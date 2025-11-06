@@ -1,0 +1,3 @@
+const
+  LSQUIC_GLOBAL_CLIENT* = (1 shl 0)
+  LSQUIC_GLOBAL_SERVER* = (1 shl 1)
