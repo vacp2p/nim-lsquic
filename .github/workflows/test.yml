@@ -32,6 +32,8 @@ jobs:
         nim:
           - ref: version-2-0
             memory_management: refc
+          - ref: version-2-2
+            memory_management: refc
         include:
           - platform:
               os: linux
@@ -60,7 +62,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: "recursive"
 
       - name: Setup Nim
         uses: "./.github/actions/install_nim"

@@ -1,3 +1,7 @@
+when defined(windows):
+  {.passc: "-D_WIN32_WINNT=0x0600".}
+  {.passl: "-lws2_32".}
+
 import os
 import strformat, strutils
 import ./boringssl
@@ -18,6 +22,10 @@ const liblsquicInclude = root / "libs/lsquic/src/liblsquic"
 const lsqpack = root / "libs/lsquic/src/liblsquic/ls-qpack"
 const lshpack = root / "libs/lsquic/src/lshpack"
 const xxhash = root / "libs/lsquic/src/lshpack/deps/xxhash"
+
+when defined(windows):
+  const wincompat = root / "libs/lsquic/wincompat"
+  {.passc: fmt"-I{wincompat}".}
 
 {.passc: fmt"-I{lsquicInclude}".}
 {.passc: fmt"-I{boringsslInclude}".}
