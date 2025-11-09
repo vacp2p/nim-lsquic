@@ -1,0 +1,1 @@
+type Stream* = ref object

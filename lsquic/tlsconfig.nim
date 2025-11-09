@@ -1,0 +1,52 @@
+import std/sets
+import results
+import ./[certificateverifier, lsquic_ffi]
+
+type QuicConfigError* = object of CatchableError
+
+type TLSConfig* = ref object
+  alpn*: HashSet[string]
+  certVerifier*: Opt[CertificateVerifier]
+  certificate*: seq[byte]
+  key*: seq[byte]
+
+proc new*(
+    T: typedesc[TLSConfig],
+    certificate: seq[byte] = @[],
+    key: seq[byte] = @[],
+    alpn: HashSet[string] = initHashSet[string](),
+    certVerifier: Opt[CertificateVerifier] = Opt.none(CertificateVerifier),
+): T =
+  # In a config, certificate and keys are optional, but if using them, both must
+  # be specified at the same time
+  if certificate.len != 0 or key.len != 0:
+    if certificate.len == 0:
+      raise newException(QuicConfigError, "certificate is required in TLSConfig")
+
+    if key.len == 0:
+      raise newException(QuicConfigError, "key is required in TLSConfig")
+
+  TLSConfig(alpn: alpn, certVerifier: certVerifier, certificate: certificate, key: key)
+
+proc alpnStr*(tlsCtx: TLSConfig): string =
+  var list = newString(0)
+  for alpn in tlsCtx.alpn:
+    list.add chr(alpn.len)
+    list.add alpn
+  return list
+
+proc toX509*(pemCertificate: seq[byte]): Result[ptr X509, string] =
+  var
+    bio = BIO_new_mem_buf(addr pemCertificate[0], ossl_ssize_t(pemCertificate.len))
+    x509 = PEM_read_bio_X509(bio, nil, nil, nil)
+  if BIO_free(bio) != 1:
+    return err("could not free x509 bio")
+  ok(x509)
+
+proc toPKey*(pemKey: seq[byte]): Result[ptr EVP_PKEY, string] =
+  var
+    bio = BIO_new_mem_buf(addr pemKey[0], ossl_ssize_t(pemKey.len))
+    p = PEM_read_bio_PrivateKey(bio, nil, nil, nil)
+  if BIO_free(bio) != 1:
+    return err("could not free pkey bio")
+  ok(p)
