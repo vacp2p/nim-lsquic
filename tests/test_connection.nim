@@ -22,7 +22,7 @@ proc certificateCb(
 
 suite "connections":
   setup:
-    let address = initTAddress("127.0.0.2:45346")
+    let address = initTAddress("127.0.0.1:12345")
 
   asyncTest "test":
     let logger = struct_lsquic_logger_if(log_buf: logging)
