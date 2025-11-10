@@ -2,18 +2,19 @@ import results
 import chronicles
 import chronos
 import chronos/osdefs
-import ./[context, io]
-import ../[lsquic_ffi, tlsconfig, datagram, timeout]
+import ./[context, io, stream]
+import ../[lsquic_ffi, tlsconfig, datagram, timeout, stream]
 import ../helpers/[sequninit, transportaddr]
 
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
 ): ptr lsquic_conn_ctx_t {.cdecl.} =
-  echo "New connection established: server"
+  trace "New connection established: server"
   var local: ptr SockAddr
   var remote: ptr SockAddr
   discard lsquic_conn_get_sockaddr(conn, addr local, addr remote)
   let quicServerConn = QuicServerConn(
+    incoming: newAsyncQueue[Stream](),
     local: local.toTransportAddress(),
     remote: remote.toTransportAddress(),
     lsquicConn: conn,
@@ -23,9 +24,9 @@ proc onNewConn(
   cast[ptr lsquic_conn_ctx_t](quicServerConn)
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
-  echo "Connection closed"
+  trace "Connection closed: server"
   let conn_ctx = lsquic_conn_get_ctx(conn)
-  if conn_ctx != nil:
+  if not conn_ctx.isNil:
     let quicConn = cast[QuicConnection](conn_ctx)
     quicConn.onClose()
   lsquic_conn_set_ctx(conn, nil)
@@ -33,12 +34,28 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
 proc onNewStream(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
-  echo "New stream created"
-  echo lsquic_stream_wantread(stream, 1)
-  return cast[ptr lsquic_stream_ctx_t](stream)
+  trace "New stream created: server"
+  let conn = lsquic_stream_conn(stream)
+  let conn_ctx = lsquic_conn_get_ctx(conn)
+  if conn_ctx.isNil:
+    debug "conn_ctx is nil in onNewStream"
+    return nil
+
+  let streamCtx = Stream.new(stream)
+  let quicConn = cast[QuicServerConn](conn_ctx)
+  quicConn.incoming.putNoWait(streamCtx)
+
+  discard lsquic_stream_wantread(stream, 1)
+  return cast[ptr lsquic_stream_ctx_t](streamCtx)
 
 proc onRead(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  echo "stream read"
+  echo "stream read!"
+  # Once read throughly?
+  let x = newSeq[byte](5)
+  discard lsquic_stream_read(stream, addr x[0], sizeof(x).csize_t)
+  echo cast[string](x)
+  echo lsquic_stream_wantread(stream, 0)
+
   #[unsigned char buf[4096];
     size_t nr;
     
@@ -59,9 +76,6 @@ proc onRead(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.}
 
 proc onWrite(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   echo lsquic_stream_wantwrite(stream, 0)
-
-proc onClose(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  echo "Stream closed"
 
 proc new*(
     T: typedesc[ServerContext],
@@ -85,6 +99,7 @@ proc new*(
     on_read: onRead,
     on_write: onWrite,
     on_close: onClose,
+    on_reset: onReset,
   )
 
   ctx.api = struct_lsquic_engine_api(
