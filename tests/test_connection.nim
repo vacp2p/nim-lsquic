@@ -61,14 +61,12 @@ suite "connections":
     echo "Connected!"
 
     let outgoingBehaviour = proc() {.async.} =
-      discard
-      try:
-        let stream = await outgoingConn.openStream()
-        let stream2 = await outgoingConn.openStream()
-        let stream3 = await outgoingConn.openStream()
-      except ConnectionError:
-        echo "Cannot create stream"
-      echo "Created streams in client"
+      let stream = await outgoingConn.openStream()
+      await sleepAsync(2.seconds)
+      echo "CLOSING!"
+      echo stream.close()
+      await sleepAsync(10.seconds)
+
 
     let incomingBehaviour = proc() {.async.} =
       try:
@@ -81,16 +79,16 @@ suite "connections":
 
     await sleepAsync(1.seconds)
 
-    outgoingConn.close()
-    incomingConn.close()
+    #outgoingConn.close()
+    #incomingConn.close()
 
-    await client.stop()
-    await listener.stop()
+    #await client.stop()
+    #await listener.stop()
 
-    # READ / WRITE / RESET
+    # CLOSE WRITE, CLOSE READ, READ / WRITE / RESET
     # -- Create a write buffer
     # CLOSE ALL EVENT LOOPS RELATED TO WRITING / READING
     # TODO: destructors?
     # chronicles topics
 
-    await sleepAsync(3.seconds)
+    await sleepAsync(10.seconds)
