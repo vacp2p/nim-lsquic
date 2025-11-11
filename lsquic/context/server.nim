@@ -48,33 +48,8 @@ proc onNewStream(
   discard lsquic_stream_wantread(stream, 1)
   return cast[ptr lsquic_stream_ctx_t](streamCtx)
 
-proc onRead(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  echo "stream read!"
-  # Once read throughly?
-  let x = newSeq[byte](5)
-  discard lsquic_stream_read(stream, addr x[0], sizeof(x).csize_t)
-  echo cast[string](x)
-  echo lsquic_stream_wantread(stream, 0)
-
-  #[unsigned char buf[4096];
-    size_t nr;
-    
-    nr = lsquic_stream_read(stream, buf, sizeof(buf));
-    if (nr > 0) {
-        printf("Received %zu bytes: %.*s\n", nr, (int)nr, buf);
-        
-        // Send response
-        const char *response = "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: text/plain\r\n"
-                              "Content-Length: 13\r\n"
-                              "\r\n"
-                              "Hello, QUIC!\n";
-        lsquic_stream_write(stream, response, strlen(response));
-        lsquic_stream_flush(stream);
-        lsquic_stream_shutdown(stream, 1);
-    }]#
-
 proc onWrite(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
+  # TODO:
   echo lsquic_stream_wantwrite(stream, 0)
 
 proc new*(
@@ -99,7 +74,6 @@ proc new*(
     on_read: onRead,
     on_write: onWrite,
     on_close: onClose,
-    on_reset: onReset,
   )
 
   ctx.api = struct_lsquic_engine_api(
@@ -121,7 +95,8 @@ proc new*(
       let connsToProcess = lsquic_engine_earliest_adv_tick(ctx.engine, addr diff)
       if connsToProcess == 1:
         lsquic_engine_process_conns(ctx.engine)
-      lsquic_engine_send_unsent_packets(ctx.engine)
+      if lsquic_engine_has_unsent_packets(ctx.engine) != 0:
+        lsquic_engine_send_unsent_packets(ctx.engine)
       let nextTimeout = Moment.init((if diff > 0: diff else: 0).int64, 1.microseconds)
       ctx.tickTimeout.set(nextTimeout)
   )

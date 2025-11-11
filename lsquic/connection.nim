@@ -3,9 +3,6 @@ import chronos
 import ./[stream, tlsconfig, datagram, lsquic_ffi]
 import ./context/[context, io]
 
-logScope:
-  topics = "quic connection"
-
 export ConnectionError
 
 type DialError* = object of IOError

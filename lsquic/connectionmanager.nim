@@ -70,8 +70,11 @@ proc stop*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
   connman.closed.complete()
   for conn in connman.connections:
     conn.abort()
-  await connman.stopSending()
-  await connman.closeUdp()
+
+  # Politely wait before closing udp so connections closure go out
+  await noCancel sleepAsync(1.seconds)
+  await noCancel connman.stopSending()
+  await noCancel connman.closeUdp()
 
 proc addConnection*(connman: ConnectionManager, conn: Connection) =
   connman.connections.add(conn)
