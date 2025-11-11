@@ -2,24 +2,24 @@ import results
 import chronicles
 import chronos
 import chronos/osdefs
-import ./[context, io]
+import ./[context, io, stream]
 import ../[lsquic_ffi, tlsconfig, datagram, timeout]
 import ../helpers/sequninit
 
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
 ): ptr lsquic_conn_ctx_t {.cdecl.} =
-  echo "New connection established: client"
+  trace "New connection established: client"
   let conn_ctx = lsquic_conn_get_ctx(conn)
   cast[ptr lsquic_conn_ctx_t](conn_ctx)
-
-type ConnectionError* = object of IOError
 
 proc onHandshakeDone(
     conn: ptr lsquic_conn_t, status: enum_lsquic_hsk_status
 ) {.cdecl.} =
+  trace "Handshake done", status
   let conn_ctx = lsquic_conn_get_ctx(conn)
-  if conn_ctx == nil:
+  if conn_ctx.isNil:
+    debug "conn_ctx is nil in onHandshakeDone"
     return
 
   let quicClientConn = cast[QuicClientConn](conn_ctx)
@@ -34,10 +34,9 @@ proc onHandshakeDone(
     quicClientConn.connectedFut.complete()
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
-  echo "Connection closed"
+  trace "Connection closed: client"
   let conn_ctx = lsquic_conn_get_ctx(conn)
-  if conn_ctx != nil:
-    # TODO: destroy conn
+  if not conn_ctx.isNil:
     let quicClientConn = cast[QuicClientConn](conn_ctx)
     if not quicClientConn.connectedFut.completed():
       # Not connected yet
@@ -51,18 +50,31 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
           "could not connect to server. Status: " & $connStatus & ". " & msg,
         )
       )
+    quicClientConn.cancelPending()
     quicClientConn.onClose()
   lsquic_conn_set_ctx(conn, nil)
 
 proc onNewStream(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
-  echo "New stream created"
-  echo lsquic_stream_wantread(stream, 1)
-  return cast[ptr lsquic_stream_ctx_t](stream)
+  trace "New stream created: client"
+  let conn = lsquic_stream_conn(stream)
+  let conn_ctx = lsquic_conn_get_ctx(conn)
+  if conn_ctx.isNil:
+    debug "conn_ctx is nil in onNewStream"
+    return nil
+
+  let quicConn = cast[QuicClientConn](conn_ctx)
+  let streamCtx = quicConn.popPendingStream(stream).valueOr:
+    return
+
+  # Clients have to write first
+  discard lsquic_stream_wantread(stream, 0)
+  discard lsquic_stream_wantwrite(stream, 1)
+  return cast[ptr lsquic_stream_ctx_t](streamCtx)
 
 proc onRead(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  echo "stream read"
+  trace "stream read: client"
   #[unsigned char buf[4096];
     size_t nr;
     
@@ -82,10 +94,11 @@ proc onRead(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.}
     }]#
 
 proc onWrite(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  echo lsquic_stream_wantwrite(stream, 0)
-
-proc onClose(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  echo "Stream closed"
+  trace "onWrite: client"
+  let msg = "hello".cstring
+  discard lsquic_stream_write(stream, msg, msg.len.csize_t)
+  discard lsquic_stream_flush(stream)
+  discard lsquic_stream_wantwrite(stream, 0)
 
 method dial*(
     ctx: ClientContext,
@@ -145,6 +158,7 @@ proc new*(
     on_read: onRead,
     on_write: onWrite,
     on_close: onClose,
+    on_reset: onReset,
   )
   ctx.api = struct_lsquic_engine_api(
     ea_settings: addr ctx.settings,
@@ -172,3 +186,9 @@ proc new*(
   ctx.tickTimeout.set(Moment.now())
 
   return ok(ctx)
+
+method makeStream*(
+    ctx: ClientContext, quicConn: QuicConnection
+) {.gcsafe, raises: [].} =
+  trace "Creating stream: client"
+  lsquic_conn_make_stream(quicConn.lsquicConn)

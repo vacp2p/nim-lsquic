@@ -1,10 +1,15 @@
 import chronos
 import chronos/osdefs
 import chronicles
-import ../[lsquic_ffi, tlsconfig, datagram, timeout, certificates, certificateverifier]
+import
+  ../[
+    lsquic_ffi, tlsconfig, datagram, timeout, certificates, certificateverifier, stream
+  ]
 
 let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is global
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
+
+type ConnectionError* = object of IOError
 
 type QuicContext* = ref object of RootObj
   settings*: struct_lsquic_engine_settings
@@ -15,21 +20,67 @@ type QuicContext* = ref object of RootObj
   outgoing*: AsyncQueue[Datagram]
   tickTimeout*: Timeout
 
+type PendingStream = object
+  stream: Stream
+  created: Future[void].Raising([CancelledError, ConnectionError])
+
 type QuicConnection* = ref object of RootObj
   local*: TransportAddress
   remote*: TransportAddress
   lsquicConn*: ptr lsquic_conn_t
   onClose*: proc() {.gcsafe, raises: [].}
+  closedLocal*: bool
+  closedRemote*: bool
 
 type QuicServerConn* = ref object of QuicConnection
+  incoming*: AsyncQueue[Stream]
 
 type QuicClientConn* = ref object of QuicConnection
   connectedFut*: Future[void]
+  pendingStreams: seq[PendingStream]
 
 type ClientContext* = ref object of QuicContext
 
 type ServerContext* = ref object of QuicContext
   incoming*: AsyncQueue[QuicServerConn]
+
+method incomingStream*(
+    quicConn: QuicConnection
+): Future[Stream] {.base, async: (raises: [CancelledError]).} =
+  raiseAssert "incoming streams not implemented"
+
+method incomingStream*(
+    quicConn: QuicServerConn
+): Future[Stream] {.async: (raises: [CancelledError]).} =
+  await quicConn.incoming.get()
+
+method addPendingStream*(
+    quicConn: QuicConnection, s: Stream
+): Future[void].Raising([CancelledError, ConnectionError]) {.base, raises: [], gcsafe.} =
+  raiseAssert "adding pending streams not implemented"
+
+method addPendingStream*(
+    quicConn: QuicClientConn, s: Stream
+): Future[void].Raising([CancelledError, ConnectionError]) {.raises: [], gcsafe.} =
+  let created = Future[void].Raising([CancelledError, ConnectionError]).init()
+  quicConn.pendingStreams.add(PendingStream(stream: s, created: created))
+  created
+
+proc popPendingStream*(
+    quicConn: QuicClientConn, stream: ptr lsquic_stream_t
+): Opt[Stream] {.raises: [], gcsafe.} =
+  if quicConn.pendingStreams.len == 0:
+    debug "no pending streams!"
+    return Opt.none(Stream)
+
+  let pending = quicConn.pendingStreams.pop()
+  pending.stream.quicStream = stream
+  pending.created.complete()
+  Opt.some(pending.stream)
+
+proc cancelPending*(quicConn: QuicClientConn) =
+  for pending in quicConn.pendingStreams:
+    pending.created.fail(newException(ConnectionError, "can't open new streams"))
 
 proc alpnSelectProtoCB(
     ssl: ptr SSL,
@@ -75,9 +126,7 @@ proc verifyCertificate(
     out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
     return ssl_verify_invalid
 
-proc getSSLCtx*(
-    peer_ctx: pointer, sockaddr: ptr SockAddr
-): ptr SSL_CTX {.cdecl.} =
+proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.} =
   let quicCtx = cast[QuicContext](peer_ctx)
 
   let sslCtx = SSL_CTX_new(
@@ -160,3 +209,8 @@ method dial*(
     connectedFut: Future[void],
 ): Result[QuicConnection, string] {.base, gcsafe, raises: [].} =
   raiseAssert "dial not implemented"
+
+method makeStream*(
+    ctx: QuicContext, quicConn: QuicConnection
+) {.base, gcsafe, raises: [].} =
+  raiseAssert "makeStream not implemented"

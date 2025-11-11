@@ -52,7 +52,7 @@ proc startSending*(connman: ConnectionManager) =
     try:
       let datagram = await connman.outgoing.get()
       await connman.udp.sendTo(datagram.taddr, datagram.data)
-    except TransportError:
+    except TransportError as e:
       trace "Failed to send datagram", errorMsg = e.msg
 
   connman.loop = asyncLoop(send)

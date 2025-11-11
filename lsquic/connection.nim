@@ -6,13 +6,14 @@ import ./context/[context, io]
 logScope:
   topics = "quic connection"
 
+export ConnectionError
+
 type DialError* = object of IOError
 
 type
   Connection* = ref object of RootObj
     local: TransportAddress
     remote: TransportAddress
-    incoming*: AsyncQueue[Stream]
     ensureClosedFut: Future[void]
     isClosed: bool
     closed: AsyncEvent
@@ -25,20 +26,23 @@ type
 
 proc ensureClosed(connection: Connection) {.async: (raises: [CancelledError]).} =
   await connection.closed.wait()
-  echo "Closing connection"
-  connection.incoming.clear()
-  echo "TODO: close/reset streams"
+  debug "Closing connection"
+  if not connection.quicConn.closedLocal:
+    connection.quicConn.closedRemote = true
+  echo "TODO: reset streams?"
 
 proc close*(conn: Connection) {.raises: [].} =
   if conn.isClosed:
     return
   conn.isClosed = true
+  conn.quicConn.closedLocal = true
   conn.quicContext.close(conn.quicConn)
 
 proc abort*(conn: Connection) {.gcsafe, raises: [].} =
   if conn.isClosed:
     return
   conn.isClosed = true
+  conn.quicConn.closedLocal = true
   conn.quicContext.abort(conn.quicConn)
 
 proc newOutgoingConnection*(
@@ -49,7 +53,6 @@ proc newOutgoingConnection*(
     quicConn: QuicClientConn(),
     local: local,
     remote: remote,
-    incoming: newAsyncQueue[Stream](),
     closed: newAsyncEvent(),
   )
   conn.ensureClosedFut = conn.ensureClosed()
@@ -76,42 +79,44 @@ proc dial*(
 proc newIncomingConnection*(
     tlsConfig: TLSConfig, quicContext: QuicContext, serverConn: QuicServerConn
 ): Connection =
-  let incoming = newAsyncQueue[Stream]()
   let conn = IncomingConnection(
-    quicContext: quicContext,
-    quicConn: serverConn,
-    closed: newAsyncEvent(),
-    incoming: incoming,
+    quicContext: quicContext, quicConn: serverConn, closed: newAsyncEvent()
   )
   conn.ensureClosedFut = conn.ensureClosed()
   conn.quicConn.onClose = proc() {.raises: [].} =
     conn.closed.fire()
   conn
 
-# proc handleNewStream(
-#     connection: Connection,
-#     streamFut: Future[Stream].Raising([CancelledError, QuicError]),
-# ): Future[Stream] {.async: (raises: [CancelledError, QuicError]).} =
-#   let closedFut = connection.closed.wait()
-#   let raceFut = await race(streamFut, closedFut)
-#   if raceFut == closedFut:
-#     raise newException(QuicError, "connection closed")
-
-# return await streamFut
-
-proc incomingStream*(
+method incomingStream*(
     connection: Connection
-): Future[Stream] {.async: (raises: [CancelledError]).} =
-  #return await connection.handleNewStream(connection.quic.incomingStream())
-  # TODO:
-  discard
+): Future[Stream] {.base, async: (raises: [CancelledError, ConnectionError]).} =
+  raiseAssert "incomingStream not implemented"
 
-proc openStream*(
-    connection: Connection, unidirectional = false
-): Future[Stream] {.async: (raises: [CancelledError]).} =
-  #return await connection.handleNewStream(connection.quic.openStream(unidirectional))
-  # TODO:
-  discard
+method incomingStream*(
+    connection: IncomingConnection
+): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
+  let closedFut = connection.closed.wait()
+  let incomingFut = connection.quicConn.incomingStream()
+  let raceFut = await race(closedFut, incomingFut)
+  if raceFut == closedFut:
+    await incomingFut.cancelAndWait()
+    raise newException(ConnectionError, "connection is closed")
+  let stream = await incomingFut
+  stream
+
+method openStream*(
+    connection: Connection
+): Future[Stream] {.base, async: (raises: [CancelledError, ConnectionError]).} =
+  raiseAssert "openStream not implemented"
+
+method openStream*(
+    connection: OutgoingConnection
+): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
+  let s = Stream()
+  let created = connection.quicConn.addPendingStream(s)
+  connection.quicContext.makeStream(connection.quicConn)
+  await created
+  s
 
 proc certificates*(conn: Connection): seq[seq[byte]] {.raises: [].} =
   conn.quicContext.certificates(conn.quicConn)

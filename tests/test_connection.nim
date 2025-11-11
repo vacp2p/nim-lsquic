@@ -9,6 +9,7 @@ import lsquic/tlsconfig
 import lsquic/connection
 import ./helpers/certificate
 import lsquic/certificateverifier
+import lsquic/stream
 import lsquic/lsquic_ffi
 
 proc logging(ctx: pointer, buf: cstring, len: csize_t): cint {.cdecl.} =
@@ -59,18 +60,37 @@ suite "connections":
 
     echo "Connected!"
 
-    await sleepAsync(2.seconds)
+    let outgoingBehaviour = proc() {.async.} =
+      discard
+      try:
+        let stream = await outgoingConn.openStream()
+        let stream2 = await outgoingConn.openStream()
+        let stream3 = await outgoingConn.openStream()
+      except ConnectionError:
+        echo "Cannot create stream"
+      echo "Created streams in client"
+
+    let incomingBehaviour = proc() {.async.} =
+      try:
+        let stream = await incomingConn.incomingStream()
+        echo "Received stream in server"
+      except CancelledError:
+        echo "Canceled incoming behavior"
+
+    discard allFutures(outgoingBehaviour(), incomingBehaviour())
+
+    await sleepAsync(1.seconds)
 
     outgoingConn.close()
+    incomingConn.close()
 
-    #await client.stop()
-    #await listener.stop()
+    await client.stop()
+    await listener.stop()
 
-    # STREAMS!!
-    # READ / WRITE
-    # ON CONN CLOSE, CLOSE STREAMS
-    # ON LISTENER CLOSE, CLOSE CONNS AND STREAMS
-    # CLOSE ALL EVENT LOOPS
+    # READ / WRITE / RESET
+    # -- Create a write buffer
+    # CLOSE ALL EVENT LOOPS RELATED TO WRITING / READING
     # TODO: destructors?
+    # chronicles topics
 
-    await sleepAsync(5.seconds)
+    await sleepAsync(3.seconds)
