@@ -62,33 +62,44 @@ suite "connections":
 
     let outgoingBehaviour = proc() {.async.} =
       let stream = await outgoingConn.openStream()
-      await sleepAsync(2.seconds)
-      echo "CLOSING!"
-      echo stream.close()
-      await sleepAsync(10.seconds)
-
+      echo "Closing client stream"
+      echo "Client closed: ", stream.close()
+      echo "Client abort: ", stream.abort() # Not interested in RW anything else
+      await sleepAsync(5.seconds)
 
     let incomingBehaviour = proc() {.async.} =
       try:
         let stream = await incomingConn.incomingStream()
         echo "Received stream in server"
+
+        let chunk1 = await stream.read()
+        echo "First chunk: ", chunk1
+        let chunk2 = await stream.read()
+        echo "Second chunk", chunk2
+        check:
+          stream.isEof
+
+        echo "Server closed: ", stream.close()
+        echo "Server aborted: ", stream.abort() # Not interested in RW anything else
+      except StreamError:
+        echo "Stream error: ", getCurrentExceptionMsg()
       except CancelledError:
         echo "Canceled incoming behavior"
 
     discard allFutures(outgoingBehaviour(), incomingBehaviour())
 
-    await sleepAsync(1.seconds)
+    await sleepAsync(2.seconds)
 
     #outgoingConn.close()
     #incomingConn.close()
-
     #await client.stop()
     #await listener.stop()
 
-    # CLOSE WRITE, CLOSE READ, READ / WRITE / RESET
-    # -- Create a write buffer
-    # CLOSE ALL EVENT LOOPS RELATED TO WRITING / READING
-    # TODO: destructors?
+    # TODO: Create a write buffer
+    # TODO: Close all event loops related to writing
+    # TODO: destructors: (nice to have:)
+    # - lsquic_global_cleanup() to free global resources. 
+    # - lsquic_engine_destroy(engine)
     # chronicles topics
 
-    await sleepAsync(10.seconds)
+    await sleepAsync(20.seconds)

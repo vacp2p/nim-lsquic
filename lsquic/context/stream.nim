@@ -1,5 +1,7 @@
 import chronicles
+import chronos
 import ../[lsquic_ffi, stream]
+import ../helpers/sequninit
 
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "Stream closed"
@@ -7,28 +9,36 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     debug "stream_ctx is nil onClose"
 
   let streamCtx = cast[Stream](ctx)
-  if not streamCtx.localClosed:
-    streamCtx.remoteClosed = true
-  # TODO: reset / eof
+  if not streamCtx.closeWrite:
+    streamCtx.isEof = true
+    streamCtx.closed.fire()
+    # TODO: reset / eof?
 
-proc onReset*(
-    stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t, how: cint
-) {.cdecl.} =
-  trace "Stream reset", how
+type StreamReadContext = object
+  stream: ptr lsquic_stream_t
+  ctx: ptr lsquic_stream_ctx_t
 
-  if ctx.isNil:
-    debug "stream_ctx is nil onReset"
-    return
+proc readCtxCb(
+    ctx: pointer, data: ptr uint8, len: csize_t, fin: cint
+): csize_t {.cdecl.} =
+  let readContext = cast[ptr StreamReadContext](ctx)
+  let stream = cast[Stream](readContext.ctx)
+  if len != 0:
+    var s = newSeqUninit[byte](len)
+    copyMem(addr s[0], data, len)
+    stream.incoming.putNoWait(s)
+  if fin != 0:
+    stream.incoming.putNoWait(@[])
+  len
 
-  let streamCtx = cast[Stream](ctx)
-  if streamCtx.reset:
-    return
-  streamCtx.reset = true
+proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
+  trace "stream read"
+  let readContext = StreamReadContext(stream: stream, ctx: ctx)
+  let nread = lsquic_stream_readf(stream, readCtxCb, (addr readContext))
+  if nread < 0:
+    discard
+    # TODO: notify stream of error and close
 
-  if (how == 0 or how == 1):
-    discard lsquic_stream_wantread(stream, 0)
-
-  if (how == 1 or how == 2):
-    discard lsquic_stream_wantwrite(stream, 0)
-
-  # TODO: reset / eof
+  if lsquic_stream_wantread(stream, 0) == -1:
+    discard
+    # TODO: notify stream of error and close
