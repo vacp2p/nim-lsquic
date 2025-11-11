@@ -13,7 +13,7 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   if not streamCtx.closeWrite:
     streamCtx.isEof = true
     streamCtx.closed.fire()
-    # TODO: remove pending writes)
+    streamCtx.abortPendingWrites("stream closed")
 
 type StreamReadContext = object
   stream: ptr lsquic_stream_t
@@ -35,14 +35,16 @@ proc readCtxCb(
 proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "stream read"
   let readContext = StreamReadContext(stream: stream, ctx: ctx)
+  let streamCtx = cast[Stream](ctx)
   let nread = lsquic_stream_readf(stream, readCtxCb, (addr readContext))
   if nread < 0:
-    discard
-    # TODO: notify stream of error and close
-
+    error "could not read from stream", nread, streamId = lsquic_stream_id(stream)
+    streamCtx.abort()
+    
   if lsquic_stream_wantread(stream, 0) == -1:
-    discard
-    # TODO: notify stream of error and close
+    error "could not set stream wantread", streamId = lsquic_stream_id(stream)
+    streamCtx.abort()
+
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "onWrite"
@@ -54,8 +56,8 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   let streamCtx = cast[Stream](ctx)
   if streamCtx.toWrite.len == 0:
     if lsquic_stream_wantwrite(stream, 0) == -1:
-      discard
-      # TODO: notify stream of error and close
+      error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
+      streamCtx.abort()
 
   # always drain from head of queue to preserve order
   while streamCtx.toWrite.len > 0:
@@ -76,21 +78,18 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
         if not w.doneFut.finished:
           w.doneFut.complete()
         if lsquic_stream_flush(stream) != 0:
-          discard # TODO: handle error
+          streamCtx.abort()
+          return
         streamCtx.toWrite.delete(0)
     elif n == 0:
-      # flow control; stop
       break
     else:
-      # error: fail all pending
-      for pendingWrite in streamCtx.toWrite.mitems:
-        if not pendingWrite.doneFut.finished:
-          pendingWrite.doneFut.fail(newException(StreamError, "write failed"))
-      streamCtx.toWrite.setLen(0)
+      streamCtx.abortPendingWrites("write failed")
       return
 
   if streamCtx.toWrite.len == 0:
     if lsquic_stream_wantwrite(stream, 0) == -1:
-      discard # TODO: handle error
+      error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
+      streamCtx.abort()
 
   return
