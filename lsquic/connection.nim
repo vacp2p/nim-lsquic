@@ -26,7 +26,6 @@ proc ensureClosed(connection: Connection) {.async: (raises: [CancelledError]).} 
   debug "Closing connection"
   if not connection.quicConn.closedLocal:
     connection.quicConn.closedRemote = true
-  echo "TODO: reset streams?"
 
 proc close*(conn: Connection) {.raises: [].} =
   if conn.isClosed:
@@ -109,7 +108,7 @@ method openStream*(
 method openStream*(
     connection: OutgoingConnection
 ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
-  let s = Stream()
+  let s = Stream.new()
   let created = connection.quicConn.addPendingStream(s)
   connection.quicContext.makeStream(connection.quicConn)
   await created

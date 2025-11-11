@@ -64,7 +64,7 @@ proc closeUdp*(connman: ConnectionManager) {.async: (raises: []).} =
   await connman.udp.closeWait()
 
 proc stop*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
-  if connman.closed.completed():
+  if connman.closed.finished:
     return
 
   connman.closed.complete()

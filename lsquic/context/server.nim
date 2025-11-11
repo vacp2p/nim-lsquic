@@ -48,10 +48,6 @@ proc onNewStream(
   discard lsquic_stream_wantread(stream, 1)
   return cast[ptr lsquic_stream_ctx_t](streamCtx)
 
-proc onWrite(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  # TODO:
-  echo lsquic_stream_wantwrite(stream, 0)
-
 proc new*(
     T: typedesc[ServerContext],
     tlsConfig: TLSConfig,

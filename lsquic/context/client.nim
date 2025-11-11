@@ -23,7 +23,7 @@ proc onHandshakeDone(
     return
 
   let quicClientConn = cast[QuicClientConn](conn_ctx)
-  if quicClientConn.connectedFut.completed():
+  if quicClientConn.connectedFut.finished:
     return
 
   if status == LSQ_HSK_FAIL or status == LSQ_HSK_RESUMED_FAIL:
@@ -38,7 +38,7 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
     let quicClientConn = cast[QuicClientConn](conn_ctx)
-    if not quicClientConn.connectedFut.completed():
+    if not quicClientConn.connectedFut.finished:
       # Not connected yet
       var buf: array[256, char]
       let connStatus =
@@ -72,13 +72,6 @@ proc onNewStream(
   discard lsquic_stream_wantread(stream, 0)
   discard lsquic_stream_wantwrite(stream, 1)
   return cast[ptr lsquic_stream_ctx_t](streamCtx)
-
-proc onWrite(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  #trace "onWrite: client"
-  #let msg = "hello".cstring
-  #discard lsquic_stream_write(stream, msg, msg.len.csize_t)
-  #discard lsquic_stream_flush(stream)
-  discard lsquic_stream_wantwrite(stream, 0)
 
 method dial*(
     ctx: ClientContext,
