@@ -9,14 +9,14 @@ import ../helpers/sequninit
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
 ): ptr lsquic_conn_ctx_t {.cdecl.} =
-  trace "New connection established: client"
+  debug "New connection established: client"
   let conn_ctx = lsquic_conn_get_ctx(conn)
   cast[ptr lsquic_conn_ctx_t](conn_ctx)
 
 proc onHandshakeDone(
     conn: ptr lsquic_conn_t, status: enum_lsquic_hsk_status
 ) {.cdecl.} =
-  trace "Handshake done", status
+  debug "Handshake done", status
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
     debug "conn_ctx is nil in onHandshakeDone"
@@ -34,7 +34,7 @@ proc onHandshakeDone(
     quicClientConn.connectedFut.complete()
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
-  trace "Connection closed: client"
+  debug "Connection closed: client"
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
     let quicClientConn = cast[QuicClientConn](conn_ctx)
@@ -52,12 +52,13 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
       )
     quicClientConn.cancelPending()
     quicClientConn.onClose()
+    GC_unref(quicClientConn)
   lsquic_conn_set_ctx(conn, nil)
 
 proc onNewStream(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
-  trace "New stream created: client"
+  debug "New stream created: client"
   let conn = lsquic_stream_conn(stream)
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
@@ -90,7 +91,7 @@ method dial*(
 
   let quicClientConn =
     QuicClientConn(connectedFut: connectedFut, local: local, remote: remote)
-
+  GC_ref(quicClientConn) # Keep it pinned until on_conn_closed is called
   let conn = lsquic_engine_connect(
     ctx.engine,
     N_LSQVER,
@@ -163,5 +164,5 @@ proc new*(
 method makeStream*(
     ctx: ClientContext, quicConn: QuicConnection
 ) {.gcsafe, raises: [].} =
-  trace "Creating stream: client"
+  debug "Creating stream: client"
   lsquic_conn_make_stream(quicConn.lsquicConn)

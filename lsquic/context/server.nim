@@ -9,7 +9,7 @@ import ../helpers/[sequninit, transportaddr]
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
 ): ptr lsquic_conn_ctx_t {.cdecl.} =
-  trace "New connection established: server"
+  debug "New connection established: server"
   var local: ptr SockAddr
   var remote: ptr SockAddr
   discard lsquic_conn_get_sockaddr(conn, addr local, addr remote)
@@ -19,12 +19,13 @@ proc onNewConn(
     remote: remote.toTransportAddress(),
     lsquicConn: conn,
   )
+  GC_ref(quicServerConn) # Keep it pinned until on_conn_closed is called
   let serverCtx = cast[ServerContext](stream_if_ctx)
   serverCtx.incoming.putNoWait(quicServerConn)
   cast[ptr lsquic_conn_ctx_t](quicServerConn)
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
-  trace "Connection closed: server"
+  debug "Connection closed: server"
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
     let quicConn = cast[QuicConnection](conn_ctx)
@@ -34,7 +35,7 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
 proc onNewStream(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
-  trace "New stream created: server"
+  debug "New stream created: server"
   let conn = lsquic_stream_conn(stream)
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
