@@ -54,3 +54,6 @@ proc accept*(
   let conn = newIncomingConnection(listener.tlsConfig, listener.quicContext, quicConn)
   listener.addConnection(conn)
   conn
+
+proc localAddress*(listener: Listener): TransportAddress {.raises: [TransportOsError].} =
+  listener.udp.localAddress()
