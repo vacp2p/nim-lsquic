@@ -4,7 +4,7 @@ import ../[lsquic_ffi, stream]
 import ../helpers/sequninit
 
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  trace "Stream closed"
+  debug "Stream closed"
   if ctx.isNil:
     debug "stream_ctx is nil onClose"
     return
@@ -13,7 +13,8 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   if not streamCtx.closeWrite:
     streamCtx.isEof = true
     streamCtx.closed.fire()
-    streamCtx.abortPendingWrites("stream closed")
+    streamCtx.abortPendingWrites("stream closed 4")
+  GC_unref(streamCtx)
 
 type StreamReadContext = object
   stream: ptr lsquic_stream_t
@@ -40,11 +41,10 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
   if nread < 0:
     error "could not read from stream", nread, streamId = lsquic_stream_id(stream)
     streamCtx.abort()
-    
+
   if lsquic_stream_wantread(stream, 0) == -1:
     error "could not set stream wantread", streamId = lsquic_stream_id(stream)
     streamCtx.abort()
-
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "onWrite"
@@ -55,6 +55,8 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   let streamCtx = cast[Stream](ctx)
   if streamCtx.toWrite.len == 0:
+    if not streamCtx.shouldClose.isNil and not streamCtx.shouldClose.finished:
+      streamCtx.shouldClose.complete()
     if lsquic_stream_wantwrite(stream, 0) == -1:
       error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
       streamCtx.abort()
@@ -71,7 +73,6 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     let p = w.data[w.offset].addr
     let nAvail = (w.data.len - w.offset).csize_t
     let n: ssize_t = lsquic_stream_write(stream, p, nAvail)
-
     if n > 0:
       w.offset += n.int
       if w.offset >= w.data.len:
@@ -82,12 +83,15 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
           return
         streamCtx.toWrite.delete(0)
     elif n == 0:
+      # Nothing to write
       break
     else:
       streamCtx.abortPendingWrites("write failed")
       return
 
   if streamCtx.toWrite.len == 0:
+    if not streamCtx.shouldClose.isNil and not streamCtx.shouldClose.finished:
+      streamCtx.shouldClose.complete()
     if lsquic_stream_wantwrite(stream, 0) == -1:
       error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
       streamCtx.abort()

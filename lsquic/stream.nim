@@ -16,13 +16,16 @@ type Stream* = ref object
   closed*: AsyncEvent # This is called when on_close callback is executed
   isEof*: bool # Received a FIN from remote
   toWrite*: seq[WriteTask]
+  shouldClose*: Future[void].Raising([CancelledError])
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
-  Stream(
+  let s = Stream(
     quicStream: quicStream,
     incoming: newAsyncQueue[seq[byte]](),
     closed: newAsyncEvent(),
   )
+  GC_ref(s) # Keep it pinned until stream_if.on_close is executed
+  s
 
 proc abortPendingWrites*(stream: Stream, reason: string = "") =
   for pendingWrite in stream.toWrite.mitems:
@@ -46,9 +49,13 @@ proc abort*(stream: Stream) =
   stream.abortPendingWrites("stream aborted")
   stream.closed.fire()
 
-proc close*(stream: Stream) =
+proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
   if stream.closeWrite:
     return
+
+  if stream.toWrite.len != 0:
+    stream.shouldClose = Future[void].Raising([CancelledError]).init()
+    await stream.shouldClose
 
   # Closing only the write side
   let ret = lsquic_stream_shutdown(stream.quicStream, 1)
@@ -78,7 +85,7 @@ proc read*(
     await incomingFut.cancelAndWait()
     stream.isEof = true
     stream.closeWrite = true
-    raise newException(StreamError, "stream closed")
+    raise newException(StreamError, "stream closed 1")
 
   let incoming = await incomingFut
   if incoming.len == 0:
@@ -95,7 +102,7 @@ proc write*(
     stream: Stream, data: seq[byte]
 ) {.async: (raises: [CancelledError, StreamError]).} =
   if stream.closeWrite:
-    raise newException(StreamError, "stream is closed")
+    raise newException(StreamError, "stream closed 3")
 
   let closedFut = stream.closed.wait()
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
@@ -103,7 +110,8 @@ proc write*(
   discard lsquic_stream_wantwrite(stream.quicStream, 1)
   let raceFut = await race(closedFut, doneFut)
   if raceFut == closedFut:
-    doneFut.fail(newException(StreamError, "stream closed"))
+    if not doneFut.finished:
+      doneFut.fail(newException(StreamError, "stream closed 2"))
     stream.closeWrite = true
 
   await doneFut

@@ -91,6 +91,9 @@ method incomingStream*(
 method incomingStream*(
     connection: IncomingConnection
 ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
+  if connection.isClosed:
+    raise newException(ConnectionError, "connection is closed")
+
   let closedFut = connection.closed.wait()
   let incomingFut = connection.quicConn.incomingStream()
   let raceFut = await race(closedFut, incomingFut)
@@ -108,6 +111,8 @@ method openStream*(
 method openStream*(
     connection: OutgoingConnection
 ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
+  if connection.isClosed:
+    raise newException(ConnectionError, "connection is closed")
   let s = Stream.new()
   let created = connection.quicConn.addPendingStream(s)
   connection.quicContext.makeStream(connection.quicConn)

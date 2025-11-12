@@ -46,14 +46,17 @@ proc localAddress*(
   connman.udp.localAddress()
 
 proc startSending*(connman: ConnectionManager) =
-  trace "Starting sending loop"
+  debug "Starting sending loop"
 
   proc send() {.async: (raises: [CancelledError]).} =
     try:
       let datagram = await connman.outgoing.get()
+      if datagram.len == 0:
+        # In windows, empty datagrams will make the peer stop receiving data
+        return
       await connman.udp.sendTo(datagram.taddr, datagram.data)
     except TransportError as e:
-      trace "Failed to send datagram", errorMsg = e.msg
+      debug "Failed to send datagram", errorMsg = e.msg
 
   connman.loop = asyncLoop(send)
 
