@@ -1,4 +1,5 @@
 import chronos
+import chronicles
 import ./lsquic_ffi
 
 type StreamError* = object of IOError
@@ -23,30 +24,42 @@ proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
     closed: newAsyncEvent(),
   )
 
-proc close*(stream: Stream): bool =
+proc abortPendingWrites*(stream: Stream, reason: string = "") =
+  for pendingWrite in stream.toWrite.mitems:
+    if not pendingWrite.doneFut.finished:
+      pendingWrite.doneFut.fail(newException(StreamError, reason))
+  stream.toWrite.setLen(0)
+
+proc abort*(stream: Stream) =
+  if stream.closeWrite and stream.isEof:
+    if not stream.closed.isSet():
+      stream.closed.fire()
+    stream.abortPendingWrites("stream aborted")
+    return
+
+  let ret = lsquic_stream_close(stream.quicStream)
+  if ret != 0:
+    error "could not abort stream", streamId = lsquic_stream_id(stream.quicStream)
+
+  stream.closeWrite = true
+  stream.isEof = true
+  stream.abortPendingWrites("stream aborted")
+  stream.closed.fire()
+
+proc close*(stream: Stream) =
   if stream.closeWrite:
-    return true
+    return
 
   # Closing only the write side
   let ret = lsquic_stream_shutdown(stream.quicStream, 1)
   if ret == 0:
     if stream.isEof:
       if lsquic_stream_close(stream.quicStream) != 0:
+        stream.abort()
         raise newException(StreamError, "could not close the stream")
 
+    stream.abortPendingWrites("steam closed")
     stream.closeWrite = true
-    return true
-  false
-  # TODO: clear all pending writes
-
-proc abort*(stream: Stream): bool =
-  let ret = lsquic_stream_close(stream.quicStream) == 0
-  if ret:
-    stream.closeWrite = true
-    stream.isEof = true
-    return true
-  false
-  # TODO: clear all pending writes and cancel reads
 
 proc read*(
     stream: Stream
@@ -55,7 +68,7 @@ proc read*(
     return @[]
 
   if lsquic_stream_wantread(stream.quicStream, 1) == -1:
-    discard stream.abort()
+    stream.abort()
     raise newException(StreamError, "could not set wantread")
 
   let incomingFut = stream.incoming.get()
@@ -65,14 +78,14 @@ proc read*(
     await incomingFut.cancelAndWait()
     stream.isEof = true
     stream.closeWrite = true
-    raise newException(StreamError, "connection closed")
+    raise newException(StreamError, "stream closed")
 
   let incoming = await incomingFut
   if incoming.len == 0:
     if stream.closeWrite:
       # We were already closed for write. Close the stream completely
       if lsquic_stream_close(stream.quicStream) != 0:
-        discard stream.abort()
+        stream.abort()
         raise newException(StreamError, "could not close the stream")
     stream.isEof = true
 
@@ -90,7 +103,7 @@ proc write*(
   discard lsquic_stream_wantwrite(stream.quicStream, 1)
   let raceFut = await race(closedFut, doneFut)
   if raceFut == closedFut:
-    doneFut.fail(newException(StreamError, "connection closed"))
+    doneFut.fail(newException(StreamError, "stream closed"))
     stream.closeWrite = true
 
   await doneFut

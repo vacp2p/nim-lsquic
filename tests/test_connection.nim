@@ -67,8 +67,12 @@ suite "connections":
       await stream.write(@[6'u8, 7, 8, 9, 10])
 
       echo "Closing client stream"
-      echo "Client closed: ", stream.close()
-      echo "Client abort: ", stream.abort() # Not interested in RW anything else
+
+      echo "Client closed"
+      stream.close()
+
+      #echo "Client aborted"
+      # stream.abort() # Not interested in RW anything else
 
     let incomingBehaviour = proc() {.async.} =
       try:
@@ -86,8 +90,11 @@ suite "connections":
         check:
           stream.isEof
 
-        echo "Server closed: ", stream.close()
-        echo "Server aborted: ", stream.abort() # Not interested in RW anything else
+        echo "Server closed"
+        stream.close()
+
+        #echo "Server aborted"
+        #stream.abort() # Not interested in RW anything else
       except StreamError:
         echo "Stream error: ", getCurrentExceptionMsg()
       except CancelledError:
@@ -105,9 +112,8 @@ suite "connections":
     await client.stop()
     await listener.stop()
 
-    # TODO: Close all event loops related to writing
+    # TODO: perf example
     # TODO: destructors: (nice to have:)
     # - lsquic_global_cleanup() to free global resources. 
     # - lsquic_engine_destroy(engine)
-    # chronicles topics
     await sleepAsync(2.seconds)
