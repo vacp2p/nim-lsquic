@@ -41,15 +41,22 @@ proc abort*(conn: Connection) {.gcsafe, raises: [].} =
   conn.quicConn.closedLocal = true
   conn.quicContext.abort(conn.quicConn)
 
+# TODO: refactor this into a single newConnection
+
 proc newOutgoingConnection*(
     quicContext: QuicContext, local: TransportAddress, remote: TransportAddress
 ): OutgoingConnection =
   let conn = OutgoingConnection(
-    quicContext: quicContext,
-    quicConn: QuicClientConn(),
-    local: local,
-    remote: remote,
-    closed: newAsyncEvent(),
+    quicContext: quicContext, local: local, remote: remote, closed: newAsyncEvent()
+  )
+  conn.ensureClosedFut = conn.ensureClosed()
+  conn
+
+proc newIncomingConnection*(
+    tlsConfig: TLSConfig, quicContext: QuicContext, quicConn: QuicConnection
+): Connection =
+  let conn = IncomingConnection(
+    quicContext: quicContext, quicConn: quicConn, closed: newAsyncEvent()
   )
   conn.ensureClosedFut = conn.ensureClosed()
   conn.quicConn.onClose = proc() {.raises: [].} =
@@ -72,24 +79,8 @@ proc dial*(
     connection.closed.fire()
   retFut
 
-proc newIncomingConnection*(
-    tlsConfig: TLSConfig, quicContext: QuicContext, serverConn: QuicServerConn
-): Connection =
-  let conn = IncomingConnection(
-    quicContext: quicContext, quicConn: serverConn, closed: newAsyncEvent()
-  )
-  conn.ensureClosedFut = conn.ensureClosed()
-  conn.quicConn.onClose = proc() {.raises: [].} =
-    conn.closed.fire()
-  conn
-
-method incomingStream*(
+proc incomingStream*(
     connection: Connection
-): Future[Stream] {.base, async: (raises: [CancelledError, ConnectionError]).} =
-  raiseAssert "incomingStream not implemented"
-
-method incomingStream*(
-    connection: IncomingConnection
 ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
   if connection.isClosed:
     raise newException(ConnectionError, "connection is closed")
@@ -103,13 +94,8 @@ method incomingStream*(
   let stream = await incomingFut
   stream
 
-method openStream*(
+proc openStream*(
     connection: Connection
-): Future[Stream] {.base, async: (raises: [CancelledError, ConnectionError]).} =
-  raiseAssert "openStream not implemented"
-
-method openStream*(
-    connection: OutgoingConnection
 ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
   if connection.isClosed:
     raise newException(ConnectionError, "connection is closed")

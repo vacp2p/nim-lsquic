@@ -31,43 +31,29 @@ type QuicConnection* = ref object of RootObj
   onClose*: proc() {.gcsafe, raises: [].}
   closedLocal*: bool
   closedRemote*: bool
-
-type QuicServerConn* = ref object of QuicConnection
   incoming*: AsyncQueue[Stream]
-
-type QuicClientConn* = ref object of QuicConnection
   connectedFut*: Future[void]
   pendingStreams: seq[PendingStream]
 
 type ClientContext* = ref object of QuicContext
 
 type ServerContext* = ref object of QuicContext
-  incoming*: AsyncQueue[QuicServerConn]
+  incoming*: AsyncQueue[QuicConnection]
 
-method incomingStream*(
+proc incomingStream*(
     quicConn: QuicConnection
-): Future[Stream] {.base, async: (raises: [CancelledError]).} =
-  raiseAssert "incoming streams not implemented"
-
-method incomingStream*(
-    quicConn: QuicServerConn
 ): Future[Stream] {.async: (raises: [CancelledError]).} =
   await quicConn.incoming.get()
 
-method addPendingStream*(
+proc addPendingStream*(
     quicConn: QuicConnection, s: Stream
-): Future[void].Raising([CancelledError, ConnectionError]) {.base, raises: [], gcsafe.} =
-  raiseAssert "adding pending streams not implemented"
-
-method addPendingStream*(
-    quicConn: QuicClientConn, s: Stream
 ): Future[void].Raising([CancelledError, ConnectionError]) {.raises: [], gcsafe.} =
   let created = Future[void].Raising([CancelledError, ConnectionError]).init()
   quicConn.pendingStreams.add(PendingStream(stream: s, created: created))
   created
 
 proc popPendingStream*(
-    quicConn: QuicClientConn, stream: ptr lsquic_stream_t
+    quicConn: QuicConnection, stream: ptr lsquic_stream_t
 ): Opt[Stream] {.raises: [], gcsafe.} =
   if quicConn.pendingStreams.len == 0:
     debug "no pending streams!"
@@ -78,7 +64,7 @@ proc popPendingStream*(
   pending.created.complete()
   Opt.some(pending.stream)
 
-proc cancelPending*(quicConn: QuicClientConn) =
+proc cancelPending*(quicConn: QuicConnection) =
   for pending in quicConn.pendingStreams:
     pending.created.fail(newException(ConnectionError, "can't open new streams"))
 
@@ -210,7 +196,6 @@ method dial*(
 ): Result[QuicConnection, string] {.base, gcsafe, raises: [].} =
   raiseAssert "dial not implemented"
 
-method makeStream*(
-    ctx: QuicContext, quicConn: QuicConnection
-) {.base, gcsafe, raises: [].} =
-  raiseAssert "makeStream not implemented"
+proc makeStream*(ctx: QuicContext, quicConn: QuicConnection) {.raises: [].} =
+  debug "Creating stream"
+  lsquic_conn_make_stream(quicConn.lsquicConn)

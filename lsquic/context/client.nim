@@ -3,7 +3,7 @@ import chronicles
 import chronos
 import chronos/osdefs
 import ./[context, io, stream]
-import ../[lsquic_ffi, tlsconfig, datagram, timeout]
+import ../[lsquic_ffi, tlsconfig, datagram, timeout, stream]
 import ../helpers/sequninit
 
 proc onNewConn(
@@ -22,7 +22,7 @@ proc onHandshakeDone(
     debug "conn_ctx is nil in onHandshakeDone"
     return
 
-  let quicClientConn = cast[QuicClientConn](conn_ctx)
+  let quicClientConn = cast[QuicConnection](conn_ctx)
   if quicClientConn.connectedFut.finished:
     return
 
@@ -37,7 +37,7 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   debug "Connection closed: client"
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
-    let quicClientConn = cast[QuicClientConn](conn_ctx)
+    let quicClientConn = cast[QuicConnection](conn_ctx)
     if not quicClientConn.connectedFut.finished:
       # Not connected yet
       var buf: array[256, char]
@@ -65,11 +65,11 @@ proc onNewStream(
     debug "conn_ctx is nil in onNewStream"
     return nil
 
-  let quicConn = cast[QuicClientConn](conn_ctx)
+  let quicConn = cast[QuicConnection](conn_ctx)
   let streamCtx = quicConn.popPendingStream(stream).valueOr:
     return
 
-  # Clients have to write first
+  # Whoever opens the stream writes first
   discard lsquic_stream_wantread(stream, 0)
   discard lsquic_stream_wantwrite(stream, 1)
   return cast[ptr lsquic_stream_ctx_t](streamCtx)
@@ -89,8 +89,12 @@ method dial*(
   local.toSAddr(localAddress, localAddrLen)
   remote.toSAddr(remoteAddress, remoteAddrLen)
 
-  let quicClientConn =
-    QuicClientConn(connectedFut: connectedFut, local: local, remote: remote)
+  let quicClientConn = QuicConnection(
+    connectedFut: connectedFut,
+    local: local,
+    remote: remote,
+    incoming: newAsyncQueue[Stream](),
+  )
   GC_ref(quicClientConn) # Keep it pinned until on_conn_closed is called
   let conn = lsquic_engine_connect(
     ctx.engine,
@@ -160,9 +164,3 @@ proc new*(
   ctx.tickTimeout.set(Moment.now())
 
   return ok(ctx)
-
-method makeStream*(
-    ctx: ClientContext, quicConn: QuicConnection
-) {.gcsafe, raises: [].} =
-  debug "Creating stream: client"
-  lsquic_conn_make_stream(quicConn.lsquicConn)

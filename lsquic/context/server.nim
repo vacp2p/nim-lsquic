@@ -13,16 +13,17 @@ proc onNewConn(
   var local: ptr SockAddr
   var remote: ptr SockAddr
   discard lsquic_conn_get_sockaddr(conn, addr local, addr remote)
-  let quicServerConn = QuicServerConn(
+  # TODO: should use a constructor
+  let quicConn = QuicConnection(
     incoming: newAsyncQueue[Stream](),
     local: local.toTransportAddress(),
     remote: remote.toTransportAddress(),
     lsquicConn: conn,
   )
-  GC_ref(quicServerConn) # Keep it pinned until on_conn_closed is called
+  GC_ref(quicConn) # Keep it pinned until on_conn_closed is called
   let serverCtx = cast[ServerContext](stream_if_ctx)
-  serverCtx.incoming.putNoWait(quicServerConn)
-  cast[ptr lsquic_conn_ctx_t](quicServerConn)
+  serverCtx.incoming.putNoWait(quicConn)
+  cast[ptr lsquic_conn_ctx_t](quicConn)
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   debug "Connection closed: server"
@@ -43,17 +44,19 @@ proc onNewStream(
     return nil
 
   let streamCtx = Stream.new(stream)
-  let quicConn = cast[QuicServerConn](conn_ctx)
+  let quicConn = cast[QuicConnection](conn_ctx)
   quicConn.incoming.putNoWait(streamCtx)
 
   discard lsquic_stream_wantread(stream, 1)
+  discard lsquic_stream_wantwrite(stream, 0)
+
   return cast[ptr lsquic_stream_ctx_t](streamCtx)
 
 proc new*(
     T: typedesc[ServerContext],
     tlsConfig: TLSConfig,
     outgoing: AsyncQueue[Datagram],
-    incoming: AsyncQueue[QuicServerConn],
+    incoming: AsyncQueue[QuicConnection],
 ): Result[T, string] =
   if lsquic_global_init(LSQUIC_GLOBAL_SERVER) != 0:
     return err("lsquic initialization failed")
