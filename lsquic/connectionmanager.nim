@@ -75,7 +75,11 @@ proc stop*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
     conn.abort()
 
   # Politely wait before closing udp so connections closure go out
-  await noCancel sleepAsync(1.seconds)
+  # TODO: this should be ~ 3 times the PTO.
+  # Find out if it's possible to react to shutting down the context and
+  # lsquic engine. Maybe there's a callback that one can hook to and safely
+  # stop the udp transport.
+  await noCancel sleepAsync(300.milliseconds)
   await noCancel connman.stopSending()
   await noCancel connman.closeUdp()
 
