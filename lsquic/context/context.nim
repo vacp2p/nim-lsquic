@@ -10,6 +10,7 @@ let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is 
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
 
 type ConnectionError* = object of IOError
+type DialError* = object of IOError
 
 type QuicContext* = ref object of RootObj
   settings*: struct_lsquic_engine_settings
@@ -128,11 +129,9 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
   if SSL_CTX_set_ex_data(sslCtx, SSL_CTX_ID, peer_ctx) != 1:
     raiseAssert "could not set data in sslCtx"
 
-  discard SSL_CTX_set_mode(sslCtx, SSL_MODE_RELEASE_BUFFERS)
-  const ssl_opts =
-    (SSL_OP_ALL and not SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS) or SSL_OP_SINGLE_ECDH_USE or
-    SSL_OP_CIPHER_SERVER_PREFERENCE
-  discard SSL_CTX_set_options(sslCtx, uint32(ssl_opts))
+
+  var opts = 0 or SSL_OP_NO_SSLv2 or  SSL_OP_NO_SSLv3 or SSL_OP_NO_TLSv1 or SSL_OP_NO_TLSv1_1 or SSL_OP_CIPHER_SERVER_PREFERENCE;
+  discard SSL_CTX_set_options(sslCtx, opts.uint32)
 
   if quicCtx.tlsConfig.key.len != 0 and quicCtx.tlsConfig.certificate.len != 0:
     let pkey = quicCtx.tlsConfig.key.toPKey().valueOr:
@@ -177,10 +176,12 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
   sslCtx
 
 proc close*(ctx: QuicContext, conn: QuicConnection) =
-  lsquic_conn_close(conn.lsquicConn)
+  if conn != nil and conn.lsquicConn != nil:
+    lsquic_conn_close(conn.lsquicConn)
 
 proc abort*(ctx: QuicContext, conn: QuicConnection) =
-  lsquic_conn_abort(conn.lsquicConn)
+  if conn != nil and conn.lsquicConn != nil:
+    lsquic_conn_abort(conn.lsquicConn)
 
 proc certificates*(ctx: QuicContext, conn: QuicConnection): seq[seq[byte]] =
   let x509chain = lsquic_conn_get_full_cert_chain(conn.lsquicConn)
@@ -193,6 +194,7 @@ method dial*(
     local: TransportAddress,
     remote: TransportAddress,
     connectedFut: Future[void],
+    onClose: proc() {.gcsafe, raises: [].},
 ): Result[QuicConnection, string] {.base, gcsafe, raises: [].} =
   raiseAssert "dial not implemented"
 

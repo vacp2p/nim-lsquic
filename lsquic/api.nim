@@ -4,6 +4,7 @@ import chronicles
 import results
 import ./[listener, connection, tlsconfig, datagram, connectionmanager]
 import ./context/[context, io, client]
+import lsquic_ffi
 
 type Quic = ref object of RootObj
 
@@ -14,6 +15,16 @@ type QuicServer* = ref object of Quic
   tlsConfig: TLSConfig
 
 type QuicError* = object of CatchableError
+
+proc initializeLsquic*(client: bool = true, server: bool = true) =
+  var flags = 0.cint
+  if client:
+    flags = flags or LSQUIC_GLOBAL_CLIENT
+  if server:
+    flags = flags or LSQUIC_GLOBAL_SERVER
+
+  if lsquic_global_init(flags) != 0:
+    raiseAssert "lsquic initialization failed"
 
 proc new*(
     t: typedesc[QuicServer], tlsConfig: TLSConfig

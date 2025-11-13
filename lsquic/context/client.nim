@@ -28,7 +28,7 @@ proc onHandshakeDone(
 
   if status == LSQ_HSK_FAIL or status == LSQ_HSK_RESUMED_FAIL:
     quicClientConn.connectedFut.fail(
-      newException(ConnectionError, "could not connect to server. Handshake failed")
+      newException(DialError, "could not connect to server. Handshake failed")
     )
   else:
     quicClientConn.connectedFut.complete()
@@ -79,6 +79,7 @@ method dial*(
     local: TransportAddress,
     remote: TransportAddress,
     connectedFut: Future[void],
+    onClose: proc() {.gcsafe, raises: [].},
 ): Result[QuicConnection, string] {.raises: [], gcsafe.} =
   var
     localAddress: Sockaddr_storage
@@ -89,11 +90,13 @@ method dial*(
   local.toSAddr(localAddress, localAddrLen)
   remote.toSAddr(remoteAddress, remoteAddrLen)
 
+  # TODO: should use constructor
   let quicClientConn = QuicConnection(
     connectedFut: connectedFut,
     local: local,
     remote: remote,
     incoming: newAsyncQueue[Stream](),
+    onClose: onClose,
   )
   GC_ref(quicClientConn) # Keep it pinned until on_conn_closed is called
   let conn = lsquic_engine_connect(
@@ -120,9 +123,6 @@ method dial*(
 proc new*(
     T: typedesc[ClientContext], tlsConfig: TLSConfig, outgoing: AsyncQueue[Datagram]
 ): Result[T, string] =
-  if lsquic_global_init(LSQUIC_GLOBAL_CLIENT) != 0:
-    return err("lsquic initialization failed")
-
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig
   ctx.outgoing = outgoing

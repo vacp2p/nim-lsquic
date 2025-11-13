@@ -19,6 +19,8 @@ proc onNewConn(
     local: local.toTransportAddress(),
     remote: remote.toTransportAddress(),
     lsquicConn: conn,
+    onClose: proc() =
+      discard,
   )
   GC_ref(quicConn) # Keep it pinned until on_conn_closed is called
   let serverCtx = cast[ServerContext](stream_if_ctx)

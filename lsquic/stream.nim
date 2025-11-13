@@ -85,7 +85,7 @@ proc read*(
     await incomingFut.cancelAndWait()
     stream.isEof = true
     stream.closeWrite = true
-    raise newException(StreamError, "stream closed 1")
+    return @[]
 
   let incoming = await incomingFut
   if incoming.len == 0:
