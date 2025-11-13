@@ -26,6 +26,7 @@ type PendingStream = object
   created: Future[void].Raising([CancelledError, ConnectionError])
 
 type QuicConnection* = ref object of RootObj
+  isOutgoing*: bool
   local*: TransportAddress
   remote*: TransportAddress
   lsquicConn*: ptr lsquic_conn_t
@@ -129,8 +130,9 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
   if SSL_CTX_set_ex_data(sslCtx, SSL_CTX_ID, peer_ctx) != 1:
     raiseAssert "could not set data in sslCtx"
 
-
-  var opts = 0 or SSL_OP_NO_SSLv2 or  SSL_OP_NO_SSLv3 or SSL_OP_NO_TLSv1 or SSL_OP_NO_TLSv1_1 or SSL_OP_CIPHER_SERVER_PREFERENCE;
+  var opts =
+    0 or SSL_OP_NO_SSLv2 or SSL_OP_NO_SSLv3 or SSL_OP_NO_TLSv1 or SSL_OP_NO_TLSv1_1 or
+    SSL_OP_CIPHER_SERVER_PREFERENCE
   discard SSL_CTX_set_options(sslCtx, opts.uint32)
 
   if quicCtx.tlsConfig.key.len != 0 and quicCtx.tlsConfig.certificate.len != 0:
@@ -201,3 +203,39 @@ method dial*(
 proc makeStream*(ctx: QuicContext, quicConn: QuicConnection) {.raises: [].} =
   debug "Creating stream"
   lsquic_conn_make_stream(quicConn.lsquicConn)
+
+proc onNewStream*(
+    stream_if_ctx: pointer, stream: ptr lsquic_stream_t
+): ptr lsquic_stream_ctx_t {.cdecl.} =
+  debug "New stream created: client"
+  let conn = lsquic_stream_conn(stream)
+  let conn_ctx = lsquic_conn_get_ctx(conn)
+  if conn_ctx.isNil:
+    debug "conn_ctx is nil in onNewStream"
+    return nil
+
+  let quicConn = cast[QuicConnection](conn_ctx)
+  let stream_id = lsquic_stream_id(stream).int
+  let isLocal =
+    if quicConn.isOutgoing:
+      (stream_id and 1) == 0
+    else:
+      (stream_id and 1) == 1
+
+  let streamCtx =
+    if isLocal:
+      let s = quicConn.popPendingStream(stream).valueOr:
+        return
+      # Whoever opens the stream writes first
+      discard lsquic_stream_wantread(stream, 0)
+      discard lsquic_stream_wantwrite(stream, 1)
+      s
+    else:
+      let s = Stream.new(stream)
+      quicConn.incoming.putNoWait(s)
+      # Whoever opens the stream reads first
+      discard lsquic_stream_wantread(stream, 1)
+      discard lsquic_stream_wantwrite(stream, 0)
+      s
+
+  return cast[ptr lsquic_stream_ctx_t](streamCtx)

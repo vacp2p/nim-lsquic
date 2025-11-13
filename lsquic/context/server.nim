@@ -15,6 +15,7 @@ proc onNewConn(
   discard lsquic_conn_get_sockaddr(conn, addr local, addr remote)
   # TODO: should use a constructor
   let quicConn = QuicConnection(
+    isOutgoing: false,
     incoming: newAsyncQueue[Stream](),
     local: local.toTransportAddress(),
     remote: remote.toTransportAddress(),
@@ -34,25 +35,6 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
     let quicConn = cast[QuicConnection](conn_ctx)
     quicConn.onClose()
   lsquic_conn_set_ctx(conn, nil)
-
-proc onNewStream(
-    stream_if_ctx: pointer, stream: ptr lsquic_stream_t
-): ptr lsquic_stream_ctx_t {.cdecl.} =
-  debug "New stream created: server"
-  let conn = lsquic_stream_conn(stream)
-  let conn_ctx = lsquic_conn_get_ctx(conn)
-  if conn_ctx.isNil:
-    debug "conn_ctx is nil in onNewStream"
-    return nil
-
-  let streamCtx = Stream.new(stream)
-  let quicConn = cast[QuicConnection](conn_ctx)
-  quicConn.incoming.putNoWait(streamCtx)
-
-  discard lsquic_stream_wantread(stream, 1)
-  discard lsquic_stream_wantwrite(stream, 0)
-
-  return cast[ptr lsquic_stream_ctx_t](streamCtx)
 
 proc new*(
     T: typedesc[ServerContext],

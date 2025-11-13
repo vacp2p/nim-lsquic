@@ -55,25 +55,6 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
     GC_unref(quicClientConn)
   lsquic_conn_set_ctx(conn, nil)
 
-proc onNewStream(
-    stream_if_ctx: pointer, stream: ptr lsquic_stream_t
-): ptr lsquic_stream_ctx_t {.cdecl.} =
-  debug "New stream created: client"
-  let conn = lsquic_stream_conn(stream)
-  let conn_ctx = lsquic_conn_get_ctx(conn)
-  if conn_ctx.isNil:
-    debug "conn_ctx is nil in onNewStream"
-    return nil
-
-  let quicConn = cast[QuicConnection](conn_ctx)
-  let streamCtx = quicConn.popPendingStream(stream).valueOr:
-    return
-
-  # Whoever opens the stream writes first
-  discard lsquic_stream_wantread(stream, 0)
-  discard lsquic_stream_wantwrite(stream, 1)
-  return cast[ptr lsquic_stream_ctx_t](streamCtx)
-
 method dial*(
     ctx: ClientContext,
     local: TransportAddress,
@@ -92,6 +73,7 @@ method dial*(
 
   # TODO: should use constructor
   let quicClientConn = QuicConnection(
+    isOutgoing: true,
     connectedFut: connectedFut,
     local: local,
     remote: remote,
