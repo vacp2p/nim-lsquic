@@ -55,8 +55,6 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   let streamCtx = cast[Stream](ctx)
   if streamCtx.toWrite.len == 0:
-    if not streamCtx.shouldClose.isNil and not streamCtx.shouldClose.finished:
-      streamCtx.shouldClose.complete()
     if lsquic_stream_wantwrite(stream, 0) == -1:
       error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
       streamCtx.abort()
@@ -90,8 +88,6 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       return
 
   if streamCtx.toWrite.len == 0:
-    if not streamCtx.shouldClose.isNil and not streamCtx.shouldClose.finished:
-      streamCtx.shouldClose.complete()
     if lsquic_stream_wantwrite(stream, 0) == -1:
       error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
       streamCtx.abort()

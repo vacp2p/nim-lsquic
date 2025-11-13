@@ -16,7 +16,6 @@ type Stream* = ref object
   closed*: AsyncEvent # This is called when on_close callback is executed
   isEof*: bool # Received a FIN from remote
   toWrite*: seq[WriteTask]
-  shouldClose*: Future[void].Raising([CancelledError])
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let s = Stream(
@@ -42,7 +41,7 @@ proc abort*(stream: Stream) =
 
   let ret = lsquic_stream_close(stream.quicStream)
   if ret != 0:
-    error "could not abort stream", streamId = lsquic_stream_id(stream.quicStream)
+    trace "could not abort stream", streamId = lsquic_stream_id(stream.quicStream)
 
   stream.closeWrite = true
   stream.isEof = true
@@ -52,10 +51,6 @@ proc abort*(stream: Stream) =
 proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
   if stream.closeWrite:
     return
-
-  if stream.toWrite.len != 0:
-    stream.shouldClose = Future[void].Raising([CancelledError]).init()
-    await stream.shouldClose
 
   # Closing only the write side
   let ret = lsquic_stream_shutdown(stream.quicStream, 1)

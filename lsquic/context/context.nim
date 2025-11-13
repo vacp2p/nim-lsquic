@@ -207,7 +207,7 @@ proc makeStream*(ctx: QuicContext, quicConn: QuicConnection) {.raises: [].} =
 proc onNewStream*(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
-  debug "New stream created: client"
+  debug "New stream created"
   let conn = lsquic_stream_conn(stream)
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
