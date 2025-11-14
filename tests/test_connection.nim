@@ -25,6 +25,8 @@ proc certificateCb(
 
 let address = initTAddress("127.0.0.1:12345")
 
+initializeLsquic(true, true)
+
 suite "tests":
   asyncTest "test":
     let logger = struct_lsquic_logger_if(log_buf: logging)
