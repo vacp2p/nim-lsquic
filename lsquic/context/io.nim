@@ -3,7 +3,7 @@ import chronicles
 import chronos/osdefs
 import ./context
 import ../[lsquic_ffi, datagram]
-import ../helpers/[openarray, sequninit]
+import ../helpers/[openarray, sequninit, transportaddr]
 
 proc receive*(
     ctx: QuicContext,
@@ -41,26 +41,13 @@ proc sendPacketsOut*(
   let specsArr = cast[ptr UncheckedArray[struct_lsquic_out_spec]](specs)
   for i in 0 ..< nspecs.int:
     let curr = specsArr[i]
-    let sock = cast[ptr SockAddr](curr.dest_sa)
-    var destAddress: Sockaddr_storage
-    let destAddrLen: SockLen =
-      case sock.sa_family.uint16
-      of AF_INET.uint16:
-        sizeof(Sockaddr_in).uint32
-      of AF_INET6.uint16:
-        sizeof(Sockaddr_in6).uint32
-      else:
-        0.uint32
-    copyMem(addr destAddress, curr.dest_sa, destAddrLen)
-    var taddr: TransportAddress
-    fromSAddr(addr destAddress, destAddrLen, taddr)
 
     let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
     var totalLen: int = 0
     for j in 0 ..< curr.iovlen.int:
       totalLen += iovArr[j].iov_len.int
 
-    let data = newSeqUninit[byte](totalLen)
+    var data = newSeqUninit[byte](totalLen)
     var currLen: int = 0
     for j in 0 ..< curr.iovlen.int:
       let currIov = iovArr[j]
@@ -69,6 +56,7 @@ proc sendPacketsOut*(
       copyMem(addr data[currLen], currIov.iov_base, currIov.iov_len)
       currLen += currIov.iov_len.int
 
+    let taddr = toTransportAddress(curr.dest_sa)
     let datagram = Datagram(data: data, ecn: curr.ecn, taddr: taddr)
     try:
       quicCtx.outgoing.putNoWait(datagram)
