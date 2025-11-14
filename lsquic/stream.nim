@@ -51,6 +51,8 @@ proc abort*(stream: Stream) =
 proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
   if stream.closeWrite:
     return
+  if stream.quicStream == nil:
+    return
 
   # Closing only the write side
   let ret = lsquic_stream_shutdown(stream.quicStream, 1)
