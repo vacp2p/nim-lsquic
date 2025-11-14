@@ -115,6 +115,11 @@ proc new*(
   lsquic_engine_init_settings(addr ctx.settings, 0)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
   ctx.settings.es_cc_algo = BBRv1
+  ctx.settings.es_pace_packets = 1
+  ctx.settings.es_max_cfcw = 1
+  ctx.settings.es_dplpmtud = 1
+  ctx.settings.es_base_plpmtu = 1280
+  ctx.settings.es_max_plpmtu = 4000
   ctx.stream_if = struct_lsquic_stream_if(
     on_new_conn: onNewConn,
     on_hsk_done: onHandshakeDone,
