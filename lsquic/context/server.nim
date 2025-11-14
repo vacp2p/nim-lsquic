@@ -36,6 +36,8 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
     quicConn.onClose()
   lsquic_conn_set_ctx(conn, nil)
 
+const BBRv1 = 2
+
 proc new*(
     T: typedesc[ServerContext],
     tlsConfig: TLSConfig,
@@ -53,6 +55,7 @@ proc new*(
 
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
+  ctx.settings.es_cc_algo = BBRv1
   ctx.stream_if = struct_lsquic_stream_if(
     on_new_conn: onNewConn,
     on_conn_closed: onConnClosed,

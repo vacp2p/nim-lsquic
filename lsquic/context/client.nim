@@ -102,6 +102,8 @@ method dial*(
 
   ok(quicClientConn)
 
+const BBRv1 = 2
+
 proc new*(
     T: typedesc[ClientContext], tlsConfig: TLSConfig, outgoing: AsyncQueue[Datagram]
 ): Result[T, string] =
@@ -112,6 +114,7 @@ proc new*(
 
   lsquic_engine_init_settings(addr ctx.settings, 0)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
+  ctx.settings.es_cc_algo = BBRv1
   ctx.stream_if = struct_lsquic_stream_if(
     on_new_conn: onNewConn,
     on_hsk_done: onHandshakeDone,

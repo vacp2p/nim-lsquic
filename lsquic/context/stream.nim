@@ -10,10 +10,13 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     return
 
   let streamCtx = cast[Stream](ctx)
+
+  streamCtx.closedByEngine = true
+
   if not streamCtx.closeWrite:
     streamCtx.isEof = true
     streamCtx.closed.fire()
-    streamCtx.abortPendingWrites("stream closed 4")
+    streamCtx.abortPendingWrites("stream closed")
   GC_unref(streamCtx)
 
 type StreamReadContext = object

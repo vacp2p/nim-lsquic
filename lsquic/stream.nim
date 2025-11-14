@@ -11,6 +11,7 @@ type WriteTask = ref object
 
 type Stream* = ref object
   quicStream*: ptr lsquic_stream_t
+  closedByEngine*: bool
   closeWrite*: bool
   incoming*: AsyncQueue[seq[byte]]
   closed*: AsyncEvent # This is called when on_close callback is executed
@@ -39,9 +40,10 @@ proc abort*(stream: Stream) =
     stream.abortPendingWrites("stream aborted")
     return
 
-  let ret = lsquic_stream_close(stream.quicStream)
-  if ret != 0:
-    trace "could not abort stream", streamId = lsquic_stream_id(stream.quicStream)
+  if not stream.closedByEngine:
+    let ret = lsquic_stream_close(stream.quicStream)
+    if ret != 0:
+      trace "could not abort stream", streamId = lsquic_stream_id(stream.quicStream)
 
   stream.closeWrite = true
   stream.isEof = true
@@ -49,9 +51,7 @@ proc abort*(stream: Stream) =
   stream.closed.fire()
 
 proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
-  if stream.closeWrite:
-    return
-  if stream.quicStream == nil:
+  if stream.closeWrite or stream.closedByEngine:
     return
 
   # Closing only the write side
@@ -68,7 +68,7 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
 proc read*(
     stream: Stream
 ): Future[seq[byte]] {.async: (raises: [CancelledError, StreamError]).} =
-  if stream.isEof:
+  if stream.isEof or stream.closedByEngine:
     return @[]
 
   if lsquic_stream_wantread(stream.quicStream, 1) == -1:
@@ -86,7 +86,7 @@ proc read*(
 
   let incoming = await incomingFut
   if incoming.len == 0:
-    if stream.closeWrite:
+    if stream.closeWrite and not stream.closedByEngine:
       # We were already closed for write. Close the stream completely
       if lsquic_stream_close(stream.quicStream) != 0:
         stream.abort()
@@ -98,8 +98,8 @@ proc read*(
 proc write*(
     stream: Stream, data: seq[byte]
 ) {.async: (raises: [CancelledError, StreamError]).} =
-  if stream.closeWrite:
-    raise newException(StreamError, "stream closed 3")
+  if stream.closeWrite or stream.closedByEngine:
+    raise newException(StreamError, "stream closed")
 
   let closedFut = stream.closed.wait()
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
@@ -108,7 +108,7 @@ proc write*(
   let raceFut = await race(closedFut, doneFut)
   if raceFut == closedFut:
     if not doneFut.finished:
-      doneFut.fail(newException(StreamError, "stream closed 2"))
+      doneFut.fail(newException(StreamError, "stream closed"))
     stream.closeWrite = true
 
   await doneFut
