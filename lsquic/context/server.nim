@@ -44,9 +44,6 @@ proc new*(
     outgoing: AsyncQueue[Datagram],
     incoming: AsyncQueue[QuicConnection],
 ): Result[T, string] =
-  if lsquic_global_init(LSQUIC_GLOBAL_SERVER) != 0:
-    return err("lsquic initialization failed")
-
   var ctx = ServerContext()
   ctx.tlsConfig = tlsConfig
   ctx.outgoing = outgoing
