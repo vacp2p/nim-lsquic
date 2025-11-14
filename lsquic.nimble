@@ -17,7 +17,7 @@ requires "chronicles >= 0.11.0"
 
 before install:
   exec "git submodule update --init --recursive"
-  
+
 task format, "Format nim code using nph":
   exec "nimble install nph"
   exec "nph ."

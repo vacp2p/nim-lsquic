@@ -164,7 +164,9 @@ proc setupSSLContext*(quicCtx: QuicContext) =
     SSL_CTX_set_alpn_select_cb(sslCtx, alpnSelectProtoCB, cast[pointer](quicCtx))
   else:
     if SSL_CTX_set_alpn_protos(
-      sslCtx, cast[ptr uint8](quicCtx.tlsConfig.alpnWire.cstring), cast[cuint](quicCtx.tlsConfig.alpnWire.len)
+      sslCtx,
+      cast[ptr uint8](quicCtx.tlsConfig.alpnWire.cstring),
+      cast[cuint](quicCtx.tlsConfig.alpnWire.len),
     ) != 0:
       raiseAssert "can't set client alpn"
 
@@ -177,7 +179,7 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
   let quicCtx = cast[QuicContext](peer_ctx)
   quicCtx.sslCtx
 
-proc stop*(ctx: QuicContext)  {.raises: [].} =
+proc stop*(ctx: QuicContext) {.raises: [].} =
   ctx.tickTimeout.stop()
   lsquic_engine_destroy(ctx.engine)
 
