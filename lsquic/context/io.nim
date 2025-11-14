@@ -59,7 +59,7 @@ proc sendPacketsOut*(
 
       let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
       for j in 0 ..< curr.iovlen.int:
-        let currIov = iovArr[i]
+        let currIov = iovArr[j]
         if currIov.iov_len == 0:
           continue
         let startPos = datagram.len
