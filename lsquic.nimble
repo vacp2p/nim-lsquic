@@ -4,7 +4,7 @@ author = "Status Research & Development GmbH"
 description = "Nim wrapper around the lsquic library"
 license = "MIT"
 installDirs = @["libs"]
-installFiles = @["lsquic.nim", "boringssl.nim"]
+installFiles = @["lsquic.nim", "boringssl.nim", "lsquic/lsquic_ffi.nim"]
 
 requires "nim >= 2.0.0"
 requires "zlib"
