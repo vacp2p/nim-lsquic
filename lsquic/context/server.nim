@@ -49,6 +49,8 @@ proc new*(
   ctx.tlsConfig = tlsConfig
   ctx.outgoing = outgoing
   ctx.incoming = incoming
+  ctx.setupSSLContext()
+
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
   ctx.stream_if = struct_lsquic_stream_if(

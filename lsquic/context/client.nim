@@ -108,6 +108,8 @@ proc new*(
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig
   ctx.outgoing = outgoing
+  ctx.setupSSLContext()
+
   lsquic_engine_init_settings(addr ctx.settings, 0)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
   ctx.stream_if = struct_lsquic_stream_if(

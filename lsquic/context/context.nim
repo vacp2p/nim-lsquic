@@ -20,6 +20,7 @@ type QuicContext* = ref object of RootObj
   tlsConfig*: TLSConfig
   outgoing*: AsyncQueue[Datagram]
   tickTimeout*: Timeout
+  sslCtx*: ptr SSL_CTX
 
 type PendingStream = object
   stream: Stream
@@ -114,9 +115,7 @@ proc verifyCertificate(
     out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
     return ssl_verify_invalid
 
-proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.} =
-  let quicCtx = cast[QuicContext](peer_ctx)
-
+proc setupSSLContext*(quicCtx: QuicContext) =
   let sslCtx = SSL_CTX_new(
     if quicCtx is ServerContext:
       TLS_server_method()
@@ -124,10 +123,9 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
       TLS_client_method()
   )
   if sslCtx.isNil:
-    error "failed to create SSL_CTX"
-    return nil
+    raiseAssert "failed to create sslCtx"
 
-  if SSL_CTX_set_ex_data(sslCtx, SSL_CTX_ID, peer_ctx) != 1:
+  if SSL_CTX_set_ex_data(sslCtx, SSL_CTX_ID, cast[pointer](quicCtx)) != 1:
     raiseAssert "could not set data in sslCtx"
 
   var opts =
@@ -164,7 +162,7 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
     )
 
   if quicCtx of ServerContext:
-    SSL_CTX_set_alpn_select_cb(sslCtx, alpnSelectProtoCB, peer_ctx)
+    SSL_CTX_set_alpn_select_cb(sslCtx, alpnSelectProtoCB, cast[pointer](quicCtx))
   else:
     let alpnStr = quicCtx.tlsConfig.alpnStr()
     if SSL_CTX_set_alpn_protos(
@@ -175,7 +173,11 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
   discard SSL_CTX_set_min_proto_version(sslCtx, TLS1_3_VERSION)
   discard SSL_CTX_set_max_proto_version(sslCtx, TLS1_3_VERSION)
 
-  sslCtx
+  quicCtx.sslCtx = sslCtx
+
+proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.} =
+  let quicCtx = cast[QuicContext](peer_ctx)
+  quicCtx.sslCtx
 
 proc close*(ctx: QuicContext, conn: QuicConnection) =
   if conn != nil and conn.lsquicConn != nil:
