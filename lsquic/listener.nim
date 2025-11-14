@@ -23,7 +23,7 @@ proc newListener*(
   ) {.async: (raises: []).} =
     try:
       let datagram = Datagram(data: udp.getMessage())
-      listener.quicContext.receive(datagram, udp.localAddress(), remote)
+      listener.quicContext.receive(datagram, address, remote)
     except TransportError as e:
       error "Unexpect transport error", errorMsg = e.msg
 
