@@ -80,14 +80,13 @@ proc alpnSelectProtoCB(
     userData: pointer,
 ): cint {.cdecl.} =
   let serverCtx = cast[ServerContext](userData)
-  let alpnStr = serverCtx.tlsConfig.alpnStr()
 
   if (
     SSL_select_next_proto(
       outv,
       outlen,
-      cast[ptr uint8](alpnStr.cstring),
-      cast[cuint](alpnStr.len),
+      cast[ptr uint8](serverCtx.tlsConfig.alpnWire.cstring),
+      cast[cuint](serverCtx.tlsConfig.alpnWire.len),
       inv,
       inlen,
     ) == OPENSSL_NPN_NEGOTIATED
@@ -164,9 +163,8 @@ proc setupSSLContext*(quicCtx: QuicContext) =
   if quicCtx of ServerContext:
     SSL_CTX_set_alpn_select_cb(sslCtx, alpnSelectProtoCB, cast[pointer](quicCtx))
   else:
-    let alpnStr = quicCtx.tlsConfig.alpnStr()
     if SSL_CTX_set_alpn_protos(
-      sslCtx, cast[ptr uint8](alpnStr.cstring), cast[cuint](alpnStr.len)
+      sslCtx, cast[ptr uint8](quicCtx.tlsConfig.alpnWire.cstring), cast[cuint](quicCtx.tlsConfig.alpnWire.len)
     ) != 0:
       raiseAssert "can't set client alpn"
 

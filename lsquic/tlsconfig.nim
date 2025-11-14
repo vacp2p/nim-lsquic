@@ -5,10 +5,10 @@ import ./[certificateverifier, lsquic_ffi]
 type QuicConfigError* = object of CatchableError
 
 type TLSConfig* = ref object
-  alpn*: HashSet[string]
   certVerifier*: Opt[CertificateVerifier]
   certificate*: seq[byte]
   key*: seq[byte]
+  alpnWire*: string
 
 proc new*(
     T: typedesc[TLSConfig],
@@ -26,14 +26,14 @@ proc new*(
     if key.len == 0:
       raise newException(QuicConfigError, "key is required in TLSConfig")
 
-  TLSConfig(alpn: alpn, certVerifier: certVerifier, certificate: certificate, key: key)
+  var alpnWire = newString(0)
+  for a in alpn:
+    alpnWire.add chr(a.len)
+    alpnWire.add a
 
-proc alpnStr*(tlsCtx: TLSConfig): string =
-  var list = newString(0)
-  for alpn in tlsCtx.alpn:
-    list.add chr(alpn.len)
-    list.add alpn
-  return list
+  TLSConfig(
+    alpnWire: alpnWire, certVerifier: certVerifier, certificate: certificate, key: key
+  )
 
 proc toX509*(pemCertificate: seq[byte]): Result[ptr X509, string] =
   var
