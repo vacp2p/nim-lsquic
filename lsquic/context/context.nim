@@ -177,6 +177,10 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
   let quicCtx = cast[QuicContext](peer_ctx)
   quicCtx.sslCtx
 
+proc stop*(ctx: QuicContext)  {.raises: [].} =
+  ctx.tickTimeout.stop()
+  lsquic_engine_destroy(ctx.engine)
+
 proc close*(ctx: QuicContext, conn: QuicConnection) =
   if conn != nil and conn.lsquicConn != nil:
     lsquic_conn_close(conn.lsquicConn)

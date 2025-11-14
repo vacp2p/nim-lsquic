@@ -15,8 +15,8 @@ proc newListener*(
 ): Result[Listener, string] =
   let outgoing = newAsyncQueue[Datagram]()
   let incoming = newAsyncQueue[QuicConnection]()
-  let listener = Listener(incoming: incoming)
   let quicContext = ?ServerContext.new(tlsConfig, outgoing, incoming)
+  let listener = Listener(incoming: incoming)
 
   proc onReceive(
       udp: DatagramTransport, remote: TransportAddress

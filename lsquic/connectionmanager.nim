@@ -82,6 +82,7 @@ proc stop*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
   await noCancel sleepAsync(300.milliseconds)
   await noCancel connman.stopSending()
   await noCancel connman.closeUdp()
+  connman.quicContext.stop()
 
 proc addConnection*(connman: ConnectionManager, conn: Connection) =
   connman.connections.add(conn)
