@@ -3,9 +3,8 @@ import chronos/osdefs
 import chronicles
 import
   ../[
-    lsquic_ffi, tlsconfig, datagram, certificates, certificateverifier, stream
+    lsquic_ffi, tlsconfig, datagram, timeout, certificates, certificateverifier, stream
   ]
-import ./timeout
 
 let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is global
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
@@ -178,11 +177,8 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
   let quicCtx = cast[QuicContext](peer_ctx)
   quicCtx.sslCtx
 
-proc stopTimeoutTimer*(ctx: QuicContext) {.raises: [].} =
-  ctx.tickTimeout.stop()
-
 proc stop*(ctx: QuicContext)  {.raises: [].} =
-  ctx.stopTimeoutTimer()
+  ctx.tickTimeout.stop()
   lsquic_engine_destroy(ctx.engine)
 
 proc close*(ctx: QuicContext, conn: QuicConnection) =

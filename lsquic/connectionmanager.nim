@@ -70,7 +70,6 @@ proc stop*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
   if connman.closed.finished:
     return
 
-  connman.quicContext.stopTimeoutTimer()
   connman.closed.complete()
   for conn in connman.connections:
     conn.abort()

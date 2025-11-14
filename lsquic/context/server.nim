@@ -2,8 +2,8 @@ import results
 import chronicles
 import chronos
 import chronos/osdefs
-import ./[context, io, stream, timeout]
-import ../[lsquic_ffi, tlsconfig, datagram, stream]
+import ./[context, io, stream]
+import ../[lsquic_ffi, tlsconfig, datagram, timeout, stream]
 import ../helpers/[sequninit, transportaddr]
 
 proc onNewConn(
