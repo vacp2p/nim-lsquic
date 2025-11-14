@@ -16,12 +16,14 @@ type Stream* = ref object
   closed*: AsyncEvent # This is called when on_close callback is executed
   isEof*: bool # Received a FIN from remote
   toWrite*: seq[WriteTask]
+  lock: AsyncLock
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let s = Stream(
     quicStream: quicStream,
     incoming: newAsyncQueue[seq[byte]](),
     closed: newAsyncEvent(),
+    lock: newAsyncLock(),
   )
   GC_ref(s) # Keep it pinned until stream_if.on_close is executed
   s
@@ -100,6 +102,13 @@ proc write*(
 ) {.async: (raises: [CancelledError, StreamError]).} =
   if stream.closeWrite:
     raise newException(StreamError, "stream closed 3")
+
+  await stream.lock.acquire()
+  defer:
+    try:
+      stream.lock.release()
+    except AsyncLockError:
+      discard # should not happen - lock acquired directly above
 
   let closedFut = stream.closed.wait()
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
