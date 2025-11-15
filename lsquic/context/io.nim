@@ -32,6 +32,7 @@ proc receive*(
     cast[pointer](ctx),
     datagram.ecn,
   )
+  ctx.engine_process()
 
 proc sendPacketsOut*(
     ctx: pointer, specs: ptr struct_lsquic_out_spec, nspecs: cuint

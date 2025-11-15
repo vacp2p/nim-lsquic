@@ -21,6 +21,21 @@ type QuicContext* = ref object of RootObj
   outgoing*: ManyQueue[Datagram]
   tickTimeout*: Timeout
   sslCtx*: ptr SSL_CTX
+  dtp*: DatagramTransport
+
+proc engine_process*(ctx: QuicContext) =
+  lsquic_engine_process_conns(ctx.engine)
+
+  if lsquic_engine_has_unsent_packets(ctx.engine) != 0:
+    lsquic_engine_send_unsent_packets(ctx.engine)
+
+  var diff: cint
+  if lsquic_engine_earliest_adv_tick(ctx.engine, addr diff) != 0:
+    let deltaUs = (if diff > 0: diff else: 0).int64
+    let nextTimeout = Moment.now() + deltaUs.microseconds
+    ctx.tickTimeout.set(nextTimeout)
+  else:
+    ctx.tickTimeout.stop()
 
 type PendingStream = object
   stream: Stream
@@ -186,10 +201,12 @@ proc stop*(ctx: QuicContext) {.raises: [].} =
 proc close*(ctx: QuicContext, conn: QuicConnection) =
   if conn != nil and conn.lsquicConn != nil:
     lsquic_conn_close(conn.lsquicConn)
+    ctx.engine_process()
 
 proc abort*(ctx: QuicContext, conn: QuicConnection) =
   if conn != nil and conn.lsquicConn != nil:
     lsquic_conn_abort(conn.lsquicConn)
+    ctx.engine_process()
 
 proc certificates*(ctx: QuicContext, conn: QuicConnection): seq[seq[byte]] =
   let x509chain = lsquic_conn_get_full_cert_chain(conn.lsquicConn)
@@ -209,6 +226,7 @@ method dial*(
 proc makeStream*(ctx: QuicContext, quicConn: QuicConnection) {.raises: [].} =
   debug "Creating stream"
   lsquic_conn_make_stream(quicConn.lsquicConn)
+  ctx.engine_process()
 
 proc onNewStream*(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t

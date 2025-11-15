@@ -55,16 +55,14 @@ proc new*(
   ctx.settings.es_cc_algo = BBRv1
   ctx.settings.es_max_cfcw = 32 * 1024 * 1024
   ctx.settings.es_dplpmtud = 1
-  ctx.settings.es_base_plpmtu = 1280
-  ctx.settings.es_max_plpmtu = 0
   ctx.settings.es_pace_packets = 1
 
-  ctx.settings.es_cfcw = 4 * 1024 * 1024
+  ctx.settings.es_cfcw = 32 * 1024 * 1024
   ctx.settings.es_max_cfcw = 32 * 1024 * 1024
-  ctx.settings.es_sfcw = 1 * 1024 * 1024
+  ctx.settings.es_sfcw = 16 * 1024 * 1024
   ctx.settings.es_max_sfcw = 8 * 1024 * 1024
   ctx.settings.es_max_batch_size = 64
-  
+
   ctx.stream_if = struct_lsquic_stream_if(
     on_new_conn: onNewConn,
     on_conn_closed: onConnClosed,
@@ -89,14 +87,7 @@ proc new*(
 
   ctx.tickTimeout = newTimeout(
     proc() =
-      var diff: cint
-      let connsToProcess = lsquic_engine_earliest_adv_tick(ctx.engine, addr diff)
-      if connsToProcess == 1:
-        lsquic_engine_process_conns(ctx.engine)
-      if lsquic_engine_has_unsent_packets(ctx.engine) != 0:
-        lsquic_engine_send_unsent_packets(ctx.engine)
-      let nextTimeout = Moment.init((if diff > 0: diff else: 0).int64, 1.microseconds)
-      ctx.tickTimeout.set(nextTimeout)
+      ctx.engine_process()
   )
   ctx.tickTimeout.set(Moment.now())
 
