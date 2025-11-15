@@ -89,14 +89,7 @@ proc new*(
 
   ctx.tickTimeout = newTimeout(
     proc() =
-      var diff: cint
-      let connsToProcess = lsquic_engine_earliest_adv_tick(ctx.engine, addr diff)
-      if connsToProcess == 1:
-        lsquic_engine_process_conns(ctx.engine)
-      if lsquic_engine_has_unsent_packets(ctx.engine) != 0:
-        lsquic_engine_send_unsent_packets(ctx.engine)
-      let nextTimeout = Moment.init((if diff > 0: diff else: 0).int64, 1.microseconds)
-      ctx.tickTimeout.set(nextTimeout)
+      ctx.engine_process()
   )
   ctx.tickTimeout.set(Moment.now())
 

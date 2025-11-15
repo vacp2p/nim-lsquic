@@ -53,6 +53,8 @@ proc startSending*(connman: ConnectionManager) =
       let datagrams = await connman.outgoing.get()
       for d in datagrams:
         await connman.udp.sendTo(d.taddr, d.data)
+      # TODO: give chronos a chance to schedule others, maybe there's an official way to `yield`?
+      await sleepAsync(0.milliseconds)
     except CancelledError as e:
       raise e
     except CatchableError as e:

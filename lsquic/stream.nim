@@ -17,6 +17,7 @@ type Stream* = ref object
   closed*: AsyncEvent # This is called when on_close callback is executed
   isEof*: bool # Received a FIN from remote
   toWrite*: seq[WriteTask]
+  doProcess*: proc() {.gcsafe, raises: [].}
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let s = Stream(
@@ -44,6 +45,7 @@ proc abort*(stream: Stream) =
     let ret = lsquic_stream_close(stream.quicStream)
     if ret != 0:
       trace "could not abort stream", streamId = lsquic_stream_id(stream.quicStream)
+    stream.doProcess()
 
   stream.closeWrite = true
   stream.isEof = true
@@ -61,6 +63,7 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
       if lsquic_stream_close(stream.quicStream) != 0:
         stream.abort()
         raise newException(StreamError, "could not close the stream")
+      stream.doProcess()
 
     stream.abortPendingWrites("steam closed")
     stream.closeWrite = true
@@ -91,6 +94,7 @@ proc read*(
       if lsquic_stream_close(stream.quicStream) != 0:
         stream.abort()
         raise newException(StreamError, "could not close the stream")
+      stream.doProcess()
     stream.isEof = true
 
   return incoming
@@ -105,6 +109,8 @@ proc write*(
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
   stream.toWrite.add(WriteTask(data: data, doneFut: doneFut))
   discard lsquic_stream_wantwrite(stream.quicStream, 1)
+  stream.doProcess()
+
   let raceFut = await race(closedFut, doneFut)
   if raceFut == closedFut:
     if not doneFut.finished:

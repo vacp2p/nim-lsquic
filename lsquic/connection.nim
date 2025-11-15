@@ -97,6 +97,8 @@ proc incomingStream*(
     await incomingFut.cancelAndWait()
     raise newException(ConnectionError, "connection is closed")
   let stream = await incomingFut
+  stream.doProcess = proc() {.gcsafe, raises: [].} =
+    connection.quicContext.processWhenReady()
   stream
 
 proc openStream*(
@@ -105,6 +107,8 @@ proc openStream*(
   if connection.isClosed:
     raise newException(ConnectionError, "connection is closed")
   let s = Stream.new()
+  s.doProcess = proc() {.gcsafe, raises: [].} =
+    connection.quicContext.processWhenReady()
   let created = connection.quicConn.addPendingStream(s)
   connection.quicContext.makeStream(connection.quicConn)
   await created
