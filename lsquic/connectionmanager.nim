@@ -52,9 +52,9 @@ proc startSending*(connman: ConnectionManager) =
     try:
       let datagrams = await connman.outgoing.get()
       let req = datagrams.mapIt((it.taddr, it.data))
-      # echo "111111111 ", req.len
-      await connman.udp.sendTo(req)
-      # echo "2222222"
+      discard connman.udp.sendTo(req)
+    except CancelledError as e:
+      raise e
     except CatchableError as e:
       debug "Failed to send datagram", errorMsg = e.msg
 

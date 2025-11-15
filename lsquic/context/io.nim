@@ -55,7 +55,9 @@ proc sendPacketsOut*(
         continue
       copyMem(addr data[currLen], currIov.iov_base, currIov.iov_len)
       currLen += currIov.iov_len.int
-      
+    
+    if data.len == 0:
+      continue
     let taddr = toTransportAddress(curr.dest_sa)
     let datagram = Datagram(data: data, ecn: curr.ecn, taddr: taddr)
     quicCtx.outgoing.put(datagram)
