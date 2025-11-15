@@ -51,8 +51,13 @@ proc startSending*(connman: ConnectionManager) =
   proc send() {.async: (raises: [CancelledError]).} =
     try:
       let datagrams = await connman.outgoing.get()
-      let req = datagrams.mapIt((it.taddr, it.data))
-      discard connman.udp.sendTo(req)
+
+      # sendTo many datagrams at once
+      #let req = datagrams.mapIt((it.taddr, it.data))
+      #discard connman.udp.sendTo(req)
+
+      for d in datagrams:
+        await connman.udp.sendTo(d.taddr, d.data)
     except CancelledError as e:
       raise e
     except CatchableError as e:
