@@ -1,4 +1,4 @@
-import chronicles
+import chronicles, sequtils
 import chronos
 import chronos/osdefs
 import results
@@ -10,7 +10,7 @@ type ConnectionManager* = ref object of RootObj
   tlsConfig*: TLSConfig
   udp*: DatagramTransport
   quicContext*: QuicContext
-  outgoing*: AsyncQueue[Datagram]
+  outgoing*: ManyQueue[Datagram]
   connections: seq[Connection]
   loop*: Future[void]
   closed*: Future[void]
@@ -20,7 +20,7 @@ proc init*(
     tlsConfig: TLSConfig,
     udp: DatagramTransport,
     quicContext: QuicContext,
-    outgoing: AsyncQueue[Datagram],
+    outgoing: ManyQueue[Datagram],
 ) =
   c.tlsConfig = tlsConfig
   c.quicContext = quicContext
@@ -34,7 +34,7 @@ proc new*(
     tlsConfig: TLSConfig,
     udp: DatagramTransport,
     quicContext: QuicContext,
-    outgoing: AsyncQueue[Datagram],
+    outgoing: ManyQueue[Datagram],
 ): T =
   let ret = ConnectionManager()
   ret.init(tlsConfig, udp, quicContext, outgoing)
@@ -50,12 +50,12 @@ proc startSending*(connman: ConnectionManager) =
 
   proc send() {.async: (raises: [CancelledError]).} =
     try:
-      let datagram = await connman.outgoing.get()
-      if datagram.len == 0:
-        # In windows, empty datagrams will make the peer stop receiving data
-        return
-      await connman.udp.sendTo(datagram.taddr, datagram.data)
-    except TransportError as e:
+      let datagrams = await connman.outgoing.get()
+      let req = datagrams.mapIt((it.taddr, it.data))
+      # echo "111111111 ", req.len
+      await connman.udp.sendTo(req)
+      # echo "2222222"
+    except CatchableError as e:
       debug "Failed to send datagram", errorMsg = e.msg
 
   connman.loop = asyncLoop(send)

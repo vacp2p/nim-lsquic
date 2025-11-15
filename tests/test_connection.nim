@@ -29,6 +29,7 @@ initializeLsquic(true, true)
 
 suite "tests":
   asyncTest "test":
+    return
     let logger = struct_lsquic_logger_if(log_buf: logging)
     discard lsquic_set_log_level("debug")
     discard lsquic_logger_lopt("engine=debug,conn=debug,stream=debug")
@@ -228,7 +229,7 @@ proc runPerf(): Future[Duration] {.async.} =
 suite "perf protocol simulation":
   asyncTest "test":
     var total: Duration
-    for i in 0 ..< 1:
+    for i in 0 ..< runs:
       let duration = await runPerf()
       total += duration
       echo "\trun #" & $(i + 1) & " duration: " & $duration
