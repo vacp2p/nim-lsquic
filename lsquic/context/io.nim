@@ -47,6 +47,9 @@ proc sendPacketsOut*(
     for j in 0 ..< curr.iovlen.int:
       totalLen += iovArr[j].iov_len.int
 
+    if totalLen == 0:
+      continue
+    
     var data = newSeqUninit[byte](totalLen)
     var currLen: int = 0
     for j in 0 ..< curr.iovlen.int:
@@ -55,13 +58,10 @@ proc sendPacketsOut*(
         continue
       copyMem(addr data[currLen], currIov.iov_base, currIov.iov_len)
       currLen += currIov.iov_len.int
-
+    
     let taddr = toTransportAddress(curr.dest_sa)
     let datagram = Datagram(data: data, ecn: curr.ecn, taddr: taddr)
-    try:
-      quicCtx.outgoing.putNoWait(datagram)
-      sent.inc
-    except AsyncQueueFullError:
-      discard # nothing to do
+    quicCtx.outgoing.put(datagram)
+    sent.inc
 
   sent.cint

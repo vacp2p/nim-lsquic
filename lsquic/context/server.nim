@@ -41,7 +41,7 @@ const BBRv1 = 2
 proc new*(
     T: typedesc[ServerContext],
     tlsConfig: TLSConfig,
-    outgoing: AsyncQueue[Datagram],
+    outgoing: ManyQueue[Datagram],
     incoming: AsyncQueue[QuicConnection],
 ): Result[T, string] =
   var ctx = ServerContext()

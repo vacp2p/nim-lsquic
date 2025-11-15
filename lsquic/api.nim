@@ -43,7 +43,7 @@ proc listen*(
 proc new*(
     t: typedesc[QuicClient], tlsConfig: TLSConfig
 ): QuicClient {.raises: [QuicError, TransportOsError].} =
-  let outgoing = newAsyncQueue[Datagram]()
+  let outgoing = ManyQueue[Datagram]()
 
   let clientCtx = ClientContext.new(tlsConfig, outgoing).valueOr:
     raise newException(QuicError, error)
