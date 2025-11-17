@@ -4,6 +4,7 @@ import chronos/osdefs
 import results
 import ./[connection, tlsconfig, datagram, connectionmanager]
 import ./context/[server, context, io]
+import ./helpers/[many_queue]
 
 export stop
 
@@ -13,7 +14,7 @@ type Listener* = ref object of ConnectionManager
 proc newListener*(
     tlsConfig: TLSConfig, address: TransportAddress
 ): Result[Listener, string] =
-  let outgoing = newAsyncQueue[Datagram]()
+  let outgoing = ManyQueue[Datagram]()
   let incoming = newAsyncQueue[QuicConnection]()
   let quicContext = ?ServerContext.new(tlsConfig, outgoing, incoming)
   let listener = Listener(incoming: incoming)

@@ -3,7 +3,7 @@ import chronicles
 import chronos/osdefs
 import ./context
 import ../[lsquic_ffi, datagram]
-import ../helpers/[openarray, sequninit, transportaddr]
+import ../helpers/[openarray, sequninit, transportaddr, many_queue]
 
 proc receive*(
     ctx: QuicContext,
@@ -47,6 +47,9 @@ proc sendPacketsOut*(
     for j in 0 ..< curr.iovlen.int:
       totalLen += iovArr[j].iov_len.int
 
+    if totalLen == 0:
+      continue
+
     var data = newSeqUninit[byte](totalLen)
     var currLen: int = 0
     for j in 0 ..< curr.iovlen.int:
@@ -58,10 +61,7 @@ proc sendPacketsOut*(
 
     let taddr = toTransportAddress(curr.dest_sa)
     let datagram = Datagram(data: data, ecn: curr.ecn, taddr: taddr)
-    try:
-      quicCtx.outgoing.putNoWait(datagram)
-      sent.inc
-    except AsyncQueueFullError:
-      discard # nothing to do
+    quicCtx.outgoing.put(datagram)
+    sent.inc
 
   sent.cint

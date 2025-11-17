@@ -4,7 +4,7 @@ import chronos
 import chronos/osdefs
 import ./[context, io, stream]
 import ../[lsquic_ffi, tlsconfig, datagram, timeout, stream]
-import ../helpers/[sequninit, transportaddr]
+import ../helpers/[sequninit, transportaddr, many_queue]
 
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
@@ -41,7 +41,7 @@ const BBRv1 = 2
 proc new*(
     T: typedesc[ServerContext],
     tlsConfig: TLSConfig,
-    outgoing: AsyncQueue[Datagram],
+    outgoing: ManyQueue[Datagram],
     incoming: AsyncQueue[QuicConnection],
 ): Result[T, string] =
   var ctx = ServerContext()
@@ -64,7 +64,7 @@ proc new*(
   ctx.settings.es_sfcw = 1 * 1024 * 1024
   ctx.settings.es_max_sfcw = 8 * 1024 * 1024
   ctx.settings.es_max_batch_size = 64
-  
+
   ctx.stream_if = struct_lsquic_stream_if(
     on_new_conn: onNewConn,
     on_conn_closed: onConnClosed,
