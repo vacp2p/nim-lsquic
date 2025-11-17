@@ -4,7 +4,7 @@ import chronos
 import chronos/osdefs
 import ./[context, io, stream]
 import ../[lsquic_ffi, tlsconfig, datagram, timeout, stream]
-import ../helpers/sequninit
+import ../helpers/[sequninit, many_queue]
 
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
@@ -105,7 +105,7 @@ method dial*(
 const BBRv1 = 2
 
 proc new*(
-    T: typedesc[ClientContext], tlsConfig: TLSConfig, outgoing: AsyncQueue[Datagram]
+    T: typedesc[ClientContext], tlsConfig: TLSConfig, outgoing: ManyQueue[Datagram]
 ): Result[T, string] =
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig

@@ -4,6 +4,7 @@ import chronicles
 import results
 import ./[listener, connection, tlsconfig, datagram, connectionmanager]
 import ./context/[context, io, client]
+import ./helpers/[many_queue]
 import lsquic_ffi
 
 type Quic = ref object of RootObj
@@ -43,7 +44,7 @@ proc listen*(
 proc new*(
     t: typedesc[QuicClient], tlsConfig: TLSConfig
 ): QuicClient {.raises: [QuicError, TransportOsError].} =
-  let outgoing = newAsyncQueue[Datagram]()
+  let outgoing = ManyQueue[Datagram]()
 
   let clientCtx = ClientContext.new(tlsConfig, outgoing).valueOr:
     raise newException(QuicError, error)
