@@ -13,7 +13,7 @@ import ./helpers/certificate
 initializeLsquic(true, true)
 
 const
-  runs = 5
+  runs = 1
   uploadSize = 100000 # 100KB
   downloadSize = 100000000 # 100MB
   chunkSize = 65536 # 64KB chunks like perf
