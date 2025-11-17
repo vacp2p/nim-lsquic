@@ -54,7 +54,7 @@ proc startSending*(connman: ConnectionManager) =
       for d in datagrams:
         await connman.udp.sendTo(d.taddr, d.data)
     except CancelledError as e:
-      raise e 
+      raise e
     except CatchableError as e:
       debug "Failed to send datagram", errorMsg = e.msg
 
