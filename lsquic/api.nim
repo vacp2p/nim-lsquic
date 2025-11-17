@@ -17,7 +17,13 @@ type QuicServer* = ref object of Quic
 
 type QuicError* = object of CatchableError
 
+var initialized: bool
+
 proc initializeLsquic*(client: bool = true, server: bool = true) =
+  if initialized:
+    return
+
+  initialized = true
   var flags = 0.cint
   if client:
     flags = flags or LSQUIC_GLOBAL_CLIENT
