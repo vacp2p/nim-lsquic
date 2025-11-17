@@ -52,7 +52,7 @@ proc startSending*(connman: ConnectionManager) =
     try:
       let datagrams = await connman.outgoing.get()
       for d in datagrams:
-        discard connman.udp.sendTo(d.taddr, d.data)
+        await connman.udp.sendTo(d.taddr, d.data)
     except CancelledError as e:
       raise e 
     except CatchableError as e:

@@ -12,7 +12,6 @@ proc get*[T](q: ManyQueue[T]): Future[seq[T]] =
     return fut
 
   fut.complete(move q.data)
-  q.getFut = nil
 
   return fut
 
