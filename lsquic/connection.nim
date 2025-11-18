@@ -4,6 +4,7 @@ import ./[stream, tlsconfig, datagram, lsquic_ffi]
 import ./context/[context, io]
 
 export ConnectionError
+export ConnectionClosedError
 export DialError
 
 type
@@ -88,14 +89,15 @@ proc incomingStream*(
     connection: Connection
 ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
   if connection.isClosed:
-    raise newException(ConnectionError, "connection is closed")
+    raise newException(ConnectionClosedError, "connection closed")
 
   let closedFut = connection.closed.wait()
   let incomingFut = connection.quicConn.incomingStream()
   let raceFut = await race(closedFut, incomingFut)
   if raceFut == closedFut:
     await incomingFut.cancelAndWait()
-    raise newException(ConnectionError, "connection is closed")
+    raise newException(ConnectionClosedError, "connection closed")
+  
   let stream = await incomingFut
   stream
 
@@ -103,7 +105,8 @@ proc openStream*(
     connection: Connection
 ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
   if connection.isClosed:
-    raise newException(ConnectionError, "connection is closed")
+    raise newException(ConnectionClosedError, "connection closed")
+
   let s = Stream.new()
   let created = connection.quicConn.addPendingStream(s)
   connection.quicContext.makeStream(connection.quicConn)

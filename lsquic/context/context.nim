@@ -10,8 +10,10 @@ import ../helpers/[many_queue]
 let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is global
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
 
-type ConnectionError* = object of IOError
-type DialError* = object of IOError
+type 
+  ConnectionError* = object of IOError
+  ConnectionClosedError* = object of ConnectionError
+  DialError* = object of IOError
 
 type QuicContext* = ref object of RootObj
   settings*: struct_lsquic_engine_settings
