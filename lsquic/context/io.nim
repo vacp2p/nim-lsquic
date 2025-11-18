@@ -1,5 +1,4 @@
 import chronos
-import chronicles
 import chronos/osdefs
 import ./context
 import ../[lsquic_ffi, datagram]
