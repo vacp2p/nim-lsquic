@@ -7,8 +7,10 @@ type ManyQueue*[T] = ref object of RootRef
 proc new*[T](MQ: typedesc[ManyQueue[T]]): ManyQueue[T] =
   ManyQueue[T](data: @[], getFut: nil)
 
-proc get*[T](q: ManyQueue[T]): Future[seq[T]] =
-  let fut = Future[seq[T]].init("ManyQueue.get")
+proc get*[T](
+    q: ManyQueue[T]
+): Future[seq[T]] {.async: (raises: [CancelledError], raw: true).} =
+  let fut = newFuture[seq[T]]("ManyQueue.get")
 
   if q.data.len == 0:
     q.getFut = fut

@@ -55,9 +55,7 @@ proc startSending*(connman: ConnectionManager) =
         await connman.udp.sendTo(d.taddr, d.data)
       # TODO: give chronos a chance to schedule others, maybe there's an official way to `yield`?
       await sleepAsync(0.milliseconds)
-    except CancelledError as e:
-      raise e
-    except CatchableError as e:
+    except TransportError as e:
       debug "Failed to send datagram", errorMsg = e.msg
 
   connman.loop = asyncLoop(send)
