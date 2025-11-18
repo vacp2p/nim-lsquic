@@ -2,13 +2,13 @@ import chronos
 
 type ManyQueue*[T] = ref object of RootRef
   data: seq[T]
-  getFut: Future[seq[T]].Raising([CancelledError])
+  getFut: Future[seq[T]]
 
 proc new*[T](MQ: typedesc[ManyQueue[T]]): ManyQueue[T] =
   ManyQueue[T](data: @[], getFut: nil)
 
-proc get*[T](q: ManyQueue[T]): Future[seq[T]].Raising([CancelledError]) =
-  let fut = Future[seq[T]].Raising([CancelledError]).init("ManyQueue.get")
+proc get*[T](q: ManyQueue[T]): Future[seq[T]] =
+  let fut = Future[seq[T]].init("ManyQueue.get")
 
   if q.data.len == 0:
     q.getFut = fut
