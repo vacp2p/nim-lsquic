@@ -14,7 +14,7 @@ import ./helpers/certificate
 initializeLsquic(true, true)
 
 const
-  runs = 1
+  runs = 10
   uploadSize = 100000 # 100KB
   downloadSize = 100000000 # 100MB
   chunkSize = 65536 # 64KB chunks like perf
@@ -75,7 +75,6 @@ proc runPerf(): Future[Duration] {.async.} =
         quit(1)
 
       remainingToSend -= toSend
-
     await stream.close()
     serverDone.complete()
 

@@ -4,6 +4,9 @@ type ManyQueue*[T] = ref object of RootRef
   data: seq[T]
   getFut: Future[seq[T]]
 
+proc new*[T](MQ: typedesc[ManyQueue[T]]): ManyQueue[T] =
+  ManyQueue[T](data: @[], getFut: nil)
+
 proc get*[T](q: ManyQueue[T]): Future[seq[T]] =
   let fut = Future[seq[T]].init("ManyQueue.get")
 
@@ -18,8 +21,6 @@ proc get*[T](q: ManyQueue[T]): Future[seq[T]] =
 proc put*[T](q: ManyQueue[T], e: sink T) =
   q.data.add(e)
 
-  if isNil(q.getFut):
-    return
-
-  q.getFut.complete(move q.data)
-  q.getFut = nil
+  if not isNil(q.getFut):
+    q.getFut.complete(move q.data)
+    q.getFut = nil

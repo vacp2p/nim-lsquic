@@ -24,6 +24,18 @@ type QuicContext* = ref object of RootObj
   outgoing*: ManyQueue[Datagram]
   tickTimeout*: Timeout
   sslCtx*: ptr SSL_CTX
+  dtp*: DatagramTransport
+
+proc engine_process*(ctx: QuicContext) =
+  lsquic_engine_process_conns(ctx.engine)
+
+  if lsquic_engine_has_unsent_packets(ctx.engine) != 0:
+    lsquic_engine_send_unsent_packets(ctx.engine)
+
+  var diff: cint
+  if lsquic_engine_earliest_adv_tick(ctx.engine, addr diff) != 0:
+    let delta = if diff < 0: LSQUIC_DF_CLOCK_GRANULARITY.microseconds else: diff.microseconds
+    ctx.tickTimeout.set(Moment.now() + delta)
 
 type PendingStream = object
   stream: Stream
@@ -45,6 +57,9 @@ type ClientContext* = ref object of QuicContext
 
 type ServerContext* = ref object of QuicContext
   incoming*: AsyncQueue[QuicConnection]
+
+proc processWhenReady*(quicContext: QuicContext) =
+  quicContext.tickTimeout.set(Moment.now())
 
 proc incomingStream*(
     quicConn: QuicConnection
@@ -189,10 +204,12 @@ proc stop*(ctx: QuicContext) {.raises: [].} =
 proc close*(ctx: QuicContext, conn: QuicConnection) =
   if conn != nil and conn.lsquicConn != nil:
     lsquic_conn_close(conn.lsquicConn)
+    ctx.processWhenReady()
 
 proc abort*(ctx: QuicContext, conn: QuicConnection) =
   if conn != nil and conn.lsquicConn != nil:
     lsquic_conn_abort(conn.lsquicConn)
+    ctx.processWhenReady()
 
 proc certificates*(ctx: QuicContext, conn: QuicConnection): seq[seq[byte]] =
   let x509chain = lsquic_conn_get_full_cert_chain(conn.lsquicConn)

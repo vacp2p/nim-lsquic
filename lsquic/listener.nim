@@ -14,7 +14,7 @@ type Listener* = ref object of ConnectionManager
 proc newListener*(
     tlsConfig: TLSConfig, address: TransportAddress
 ): Result[Listener, string] =
-  let outgoing = ManyQueue[Datagram]()
+  let outgoing = ManyQueue[Datagram].new()
   let incoming = newAsyncQueue[QuicConnection]()
   let quicContext = ?ServerContext.new(tlsConfig, outgoing, incoming)
   let listener = Listener(incoming: incoming)

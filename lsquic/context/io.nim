@@ -32,6 +32,8 @@ proc receive*(
     datagram.ecn,
   )
 
+  ctx.processWhenReady()
+
 proc sendPacketsOut*(
     ctx: pointer, specs: ptr struct_lsquic_out_spec, nspecs: cuint
 ): cint {.cdecl.} =
@@ -60,7 +62,9 @@ proc sendPacketsOut*(
 
     let taddr = toTransportAddress(curr.dest_sa)
     let datagram = Datagram(data: data, ecn: curr.ecn, taddr: taddr)
+
     quicCtx.outgoing.put(datagram)
+
     sent.inc
 
   sent.cint

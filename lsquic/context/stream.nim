@@ -79,9 +79,6 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       if w.offset >= w.data.len:
         if not w.doneFut.finished:
           w.doneFut.complete()
-        if lsquic_stream_flush(stream) != 0:
-          streamCtx.abort()
-          return
         streamCtx.toWrite.delete(0)
     elif n == 0:
       # Nothing to write
@@ -90,9 +87,15 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       streamCtx.abortPendingWrites("write failed")
       return
 
+  if lsquic_stream_flush(stream) != 0:
+    streamCtx.abort()
+    return
+
   if streamCtx.toWrite.len == 0:
     if lsquic_stream_wantwrite(stream, 0) == -1:
       error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
       streamCtx.abort()
+
+  streamCtx.doProcess()
 
   return
