@@ -24,5 +24,6 @@ proc put*[T](q: ManyQueue[T], e: sink T) =
   q.data.add(e)
 
   if not isNil(q.getFut):
-    q.getFut.complete(move q.data)
+    if not q.getFut.finished():
+      q.getFut.complete(move q.data)
     q.getFut = nil
