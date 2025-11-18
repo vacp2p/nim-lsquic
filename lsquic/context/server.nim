@@ -63,6 +63,8 @@ proc new*(
   ctx.settings.es_max_cfcw = 32 * 1024 * 1024
   ctx.settings.es_sfcw = 1 * 1024 * 1024
   ctx.settings.es_max_sfcw = 8 * 1024 * 1024
+  ctx.settings.es_init_max_stream_data_bidi_local = ctx.settings.es_sfcw
+  ctx.settings.es_init_max_stream_data_bidi_remote = ctx.settings.es_sfcw
   ctx.settings.es_max_batch_size = 64
 
   ctx.stream_if = struct_lsquic_stream_if(
