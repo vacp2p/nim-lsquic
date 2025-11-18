@@ -1,11 +1,6 @@
 {.used.}
 
-import
-  chronos,
-  chronos/unittest2/asynctests,
-  results,
-  std/sets,
-  chronicles
+import chronos, chronos/unittest2/asynctests, results, std/sets, chronicles
 import
   lsquic/[api, listener, tlsconfig, connection, certificateverifier, stream, lsquic_ffi]
 import ./helpers/certificate

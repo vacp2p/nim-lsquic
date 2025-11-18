@@ -1,12 +1,6 @@
 {.used.}
 
-import
-  chronos,
-  chronos/unittest2/asynctests,
-  results,
-  std/sets,
-  stew/endians2,
-  sequtils
+import chronos, chronos/unittest2/asynctests, results, std/sets, stew/endians2, sequtils
 import
   lsquic/[api, listener, tlsconfig, connection, certificateverifier, stream, lsquic_ffi]
 import ./helpers/certificate

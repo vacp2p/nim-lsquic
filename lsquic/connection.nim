@@ -97,7 +97,7 @@ proc incomingStream*(
   if raceFut == closedFut:
     await incomingFut.cancelAndWait()
     raise newException(ConnectionClosedError, "connection closed")
-  
+
   let stream = await incomingFut
   stream.doProcess = proc() {.gcsafe, raises: [].} =
     connection.quicContext.processWhenReady()

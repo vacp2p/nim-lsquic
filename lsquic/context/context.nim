@@ -10,7 +10,7 @@ import ../helpers/[many_queue]
 let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is global
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
 
-type 
+type
   ConnectionError* = object of IOError
   ConnectionClosedError* = object of ConnectionError
   DialError* = object of IOError
@@ -34,7 +34,8 @@ proc engine_process*(ctx: QuicContext) =
 
   var diff: cint
   if lsquic_engine_earliest_adv_tick(ctx.engine, addr diff) != 0:
-    let delta = if diff < 0: LSQUIC_DF_CLOCK_GRANULARITY.microseconds else: diff.microseconds
+    let delta =
+      if diff < 0: LSQUIC_DF_CLOCK_GRANULARITY.microseconds else: diff.microseconds
     ctx.tickTimeout.set(Moment.now() + delta)
 
 type PendingStream = object
