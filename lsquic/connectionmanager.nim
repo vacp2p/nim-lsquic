@@ -58,7 +58,7 @@ proc startSending*(connman: ConnectionManager) =
       try:
         for d in datagrams:
           discard connman.udp.addToQueue(d.taddr, d.data)
-        connman.udp.writeFromQueue(datagrams.len)
+        connman.udp.writeFromQueue()
       except TransportError:
         # try-except construct is needed to make compiler happy.
         # TransportError will never raise, therfore just discard.

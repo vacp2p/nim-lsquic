@@ -10,7 +10,7 @@ requires "nim >= 2.0.0"
 requires "zlib"
 requires "nim >= 2.0.0"
 requires "stew >= 0.4.0"
-requires "https://github.com/vacp2p/nim-lsquic#b1843cc7b0da9e4ebb91b0ca5767fdb8b216f2d1",
+requires "https://github.com/status-im/nim-chronos#b1843cc7b0da9e4ebb91b0ca5767fdb8b216f2d1"
 requires "nimcrypto >= 0.6.0"
 requires "unittest2"
 requires "chronicles >= 0.11.0"
