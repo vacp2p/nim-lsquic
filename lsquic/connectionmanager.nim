@@ -50,15 +50,15 @@ proc startSending*(connman: ConnectionManager) =
 
   proc send() {.async: (raises: [CancelledError]).} =
       let datagrams = await connman.outgoing.get()
-
+      
       when defined(release):
-        # in release mode future from sendTo is discard-ed and TransportError will liekly never raise.
+        # in release mode future from sendTo is discard-ed and TransportError will never raise.
         # still, we need to have try-except construct to make compiler happy.
         try:
           for d in datagrams:
             discard connman.udp.sendTo(d.taddr, d.data)
-        except TransportError as e:
-          error "Failed to send datagram", errorMsg = e.msg
+        except TransportError:
+          discard # will never happen, therfore just discard
       else:
         # in debug mode code awaits on future as performance is not important. 
         # errors will raise, giving developer insight of what went wrong.
