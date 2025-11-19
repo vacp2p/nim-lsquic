@@ -21,7 +21,6 @@ type QuicContext* = ref object of RootObj
   engine*: ptr struct_lsquic_engine
   stream_if*: struct_lsquic_stream_if
   tlsConfig*: TLSConfig
-  outgoing*: ManyQueue[Datagram]
   tickTimeout*: Timeout
   sslCtx*: ptr SSL_CTX
   dtp*: DatagramTransport

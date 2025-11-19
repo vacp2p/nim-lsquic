@@ -115,11 +115,11 @@ method dial*(
 const BBRv1 = 2
 
 proc new*(
-    T: typedesc[ClientContext], tlsConfig: TLSConfig, outgoing: ManyQueue[Datagram]
+    T: typedesc[ClientContext], tlsConfig: TLSConfig, dtp: DatagramTransport
 ): Result[T, string] =
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig
-  ctx.outgoing = outgoing
+  ctx.dtp = dtp
   ctx.setupSSLContext()
 
   lsquic_engine_init_settings(addr ctx.settings, 0)

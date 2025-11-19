@@ -51,7 +51,7 @@ proc sendPacketsOut*(
     if totalLen == 0:
       continue
 
-    var data = newSeqUninit[byte](totalLen)
+    let data = newSeqUninit[byte](totalLen)
     var currLen: int = 0
     for j in 0 ..< curr.iovlen.int:
       let currIov = iovArr[j]
@@ -61,10 +61,18 @@ proc sendPacketsOut*(
       currLen += currIov.iov_len.int
 
     let taddr = toTransportAddress(curr.dest_sa)
-    let datagram = Datagram(data: data, ecn: curr.ecn, taddr: taddr)
 
-    quicCtx.outgoing.put(datagram)
+    try:
+      discard quicCtx.dtp.addToQueue(taddr, data)
+    except TransportError:
+      discard
 
     sent.inc
-
+  
+  if sent > 0:
+    try:
+      quicCtx.dtp.writeFromQueue()
+    except TransportError:
+      discard
+  
   sent.cint

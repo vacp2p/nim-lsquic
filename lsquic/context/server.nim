@@ -49,13 +49,13 @@ const BBRv1 = 2
 proc new*(
     T: typedesc[ServerContext],
     tlsConfig: TLSConfig,
-    outgoing: ManyQueue[Datagram],
     incoming: AsyncQueue[QuicConnection],
+    dtp: DatagramTransport
 ): Result[T, string] =
   var ctx = ServerContext()
   ctx.tlsConfig = tlsConfig
-  ctx.outgoing = outgoing
   ctx.incoming = incoming
+  ctx.dtp = dtp
   ctx.setupSSLContext()
 
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)
