@@ -49,29 +49,32 @@ proc startSending*(connman: ConnectionManager) =
   debug "Starting sending loop"
 
   proc send() {.async: (raises: [CancelledError]).} =
-      let datagrams = await connman.outgoing.get()
-      
-      when defined(release):
-        # in release mode future from sendTo is discard-ed and TransportError will never raise.
-        # still, we need to have try-except construct to make compiler happy.
-        try:
-          for d in datagrams:
-            discard connman.udp.sendTo(d.taddr, d.data)
-        except TransportError:
-          discard # will never happen, therfore just discard
-      else:
-        # in debug mode code awaits on future as performance is not important. 
-        # errors will raise, giving developer insight of what went wrong.
-        try:
-          for d in datagrams:
-            await connman.udp.sendTo(d.taddr, d.data)
-        except TransportUseClosedError:
-          error "UDP transport closed while data is still queued"
-          raise newException(CancelledError, "cancelling after transport close")
-        except TransportError as e:
-          error "Failed to send datagram", errorMsg = e.msg
-          # raiseAssert will improve visibility of anything going wrong
-          raiseAssert "Failed to send datagram"
+    let datagrams = await connman.outgoing.get()
+
+    when defined(release):
+      # in release mode future from sendTo is discard-ed. this is done to improve performance
+      # and also becasue code is not doing anything meaningul with error in debug mode.
+      # except to logs error which will not even happen unless logs are turned on.
+      try:
+        for d in datagrams:
+          discard connman.udp.sendTo(d.taddr, d.data)
+      except TransportError:
+        # we need to have try-except construct to make compiler happy.
+        # TransportError will never raise, therfore just discard.
+        discard
+    else:
+      # in debug mode code awaits on future as performance is not important. 
+      # errors will raise, giving developer insight of what went wrong.
+      try:
+        for d in datagrams:
+          await connman.udp.sendTo(d.taddr, d.data)
+      except TransportUseClosedError:
+        error "UDP transport closed while data is still queued"
+        raise newException(CancelledError, "cancelling after transport close")
+      except TransportError as e:
+        error "Failed to send datagram", errorMsg = e.msg
+        # raiseAssert will improve visibility of anything going wrong
+        raiseAssert "Failed to send datagram"
 
   connman.loop = asyncLoop(send)
 
