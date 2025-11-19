@@ -118,6 +118,8 @@ proc runPerf(): Future[Duration] {.async.} =
 suite "perf protocol simulation":
   asyncTest "test":
     var total: Duration
+
+    echo "" # new line
     for i in 0 ..< runs:
       let duration = await runPerf()
       total += duration
