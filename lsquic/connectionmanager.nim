@@ -49,14 +49,29 @@ proc startSending*(connman: ConnectionManager) =
   debug "Starting sending loop"
 
   proc send() {.async: (raises: [CancelledError]).} =
-    try:
       let datagrams = await connman.outgoing.get()
-      for d in datagrams:
-        await connman.udp.sendTo(d.taddr, d.data)
-      # TODO: give chronos a chance to schedule others, maybe there's an official way to `yield`?
-      await sleepAsync(0.milliseconds)
-    except TransportError as e:
-      debug "Failed to send datagram", errorMsg = e.msg
+
+      when defined(release):
+        # in release mode future from sendTo is discard-ed and TransportError will liekly never raise.
+        # still, we need to have try-except construct to make compiler happy.
+        try:
+          for d in datagrams:
+            discard connman.udp.sendTo(d.taddr, d.data)
+        except TransportError as e:
+          error "Failed to send datagram", errorMsg = e.msg
+      else:
+        # in debug mode code awaits on future as performance is not important. 
+        # errors will raise, giving developer insight of what went wrong.
+        try:
+          for d in datagrams:
+            await connman.udp.sendTo(d.taddr, d.data)
+        except TransportUseClosedError:
+          error "UDP transport closed while data is still queued"
+          raise newException(CancelledError, "cancelling after transport close")
+        except TransportError as e:
+          error "Failed to send datagram", errorMsg = e.msg
+          # raiseAssert will improve visibility of anything going wrong
+          raiseAssert "Failed to send datagram"
 
   connman.loop = asyncLoop(send)
 
