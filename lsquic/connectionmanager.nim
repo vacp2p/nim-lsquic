@@ -57,11 +57,13 @@ proc startSending*(connman: ConnectionManager) =
       # except to logs error which will not even happen unless logs are turned on.
       try:
         for d in datagrams:
-          discard connman.udp.sendTo(d.taddr, d.data)
+          discard connman.udp.addToQueue(d.taddr, d.data)
+        connman.udp.writeFromQueue(datagrams.len)
       except TransportError:
         # try-except construct is needed to make compiler happy.
         # TransportError will never raise, therfore just discard.
         discard
+
     else:
       # in debug mode code awaits on future as performance is not important. 
       # errors will raise, giving developer insight of what went wrong.
