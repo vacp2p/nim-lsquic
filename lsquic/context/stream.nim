@@ -2,6 +2,7 @@ import chronicles
 import chronos
 import ../[lsquic_ffi, stream]
 import ../helpers/sequninit
+import posix
 
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   debug "Stream closed"
@@ -17,37 +18,67 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     streamCtx.isEof = true
     streamCtx.closed.fire()
     streamCtx.abortPendingWrites("stream closed")
+
+  if streamCtx.toRead.len > 0:
+    let e = newException(StreamError, "stream closed")
+    for t in streamCtx.toRead:
+      if not t.doneFut.finished:
+        t.doneFut.fail(e)
+    streamCtx.toRead.clear()
+
   GC_unref(streamCtx)
-
-type StreamReadContext = object
-  stream: ptr lsquic_stream_t
-  ctx: ptr lsquic_stream_ctx_t
-
-proc readCtxCb(
-    ctx: pointer, data: ptr uint8, len: csize_t, fin: cint
-): csize_t {.cdecl.} =
-  let readContext = cast[ptr StreamReadContext](ctx)
-  let streamCtx = cast[Stream](readContext.ctx)
-  if len != 0:
-    var s = newSeqUninit[byte](len)
-    copyMem(addr s[0], data, len)
-    streamCtx.incoming.putNoWait(s)
-  if fin != 0:
-    streamCtx.incoming.putNoWait(@[])
-  len
 
 proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "stream read"
-  let readContext = StreamReadContext(stream: stream, ctx: ctx)
-  let streamCtx = cast[Stream](ctx)
-  let nread = lsquic_stream_readf(stream, readCtxCb, (addr readContext))
-  if nread < 0:
-    error "could not read from stream", nread, streamId = lsquic_stream_id(stream)
-    streamCtx.abort()
+  if ctx.isNil:
+    debug "stream_ctx is nil onRead"
+    return
 
-  if lsquic_stream_wantread(stream, 0) == -1:
-    error "could not set stream wantread", streamId = lsquic_stream_id(stream)
-    streamCtx.abort()
+  let streamCtx = cast[Stream](ctx)
+  if streamCtx.toRead.len == 0:
+    # Nothing waiting to read yet. Stop callbacks until a reader shows up.
+    if lsquic_stream_wantread(stream, 0) == -1:
+      error "could not set stream wantread", streamId = lsquic_stream_id(stream)
+      streamCtx.abort()
+    return
+
+  # keep going while:
+  # - there's pending read tasks
+  # - and stream still has data (or fin)
+  while streamCtx.toRead.len > 0:
+    var task = streamCtx.toRead.peekFirst()
+    if task.dataLen <= 0:
+      # trivial / weird case
+      task.doneFut.complete(0)
+      discard streamCtx.toRead.popFirst()
+      continue
+
+    let n = lsquic_stream_read(stream, task.data, csize_t(task.dataLen))
+
+    if n > 0:
+      task.doneFut.complete(int(n))
+      discard streamCtx.toRead.popFirst()
+      # note: if user wanted exact `dataLen`, they'd re-issue read for remainder
+      continue
+
+    if n == 0:
+      # fin → eof
+      streamCtx.isEof = true
+      # complete all pending read futures with 0
+      for t in streamCtx.toRead:
+        if not t.doneFut.finished:
+          t.doneFut.complete(0)
+      streamCtx.toRead.clear()
+      break
+
+    if errno == EAGAIN:
+      break
+
+    for t in streamCtx.toRead:
+      if not t.doneFut.finished:
+        t.doneFut.fail(newException(StreamError, "could not read from stream"))
+    streamCtx.toRead.clear()
+    break
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "onWrite"
@@ -64,11 +95,11 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   # always drain from head of queue to preserve order
   while streamCtx.toWrite.len > 0:
-    var w = streamCtx.toWrite[0]
+    var w = streamCtx.toWrite.peekFirst()
     if w.offset >= w.data.len:
       if not w.doneFut.finished:
         w.doneFut.complete()
-      streamCtx.toWrite.delete(0)
+      discard streamCtx.toWrite.popFirst()
       continue
 
     let p = w.data[w.offset].addr
@@ -79,7 +110,7 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       if w.offset >= w.data.len:
         if not w.doneFut.finished:
           w.doneFut.complete()
-        streamCtx.toWrite.delete(0)
+        discard streamCtx.toWrite.popFirst()
     elif n == 0:
       # Nothing to write
       break
