@@ -51,6 +51,7 @@ proc sendPacketsOut*(
     if totalLen == 0:
       continue
 
+    let taddr = toTransportAddress(curr.dest_sa)
     let data = newSeqUninit[byte](totalLen)
     var currLen: int = 0
     for j in 0 ..< curr.iovlen.int:
@@ -60,19 +61,11 @@ proc sendPacketsOut*(
       copyMem(addr data[currLen], currIov.iov_base, currIov.iov_len)
       currLen += currIov.iov_len.int
 
-    let taddr = toTransportAddress(curr.dest_sa)
-
     try:
-      discard quicCtx.dtp.addToQueue(taddr, data)
+      discard quicCtx.dtp.sendTo(taddr, data)
     except TransportError:
       discard
 
     sent.inc
-
-  if sent > 0:
-    try:
-      quicCtx.dtp.writeFromQueue()
-    except TransportError:
-      discard
 
   sent.cint
