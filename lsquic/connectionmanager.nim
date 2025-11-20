@@ -11,19 +11,13 @@ type ConnectionManager* = ref object of RootObj
   loop*: Future[void]
   closed*: Future[void]
 
-proc init*(
-    c: ConnectionManager,
-    tlsConfig: TLSConfig,
-    quicContext: QuicContext,
-) =
+proc init*(c: ConnectionManager, tlsConfig: TLSConfig, quicContext: QuicContext) =
   c.tlsConfig = tlsConfig
   c.quicContext = quicContext
   c.closed = newFuture[void]()
 
 proc new*(
-    T: typedesc[ConnectionManager],
-    tlsConfig: TLSConfig,
-    quicContext: QuicContext,
+    T: typedesc[ConnectionManager], tlsConfig: TLSConfig, quicContext: QuicContext
 ): T =
   let ret = ConnectionManager()
   ret.init(tlsConfig, quicContext)

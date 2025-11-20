@@ -65,9 +65,7 @@ proc new*(
   clientCtx = ClientContext.new(tlsConfig, dtp).valueOr:
     raise newException(QuicError, error)
 
-  let client = QuicClient(
-    connman: ConnectionManager.new(tlsConfig, clientCtx)
-  )
+  let client = QuicClient(connman: ConnectionManager.new(tlsConfig, clientCtx))
   client
 
 proc dial*(

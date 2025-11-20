@@ -68,11 +68,11 @@ proc sendPacketsOut*(
       discard
 
     sent.inc
-  
+
   if sent > 0:
     try:
       quicCtx.dtp.writeFromQueue()
     except TransportError:
       discard
-  
+
   sent.cint

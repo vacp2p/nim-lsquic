@@ -50,7 +50,7 @@ proc new*(
     T: typedesc[ServerContext],
     tlsConfig: TLSConfig,
     incoming: AsyncQueue[QuicConnection],
-    dtp: DatagramTransport
+    dtp: DatagramTransport,
 ): Result[T, string] =
   var ctx = ServerContext()
   ctx.tlsConfig = tlsConfig
