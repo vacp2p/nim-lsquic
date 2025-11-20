@@ -2,7 +2,7 @@ import chronos
 import chronos/osdefs
 import ./context
 import ../[lsquic_ffi, datagram]
-import ../helpers/[openarray, sequninit, transportaddr, many_queue]
+import ../helpers/[openarray, sequninit, transportaddr]
 
 proc receive*(
     ctx: QuicContext,
@@ -51,7 +51,8 @@ proc sendPacketsOut*(
     if totalLen == 0:
       continue
 
-    var data = newSeqUninit[byte](totalLen)
+    let taddr = toTransportAddress(curr.dest_sa)
+    let data = newSeqUninit[byte](totalLen)
     var currLen: int = 0
     for j in 0 ..< curr.iovlen.int:
       let currIov = iovArr[j]
@@ -60,10 +61,10 @@ proc sendPacketsOut*(
       copyMem(addr data[currLen], currIov.iov_base, currIov.iov_len)
       currLen += currIov.iov_len.int
 
-    let taddr = toTransportAddress(curr.dest_sa)
-    let datagram = Datagram(data: data, ecn: curr.ecn, taddr: taddr)
-
-    quicCtx.outgoing.put(datagram)
+    try:
+      discard quicCtx.dtp.sendTo(taddr, data)
+    except TransportError:
+      discard
 
     sent.inc
 
