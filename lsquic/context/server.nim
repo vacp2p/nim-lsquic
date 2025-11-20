@@ -3,7 +3,7 @@ import chronicles
 import chronos
 import chronos/osdefs
 import ./[context, io, stream]
-import ../[lsquic_ffi, tlsconfig, datagram, timeout, stream]
+import ../[lsquic_ffi, tlsconfig, datagram, timeout, stream, certificates]
 import ../helpers/[sequninit, transportaddr, many_queue]
 
 proc onNewConn(
@@ -35,6 +35,14 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
     let quicConn = cast[QuicConnection](conn_ctx)
     quicConn.onClose()
   lsquic_conn_set_ctx(conn, nil)
+
+method certificates*(
+    ctx: ServerContext, conn: QuicConnection
+): seq[seq[byte]] {.gcsafe, raises: [].} =
+  let x509chain = lsquic_conn_get_full_cert_chain(conn.lsquicConn)
+  let ret = x509chain.getCertChain()
+  OPENSSL_sk_free(cast[ptr OPENSSL_STACK](x509chain))
+  ret
 
 const BBRv1 = 2
 
