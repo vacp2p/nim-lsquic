@@ -17,7 +17,16 @@ type Stream* = ref object
   closed*: AsyncEvent # This is called when on_close callback is executed
   isEof*: bool # Received a FIN from remote
   toWrite*: seq[WriteTask]
+  readBuf: seq[byte] # Cached incoming chunk when readInto only partially consumes it
+  readOffset: int
   doProcess*: proc() {.gcsafe, raises: [].}
+
+template readInto*(
+    stream: Stream, dst: var openArray[byte]
+): untyped =
+  ## Convenience helper that forwards an openArray/seq to the pointer-based API.
+  (if dst.len == 0: stream.readInto(cast[ptr byte](nil), 0)
+   else: stream.readInto(dst[0].addr, dst.len))
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let s = Stream(
@@ -68,11 +77,27 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
     stream.abortPendingWrites("steam closed")
     stream.closeWrite = true
 
-proc read*(
-    stream: Stream
-): Future[seq[byte]] {.async: (raises: [CancelledError, StreamError]).} =
+proc readInto*(
+    stream: Stream, dst: ptr byte, dstLen: int
+): Future[int] {.async: (raises: [CancelledError, StreamError]).} =
+  ## Reads available data into the caller-provided buffer at `dst`, up to `dstLen`
+  ## bytes. Returns the number of bytes copied, or 0 on EOF. The caller owns the
+  ## buffer and ensures it stays alive for the duration of the await.
+  if dstLen == 0 or dst.isNil:
+    return 0
+
+  # Serve from cached chunk first (even if we've already seen EOF).
+  if stream.readOffset < stream.readBuf.len:
+    let n = min(dstLen, stream.readBuf.len - stream.readOffset)
+    copyMem(dst, stream.readBuf[stream.readOffset].addr, n)
+    stream.readOffset.inc(n)
+    if stream.readOffset >= stream.readBuf.len:
+      stream.readBuf.setLen(0)
+      stream.readOffset = 0
+    return n
+
   if stream.isEof or stream.closedByEngine:
-    return @[]
+    return 0
 
   if lsquic_stream_wantread(stream.quicStream, 1) == -1:
     stream.abort()
@@ -85,7 +110,7 @@ proc read*(
     await incomingFut.cancelAndWait()
     stream.isEof = true
     stream.closeWrite = true
-    return @[]
+    return 0
 
   let incoming = await incomingFut
   if incoming.len == 0:
@@ -96,8 +121,17 @@ proc read*(
         raise newException(StreamError, "could not close the stream")
       stream.doProcess()
     stream.isEof = true
+    return 0
 
-  return incoming
+  let copied = min(dstLen, incoming.len)
+  copyMem(dst, incoming[0].addr, copied)
+
+  if copied < incoming.len:
+    # Save the remainder for the next call without another memcpy.
+    stream.readBuf = incoming
+    stream.readOffset = copied
+
+  return copied
 
 proc write*(
     stream: Stream, data: seq[byte]

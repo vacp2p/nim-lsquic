@@ -48,15 +48,24 @@ proc runPerf(): Future[Duration] {.async.} =
     let stream = await incomingConn.incomingStream()
 
     # Step 1: Read download size (8 bytes) 
-    let clientDownloadSize = await stream.read()
+    var sizeBuf = newSeq[byte](8)
+    var sizeRead = 0
+    while sizeRead < sizeBuf.len:
+      let n = await stream.readInto(sizeBuf[sizeRead].addr, sizeBuf.len - sizeRead)
+      if n == 0:
+        break
+      sizeRead += n
+    check sizeRead == 8
+    let clientDownloadSize = sizeBuf
 
     # Step 2: Read upload data until EOF
     var totalBytesRead = 0
+    var readBuf = newSeq[byte](chunkSize)
     while true:
-      let chunk = await stream.read()
-      if chunk.len == 0:
+      let n = await stream.readInto(readBuf[0].addr, readBuf.len)
+      if n == 0:
         break
-      totalBytesRead += chunk.len
+      totalBytesRead += n
 
     # Step 3: Send download data back
     var remainingToSend = uint64.fromBytesBE(clientDownloadSize)
@@ -102,9 +111,13 @@ proc runPerf(): Future[Duration] {.async.} =
 
   # Step 4: Start reading download data
   var totalDownloaded = 0
+  # Reuse buffer for client-side download
+  var downloadBuf = newSeq[byte](chunkSize)
   while totalDownloaded < downloadSize:
-    let chunk = await clientStream.read()
-    totalDownloaded += chunk.len
+    let n = await clientStream.readInto(downloadBuf[0].addr, downloadBuf.len)
+    if n == 0:
+      break
+    totalDownloaded += n
 
   let duration = Moment.now() - startTime
 
