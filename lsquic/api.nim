@@ -4,7 +4,6 @@ import chronicles
 import results
 import ./[listener, connection, tlsconfig, datagram, connectionmanager]
 import ./context/[context, io, client]
-import ./helpers/[many_queue]
 import lsquic_ffi
 
 type Quic = ref object of RootObj
