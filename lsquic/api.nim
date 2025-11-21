@@ -50,10 +50,7 @@ proc listen*(
 proc new*(
     t: typedesc[QuicClient], tlsConfig: TLSConfig
 ): QuicClient {.raises: [QuicError, TransportOsError].} =
-  let outgoing = ManyQueue[Datagram]()
-
-  let clientCtx = ClientContext.new(tlsConfig, outgoing).valueOr:
-    raise newException(QuicError, error)
+  var clientCtx: ClientContext
 
   proc onReceive(
       udp: DatagramTransport, remote: TransportAddress
@@ -64,19 +61,18 @@ proc new*(
     except TransportError as e:
       error "Unexpected transport error", errorMsg = e.msg
 
-  let client = QuicClient(
-    connman: ConnectionManager.new(
-      tlsConfig, newDatagramTransport(onReceive), clientCtx, outgoing
-    )
-  )
-  client.connman.startSending()
+  let dtp = newDatagramTransport(onReceive)
+  clientCtx = ClientContext.new(tlsConfig, dtp).valueOr:
+      raise newException(QuicError, error)
+
+  let client = QuicClient(connman: ConnectionManager.new(tlsConfig, clientCtx))
   client
 
 proc dial*(
     self: QuicClient, address: TransportAddress
 ): Future[Connection] {.async: (raises: [CancelledError, DialError, TransportOsError]).} =
   var connection = newOutgoingConnection(
-    self.connman.quicContext, self.connman.udp.localAddress, address
+    self.connman.quicContext, self.connman.quicContext.dtp.localAddress, address
   )
   self.connman.addConnection(connection)
   await connection.dial()

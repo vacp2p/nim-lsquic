@@ -1,16 +1,12 @@
 import chronicles
 import chronos
 import chronos/osdefs
-import results
-import ./[connection, tlsconfig, datagram]
-import ./helpers/[asyncloop, many_queue]
+import ./[connection, tlsconfig]
 import ./context/context
 
 type ConnectionManager* = ref object of RootObj
   tlsConfig*: TLSConfig
-  udp*: DatagramTransport
   quicContext*: QuicContext
-  outgoing*: ManyQueue[Datagram]
   connections: seq[Connection]
   loop*: Future[void]
   closed*: Future[void]
@@ -18,55 +14,29 @@ type ConnectionManager* = ref object of RootObj
 proc init*(
     c: ConnectionManager,
     tlsConfig: TLSConfig,
-    udp: DatagramTransport,
     quicContext: QuicContext,
-    outgoing: ManyQueue[Datagram],
 ) =
   c.tlsConfig = tlsConfig
   c.quicContext = quicContext
-  c.outgoing = outgoing
-  c.udp = udp
   c.quicContext = quicContext
   c.closed = newFuture[void]()
 
 proc new*(
     T: typedesc[ConnectionManager],
     tlsConfig: TLSConfig,
-    udp: DatagramTransport,
     quicContext: QuicContext,
-    outgoing: ManyQueue[Datagram],
 ): T =
   let ret = ConnectionManager()
-  ret.init(tlsConfig, udp, quicContext, outgoing)
+  ret.init(tlsConfig, quicContext)
   ret
 
 proc localAddress*(
     connman: ConnectionManager
 ): TransportAddress {.raises: [TransportOsError].} =
-  connman.udp.localAddress()
-
-proc startSending*(connman: ConnectionManager) =
-  debug "Starting sending loop"
-
-  proc send() {.async: (raises: [CancelledError]).} =
-    try:
-      let datagrams = await connman.outgoing.get()
-      for d in datagrams:
-        await connman.udp.sendTo(d.taddr, d.data)
-      # TODO: give chronos a chance to schedule others, maybe there's an official way to `yield`?
-      await sleepAsync(0.milliseconds)
-    except CancelledError as e:
-      raise e
-    except CatchableError as e:
-      debug "Failed to send datagram", errorMsg = e.msg
-
-  connman.loop = asyncLoop(send)
-
-proc stopSending*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
-  await connman.loop.cancelAndWait()
+  connman.quicContext.dtp.localAddress()
 
 proc closeUdp*(connman: ConnectionManager) {.async: (raises: []).} =
-  await connman.udp.closeWait()
+  await connman.quicContext.dtp.closeWait()
 
 proc stop*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
   if connman.closed.finished:
@@ -82,7 +52,6 @@ proc stop*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
   # lsquic engine. Maybe there's a callback that one can hook to and safely
   # stop the udp transport.
   await noCancel sleepAsync(300.milliseconds)
-  await noCancel connman.stopSending()
   await noCancel connman.closeUdp()
   connman.quicContext.stop()
 
