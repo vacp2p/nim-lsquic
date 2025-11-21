@@ -42,13 +42,10 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       streamCtx.abort()
     return
 
-  # keep going while:
-  # - there's pending read tasks
-  # - and stream still has data (or fin)
+  # keep going while there's pending read tasks and stream still has data (or fin)
   while streamCtx.toRead.len > 0:
     var task = streamCtx.toRead.peekFirst()
     if task.dataLen <= 0:
-      # trivial / weird case
       task.doneFut.complete(0)
       discard streamCtx.toRead.popFirst()
       continue
@@ -58,13 +55,10 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
     if n > 0:
       task.doneFut.complete(int(n))
       discard streamCtx.toRead.popFirst()
-      # note: if user wanted exact `dataLen`, they'd re-issue read for remainder
       continue
 
     if n == 0:
-      # fin → eof
       streamCtx.isEof = true
-      # complete all pending read futures with 0
       for t in streamCtx.toRead:
         if not t.doneFut.finished:
           t.doneFut.complete(0)
