@@ -110,6 +110,9 @@ proc readInto*(
     stream.isEof = true
     stream.closeWrite = true
     return 0
+  
+  if not closedFut.finished():
+    closedFut.cancelSoon()
 
   return await doneFut
 
@@ -130,6 +133,9 @@ proc write*(
     if raceFut == closedFut:
       stream.closeWrite = true
       raise newException(StreamError, "stream closed")
+    
+    if not closedFut.finished():
+      closedFut.cancelSoon()
 
   let closedFut = stream.closed.wait()
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
@@ -143,5 +149,8 @@ proc write*(
     if not doneFut.finished:
       doneFut.fail(newException(StreamError, "stream closed"))
     stream.closeWrite = true
+  
+  if not closedFut.finished():
+    closedFut.cancelSoon()
 
   await doneFut
