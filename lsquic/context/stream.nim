@@ -3,6 +3,10 @@ import chronos
 import ../[lsquic_ffi, stream]
 import ../helpers/sequninit
 import posix
+import std/deques
+
+const
+  writeTrimThreshold = 64 * 1024
 
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   debug "Stream closed"
@@ -24,7 +28,7 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     for t in streamCtx.toRead:
       if not t.doneFut.finished:
         t.doneFut.fail(e)
-    streamCtx.toRead.clear()
+    streamCtx.toRead = initDeque[ReadTask]()
 
   GC_unref(streamCtx)
 
@@ -62,7 +66,7 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       for t in streamCtx.toRead:
         if not t.doneFut.finished:
           t.doneFut.complete(0)
-      streamCtx.toRead.clear()
+      streamCtx.toRead = initDeque[ReadTask]()
       break
 
     if errno == EAGAIN:
@@ -71,7 +75,7 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
     for t in streamCtx.toRead:
       if not t.doneFut.finished:
         t.doneFut.fail(newException(StreamError, "could not read from stream"))
-    streamCtx.toRead.clear()
+    streamCtx.toRead = initDeque[ReadTask]()
     break
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
@@ -100,7 +104,13 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     let nAvail = (w.data.len - w.offset).csize_t
     let n: ssize_t = lsquic_stream_write(stream, p, nAvail)
     if n > 0:
+      streamCtx.queuedWriteBytes = max(streamCtx.queuedWriteBytes - n.int, 0)
       w.offset += n.int
+      if w.offset >= writeTrimThreshold and w.offset < w.data.len:
+        # Drop already-sent prefix to let GC reclaim memory on slow links.
+        w.data = w.data[w.offset ..< w.data.len]
+        w.offset = 0
+        # queuedWriteBytes already tracks remaining bytes after decrement above.
       if w.offset >= w.data.len:
         if not w.doneFut.finished:
           w.doneFut.complete()
