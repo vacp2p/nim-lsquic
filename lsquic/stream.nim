@@ -23,6 +23,7 @@ type Stream* = ref object
   closedByEngine*: bool
   closeWrite*: bool
   closed*: AsyncEvent # This is called when on_close callback is executed
+  closedWaiter*: Future[void].Raising([CancelledError])
   isEof*: bool # Received a FIN from remote
   toWrite*: Deque[WriteTask]
   queuedWriteBytes*: int
@@ -45,6 +46,12 @@ proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   )
   GC_ref(s) # Keep it pinned until stream_if.on_close is executed
   s
+
+proc closedWait*(stream: Stream): Future[void].Raising([CancelledError]) {.inline.} =
+  ## Lazily create a single waiter for the closed event to avoid per-call allocations.
+  if stream.closedWaiter.isNil:
+    stream.closedWaiter = stream.closed.wait()
+  stream.closedWaiter
 
 proc abortPendingWrites*(stream: Stream, reason: string = "") =
   for pendingWrite in stream.toWrite.mitems:
@@ -103,16 +110,13 @@ proc readInto*(
     stream.abort()
     raise newException(StreamError, "could not set wantread")
 
-  let closedFut = stream.closed.wait()
+  let closedFut = stream.closedWait()
   let raceFut = await race(closedFut, doneFut)
   if raceFut == closedFut:
     await doneFut.cancelAndWait()
     stream.isEof = true
     stream.closeWrite = true
     return 0
-  
-  if not closedFut.finished():
-    closedFut.cancelSoon()
 
   return await doneFut
 
@@ -122,22 +126,19 @@ proc write*(
   if stream.closeWrite or stream.closedByEngine:
     raise newException(StreamError, "stream closed")
 
+  let closedFut = stream.closedWait()
+
   # Apply simple backpressure: block when queued bytes exceed the cap.
   while stream.toWrite.len > 0 and
         stream.queuedWriteBytes + data.len > stream.maxQueuedBytes:
     let head = stream.toWrite.peekFirst()
     if head.doneFut.finished:
       break
-    let closedFut = stream.closed.wait()
     let raceFut = await race(closedFut, head.doneFut)
     if raceFut == closedFut:
       stream.closeWrite = true
       raise newException(StreamError, "stream closed")
-    
-    if not closedFut.finished():
-      closedFut.cancelSoon()
 
-  let closedFut = stream.closed.wait()
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
   stream.queuedWriteBytes += data.len
   stream.toWrite.addLast(WriteTask(data: data, doneFut: doneFut))
@@ -149,8 +150,5 @@ proc write*(
     if not doneFut.finished:
       doneFut.fail(newException(StreamError, "stream closed"))
     stream.closeWrite = true
-  
-  if not closedFut.finished():
-    closedFut.cancelSoon()
 
   await doneFut

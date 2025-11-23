@@ -19,9 +19,13 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   streamCtx.closedByEngine = true
 
   if not streamCtx.closeWrite:
-    streamCtx.isEof = true
-    streamCtx.closed.fire()
     streamCtx.abortPendingWrites("stream closed")
+
+  # Always signal closure so waiters are released, even if we already shut down
+  # the write side locally.
+  streamCtx.isEof = true
+  if not streamCtx.closed.isSet():
+    streamCtx.closed.fire()
 
   if streamCtx.toRead.len > 0:
     let e = newException(StreamError, "stream closed")

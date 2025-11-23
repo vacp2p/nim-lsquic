@@ -14,6 +14,7 @@ type
     ensureClosedFut: Future[void]
     isClosed*: bool
     closed: AsyncEvent
+    closedWaiter: Future[void].Raising([CancelledError]) 
     quicContext: QuicContext
     quicConn: QuicConnection
 
@@ -21,8 +22,14 @@ type
 
   OutgoingConnection = ref object of Connection
 
+proc closedWait*(conn: Connection): Future[void].Raising([CancelledError]) {.inline.} =
+  ## Reuse a single closed-event waiter to minimize allocations on hot paths.
+  if conn.closedWaiter.isNil:
+    conn.closedWaiter = conn.closed.wait()
+  conn.closedWaiter
+
 proc ensureClosed(connection: Connection) {.async: (raises: [CancelledError]).} =
-  await connection.closed.wait()
+  await connection.closedWait()
   debug "Closing connection"
   connection.isClosed = true
   if not connection.quicConn.closedLocal:
@@ -91,15 +98,12 @@ proc incomingStream*(
   if connection.isClosed:
     raise newException(ConnectionClosedError, "connection closed")
 
-  let closedFut = connection.closed.wait()
+  let closedFut = connection.closedWait()
   let incomingFut = connection.quicConn.incomingStream()
   let raceFut = await race(closedFut, incomingFut)
   if raceFut == closedFut:
     await incomingFut.cancelAndWait()
     raise newException(ConnectionClosedError, "connection closed")
-  
-  if not closedFut.finished():
-    closedFut.cancelSoon()
 
   let stream = await incomingFut
   stream.doProcess = proc() {.gcsafe, raises: [].} =
