@@ -47,6 +47,10 @@ proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   GC_ref(s) # Keep it pinned until stream_if.on_close is executed
   s
 
+proc setMaxQueuedBytes*(stream: Stream, maxBytes: int) =
+  ## Allow callers to tune per-stream backpressure to avoid piling up buffers.
+  stream.maxQueuedBytes = max(maxBytes, 0)
+
 proc closedWait*(stream: Stream): Future[void].Raising([CancelledError]) {.inline.} =
   ## Lazily create a single waiter for the closed event to avoid per-call allocations.
   if stream.closedWaiter.isNil:

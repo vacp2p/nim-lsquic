@@ -5,8 +5,6 @@ import ../helpers/sequninit
 import posix
 import std/deques
 
-const writeTrimThreshold = 64 * 1024
-
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   debug "Stream closed"
   if ctx.isNil:
@@ -98,6 +96,7 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   while streamCtx.toWrite.len > 0:
     var w = streamCtx.toWrite.popFirst()
     if w.offset >= w.data.len:
+      w.data.setLen(0)
       if not w.doneFut.finished:
         w.doneFut.complete()
       continue
@@ -108,12 +107,14 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     if n > 0:
       streamCtx.queuedWriteBytes = max(streamCtx.queuedWriteBytes - n.int, 0)
       w.offset += n.int
-      if w.offset >= writeTrimThreshold and w.offset < w.data.len:
-        # Drop already-sent prefix to let GC reclaim memory on slow links.
+      if w.offset > 0 and w.offset < w.data.len:
+        # Drop already-sent prefix immediately so we do not hold on to large
+        # buffers longer than necessary while LSQUIC owns its own copy.
         w.data = w.data[w.offset ..< w.data.len]
         w.offset = 0
         # queuedWriteBytes already tracks remaining bytes after decrement above.
       if w.offset >= w.data.len:
+        w.data.setLen(0)
         if not w.doneFut.finished:
           w.doneFut.complete()
       else:
