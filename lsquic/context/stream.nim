@@ -108,9 +108,10 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       streamCtx.queuedWriteBytes = max(streamCtx.queuedWriteBytes - n.int, 0)
       w.offset += n.int
       if w.offset > 0 and w.offset < w.data.len:
-        # Drop already-sent prefix immediately so we do not hold on to large
-        # buffers longer than necessary while LSQUIC owns its own copy.
-        w.data = w.data[w.offset ..< w.data.len]
+        # Compact in place to avoid allocating a new seq for the remaining tail.
+        let remaining = w.data.len - w.offset
+        moveMem(addr w.data[0], addr w.data[w.offset], remaining)
+        w.data.setLen(remaining)
         w.offset = 0
         # queuedWriteBytes already tracks remaining bytes after decrement above.
       if w.offset >= w.data.len:
