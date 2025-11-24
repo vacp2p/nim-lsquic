@@ -14,7 +14,8 @@ type
     ensureClosedFut: Future[void]
     isClosed*: bool
     closed: AsyncEvent
-    closedWaiter: Future[void].Raising([CancelledError]) 
+    # Reuse a single closed-event waiter to minimize allocations on hot paths.
+    closedWaiter: Future[void].Raising([CancelledError])
     quicContext: QuicContext
     quicConn: QuicConnection
 
@@ -22,14 +23,8 @@ type
 
   OutgoingConnection = ref object of Connection
 
-proc closedWait*(conn: Connection): Future[void].Raising([CancelledError]) {.inline.} =
-  ## Reuse a single closed-event waiter to minimize allocations on hot paths.
-  if conn.closedWaiter.isNil:
-    conn.closedWaiter = conn.closed.wait()
-  conn.closedWaiter
-
 proc ensureClosed(connection: Connection) {.async: (raises: [CancelledError]).} =
-  await connection.closedWait()
+  await connection.closedWaiter
   debug "Closing connection"
   connection.isClosed = true
   if not connection.quicConn.closedLocal:
@@ -54,8 +49,14 @@ proc abort*(conn: Connection) {.gcsafe, raises: [].} =
 proc newOutgoingConnection*(
     quicContext: QuicContext, local: TransportAddress, remote: TransportAddress
 ): OutgoingConnection =
+  let closed = newAsyncEvent()
+  let closedWaiter = closed.wait()
   let conn = OutgoingConnection(
-    quicContext: quicContext, local: local, remote: remote, closed: newAsyncEvent()
+    quicContext: quicContext,
+    local: local,
+    remote: remote,
+    closed: closed,
+    closedWaiter: closedWaiter,
   )
   conn.ensureClosedFut = conn.ensureClosed()
   conn
@@ -63,10 +64,13 @@ proc newOutgoingConnection*(
 proc newIncomingConnection*(
     tlsConfig: TLSConfig, quicContext: QuicContext, quicConn: QuicConnection
 ): Connection =
+  let closed = newAsyncEvent()
+  let closedWaiter = closed.wait()
   let conn = IncomingConnection(
     quicContext: quicContext,
     quicConn: quicConn,
-    closed: newAsyncEvent(),
+    closed: closed,
+    closedWaiter: closedWaiter,
     local: quicConn.local,
     remote: quicConn.remote,
   )
@@ -98,10 +102,9 @@ proc incomingStream*(
   if connection.isClosed:
     raise newException(ConnectionClosedError, "connection closed")
 
-  let closedFut = connection.closedWait()
   let incomingFut = connection.quicConn.incomingStream()
-  let raceFut = await race(closedFut, incomingFut)
-  if raceFut == closedFut:
+  let raceFut = await race(connection.closedWaiter, incomingFut)
+  if raceFut == connection.closedWaiter:
     await incomingFut.cancelAndWait()
     raise newException(ConnectionClosedError, "connection closed")
 

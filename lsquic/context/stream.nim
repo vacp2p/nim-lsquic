@@ -1,9 +1,8 @@
+import std/[deques, posix]
 import chronicles
 import chronos
 import ../[lsquic_ffi, stream]
 import ../helpers/sequninit
-import posix
-import std/deques
 
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   debug "Stream closed"
@@ -18,9 +17,10 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   if not streamCtx.closeWrite:
     streamCtx.abortPendingWrites("stream closed")
 
+  streamCtx.isEof = true
+
   # Always signal closure so waiters are released, even if we already shut down
   # the write side locally.
-  streamCtx.isEof = true
   if not streamCtx.closed.isSet():
     streamCtx.closed.fire()
 
@@ -29,7 +29,7 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     for t in streamCtx.toRead:
       if not t.doneFut.finished:
         t.doneFut.fail(e)
-    streamCtx.toRead = initDeque[ReadTask]()
+    streamCtx.toRead.clear()
 
   GC_unref(streamCtx)
 
@@ -55,7 +55,7 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       discard streamCtx.toRead.popFirst()
       continue
 
-    let n = lsquic_stream_read(stream, task.data, csize_t(task.dataLen))
+    let n = lsquic_stream_read(stream, task.data, task.dataLen.csize_t)
 
     if n > 0:
       task.doneFut.complete(int(n))
@@ -67,16 +67,16 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       for t in streamCtx.toRead:
         if not t.doneFut.finished:
           t.doneFut.complete(0)
-      streamCtx.toRead = initDeque[ReadTask]()
+      streamCtx.toRead.clear()
       break
 
-    if errno == EAGAIN:
+    if errno == EAGAIN or errno == EWOULDBLOCK:
       break
 
     for t in streamCtx.toRead:
       if not t.doneFut.finished:
         t.doneFut.fail(newException(StreamError, "could not read from stream"))
-    streamCtx.toRead = initDeque[ReadTask]()
+    streamCtx.toRead.clear()
     break
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
@@ -96,7 +96,6 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   while streamCtx.toWrite.len > 0:
     var w = streamCtx.toWrite.popFirst()
     if w.offset >= w.data.len:
-      w.data.setLen(0)
       if not w.doneFut.finished:
         w.doneFut.complete()
       continue
@@ -115,7 +114,6 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
         w.offset = 0
         # queuedWriteBytes already tracks remaining bytes after decrement above.
       if w.offset >= w.data.len:
-        w.data.setLen(0)
         if not w.doneFut.finished:
           w.doneFut.complete()
       else:
