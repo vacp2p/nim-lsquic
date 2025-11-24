@@ -5,8 +5,7 @@ import ../helpers/sequninit
 import posix
 import std/deques
 
-const
-  writeTrimThreshold = 64 * 1024
+const writeTrimThreshold = 64 * 1024
 
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   debug "Stream closed"
@@ -97,11 +96,10 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   # always drain from head of queue to preserve order
   while streamCtx.toWrite.len > 0:
-    var w = streamCtx.toWrite.peekFirst()
+    var w = streamCtx.toWrite.popFirst()
     if w.offset >= w.data.len:
       if not w.doneFut.finished:
         w.doneFut.complete()
-      discard streamCtx.toWrite.popFirst()
       continue
 
     let p = w.data[w.offset].addr
@@ -118,7 +116,8 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       if w.offset >= w.data.len:
         if not w.doneFut.finished:
           w.doneFut.complete()
-        discard streamCtx.toWrite.popFirst()
+      else:
+        streamCtx.toWrite.addFirst(w)
     elif n == 0:
       # Nothing to write
       break

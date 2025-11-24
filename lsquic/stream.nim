@@ -8,7 +8,7 @@ const
 
 type StreamError* = object of IOError
 
-type WriteTask = ref object
+type WriteTask = object
   data*: seq[byte]
   offset*: int
   doneFut*: Future[void].Raising([CancelledError, StreamError])
