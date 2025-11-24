@@ -104,7 +104,6 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     let nAvail = (w.data.len - w.offset).csize_t
     let n: ssize_t = lsquic_stream_write(stream, p, nAvail)
     if n > 0:
-      streamCtx.queuedWriteBytes = max(streamCtx.queuedWriteBytes - n.int, 0)
       w.offset += n.int
       if w.offset > 0 and w.offset < w.data.len:
         # Compact in place to avoid allocating a new seq for the remaining tail.

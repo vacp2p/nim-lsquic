@@ -3,11 +3,6 @@ import chronos
 import chronicles
 import ./lsquic_ffi
 
-## Defies the maximum amount of bytes allowed to be kept in the write buffer.
-## Once limit is reached, further calls to `write` will wait until the buffer 
-## frees itself enough space to push the new payload
-const defaultMaxQueuedWriteBytes = 4 * 1024 * 1024
-
 type StreamError* = object of IOError
 
 type WriteTask = object
@@ -31,20 +26,13 @@ type Stream* = ref object
   closedWaiter*: Future[void].Raising([CancelledError])
   isEof*: bool # Received a FIN from remote
   toWrite*: Deque[WriteTask]
-  queuedWriteBytes*: int
-  maxQueuedWriteBytes*: int
   toRead*: Deque[ReadTask]
   doProcess*: proc() {.gcsafe, raises: [].}
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let closed = newAsyncEvent()
   let closedWaiter = closed.wait()
-  let s = Stream(
-    quicStream: quicStream,
-    closed: closed,
-    closedWaiter: closedWaiter,
-    maxQueuedWriteBytes: defaultMaxQueuedWriteBytes,
-  )
+  let s = Stream(quicStream: quicStream, closed: closed, closedWaiter: closedWaiter)
   GC_ref(s) # Keep it pinned until stream_if.on_close is executed
   s
 
@@ -52,7 +40,6 @@ proc abortPendingWrites*(stream: Stream, reason: string = "") =
   for pendingWrite in stream.toWrite.mitems:
     if not pendingWrite.doneFut.finished:
       pendingWrite.doneFut.fail(newException(StreamError, reason))
-  stream.queuedWriteBytes = 0
   stream.toWrite.clear()
 
 proc abort*(stream: Stream) =
@@ -126,8 +113,7 @@ proc write*(
     raise newException(StreamError, "stream closed")
 
   # Apply simple backpressure: block when queued bytes exceed the cap.
-  while stream.toWrite.len > 0 and
-      stream.queuedWriteBytes + data.len > stream.maxQueuedWriteBytes:
+  while stream.toWrite.len > 0:
     let head = stream.toWrite.peekFirst()
     if head.doneFut.finished:
       break
@@ -137,7 +123,6 @@ proc write*(
       raise newException(StreamError, "stream closed")
 
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
-  stream.queuedWriteBytes += data.len
   stream.toWrite.addLast(WriteTask(data: data, doneFut: doneFut))
   discard lsquic_stream_wantwrite(stream.quicStream, 1)
   stream.doProcess()
