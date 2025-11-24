@@ -1,30 +1,38 @@
+import std/deques
 import chronos
 import chronicles
 import ./lsquic_ffi
 
 type StreamError* = object of IOError
 
-type WriteTask = ref object
+type WriteTask = object
   data*: seq[byte]
   offset*: int
   doneFut*: Future[void].Raising([CancelledError, StreamError])
+
+type ReadTask* = object
+  data*: ptr byte
+  dataLen*: int
+  doneFut*: Future[int].Raising([CancelledError, StreamError])
 
 type Stream* = ref object
   quicStream*: ptr lsquic_stream_t
   closedByEngine*: bool
   closeWrite*: bool
-  incoming*: AsyncQueue[seq[byte]]
-  closed*: AsyncEvent # This is called when on_close callback is executed
+  # This is called when on_close callback is executed
+  closed*: AsyncEvent
+  # Reuse a single closed-event waiter to minimize allocations on hot paths.
+  # (no per call allocation)
+  closedWaiter*: Future[void].Raising([CancelledError])
   isEof*: bool # Received a FIN from remote
-  toWrite*: seq[WriteTask]
+  toWrite*: Deque[WriteTask]
+  toRead*: Deque[ReadTask]
   doProcess*: proc() {.gcsafe, raises: [].}
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
-  let s = Stream(
-    quicStream: quicStream,
-    incoming: newAsyncQueue[seq[byte]](),
-    closed: newAsyncEvent(),
-  )
+  let closed = newAsyncEvent()
+  let closedWaiter = closed.wait()
+  let s = Stream(quicStream: quicStream, closed: closed, closedWaiter: closedWaiter)
   GC_ref(s) # Keep it pinned until stream_if.on_close is executed
   s
 
@@ -32,7 +40,7 @@ proc abortPendingWrites*(stream: Stream, reason: string = "") =
   for pendingWrite in stream.toWrite.mitems:
     if not pendingWrite.doneFut.finished:
       pendingWrite.doneFut.fail(newException(StreamError, reason))
-  stream.toWrite.setLen(0)
+  stream.toWrite.clear()
 
 proc abort*(stream: Stream) =
   if stream.closeWrite and stream.isEof:
@@ -68,36 +76,35 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
     stream.abortPendingWrites("steam closed")
     stream.closeWrite = true
 
-proc read*(
-    stream: Stream
-): Future[seq[byte]] {.async: (raises: [CancelledError, StreamError]).} =
+proc readInto*(
+    stream: Stream, dst: ptr byte, dstLen: int
+): Future[int] {.async: (raises: [CancelledError, StreamError]).} =
+  if dstLen == 0 or dst.isNil:
+    raiseAssert "dst cannot be nil"
+
   if stream.isEof or stream.closedByEngine:
-    return @[]
+    return 0
+
+  let doneFut = Future[int].Raising([CancelledError, StreamError]).init()
+  stream.toRead.addLast(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
 
   if lsquic_stream_wantread(stream.quicStream, 1) == -1:
     stream.abort()
     raise newException(StreamError, "could not set wantread")
 
-  let incomingFut = stream.incoming.get()
-  let closedFut = stream.closed.wait()
-  let raceFut = await race(closedFut, incomingFut)
-  if raceFut == closedFut:
-    await incomingFut.cancelAndWait()
+  let raceFut = await race(stream.closedWaiter, doneFut)
+  if raceFut == stream.closedWaiter:
+    await doneFut.cancelAndWait()
     stream.isEof = true
     stream.closeWrite = true
-    return @[]
+    return 0
 
-  let incoming = await incomingFut
-  if incoming.len == 0:
-    if stream.closeWrite and not stream.closedByEngine:
-      # We were already closed for write. Close the stream completely
-      if lsquic_stream_close(stream.quicStream) != 0:
-        stream.abort()
-        raise newException(StreamError, "could not close the stream")
-      stream.doProcess()
-    stream.isEof = true
+  return await doneFut
 
-  return incoming
+template readInto*(stream: Stream, dst: var openArray[byte]): untyped =
+  ## Convenience helper that forwards an openArray/seq to the pointer-based API.
+  (if dst.len == 0: stream.readInto(nil, 0)
+  else: stream.readInto(dst[0].addr, dst.len))
 
 proc write*(
     stream: Stream, data: seq[byte]
@@ -105,14 +112,23 @@ proc write*(
   if stream.closeWrite or stream.closedByEngine:
     raise newException(StreamError, "stream closed")
 
-  let closedFut = stream.closed.wait()
+  # Apply simple backpressure: block when queued bytes exceed the cap.
+  while stream.toWrite.len > 0:
+    let head = stream.toWrite.peekFirst()
+    if head.doneFut.finished:
+      break
+    let raceFut = await race(stream.closedWaiter, head.doneFut)
+    if raceFut == stream.closedWaiter:
+      stream.closeWrite = true
+      raise newException(StreamError, "stream closed")
+
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
-  stream.toWrite.add(WriteTask(data: data, doneFut: doneFut))
+  stream.toWrite.addLast(WriteTask(data: data, doneFut: doneFut))
   discard lsquic_stream_wantwrite(stream.quicStream, 1)
   stream.doProcess()
 
-  let raceFut = await race(closedFut, doneFut)
-  if raceFut == closedFut:
+  let raceFut = await race(stream.closedWaiter, doneFut)
+  if raceFut == stream.closedWaiter:
     if not doneFut.finished:
       doneFut.fail(newException(StreamError, "stream closed"))
     stream.closeWrite = true
