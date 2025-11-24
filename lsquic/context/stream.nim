@@ -120,6 +120,7 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
         streamCtx.toWrite.addFirst(w)
     elif n == 0:
       # Nothing to write
+      streamCtx.toWrite.addFirst(w)
       break
     else:
       streamCtx.abortPendingWrites("write failed")
