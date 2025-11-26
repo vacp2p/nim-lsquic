@@ -74,13 +74,13 @@ suite "connection":
         echo "Received stream in server"
 
         var buf = newSeq[byte](16)
-        let n1 = await stream.readInto(buf)
+        let n1 = await stream.readOnce(buf)
         let chunk1 = buf[0 ..< n1]
         echo "First chunk: ", chunk1
-        let n2 = await stream.readInto(buf)
+        let n2 = await stream.readOnce(buf)
         let chunk2 = buf[0 ..< n2]
         echo "Second chunk: ", chunk2
-        let n3 = await stream.readInto(buf)
+        let n3 = await stream.readOnce(buf)
         let chunk3 = buf[0 ..< n3]
         echo "EOF chunk: ", chunk3
 

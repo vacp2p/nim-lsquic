@@ -103,8 +103,8 @@ proc readOnce*(
 
 template readOnce*(stream: Stream, dst: var openArray[byte]): untyped =
   ## Convenience helper that forwards an openArray/seq to the pointer-based API.
-  (if dst.len == 0: stream.readInto(nil, 0)
-  else: stream.readInto(dst[0].addr, dst.len))
+  (if dst.len == 0: stream.readOnce(nil, 0)
+  else: stream.readOnce(dst[0].addr, dst.len))
 
 proc write*(
     stream: Stream, data: seq[byte]
