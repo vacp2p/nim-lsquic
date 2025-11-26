@@ -19,6 +19,7 @@ type Stream* = ref object
   quicStream*: ptr lsquic_stream_t
   closedByEngine*: bool
   closeWrite*: bool
+  wantWrite*: bool
   # This is called when on_close callback is executed
   closed*: AsyncEvent
   # Reuse a single closed-event waiter to minimize allocations on hot paths.
@@ -103,8 +104,8 @@ proc readOnce*(
 
 template readOnce*(stream: Stream, dst: var openArray[byte]): untyped =
   ## Convenience helper that forwards an openArray/seq to the pointer-based API.
-  (if dst.len == 0: stream.readInto(nil, 0)
-  else: stream.readInto(dst[0].addr, dst.len))
+  (if dst.len == 0: stream.readOnce(nil, 0)
+  else: stream.readOnce(dst[0].addr, dst.len))
 
 proc write*(
     stream: Stream, data: seq[byte]
@@ -124,7 +125,9 @@ proc write*(
 
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
   stream.toWrite.addLast(WriteTask(data: data, doneFut: doneFut))
-  discard lsquic_stream_wantwrite(stream.quicStream, 1)
+  if not stream.wantWrite:
+    discard lsquic_stream_wantwrite(stream.quicStream, 1)
+    stream.wantWrite = true
   stream.doProcess()
 
   let raceFut = await race(stream.closedWaiter, doneFut)

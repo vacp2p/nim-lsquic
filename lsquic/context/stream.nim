@@ -88,9 +88,12 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   let streamCtx = cast[Stream](ctx)
   if streamCtx.toWrite.len == 0:
-    if lsquic_stream_wantwrite(stream, 0) == -1:
-      error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
-      streamCtx.abort()
+    if streamCtx.wantWrite:
+      if lsquic_stream_wantwrite(stream, 0) == -1:
+        error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
+        streamCtx.abort()
+      else:
+        streamCtx.wantWrite = false
 
   # always drain from head of queue to preserve order
   while streamCtx.toWrite.len > 0:
@@ -125,14 +128,13 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       streamCtx.abortPendingWrites("write failed")
       return
 
-  if lsquic_stream_flush(stream) != 0:
-    streamCtx.abort()
-    return
-
   if streamCtx.toWrite.len == 0:
-    if lsquic_stream_wantwrite(stream, 0) == -1:
-      error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
-      streamCtx.abort()
+    if streamCtx.wantWrite:
+      if lsquic_stream_wantwrite(stream, 0) == -1:
+        error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
+        streamCtx.abort()
+      else:
+        streamCtx.wantWrite = false
 
   streamCtx.doProcess()
 
