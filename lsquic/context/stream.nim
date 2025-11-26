@@ -4,6 +4,8 @@ import chronos
 import ../[lsquic_ffi, stream]
 import ../helpers/sequninit
 
+const MaxWritePageLength = 32 * 1024
+
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   debug "Stream closed"
   if ctx.isNil:
@@ -105,7 +107,7 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     let n: ssize_t = lsquic_stream_write(stream, p, nAvail)
     if n > 0:
       w.offset += n.int
-      if w.offset > 0 and w.offset < w.data.len:
+      if w.offset > MaxWritePageLength and w.offset < w.data.len:
         # Compact in place to avoid allocating a new seq for the remaining tail.
         let remaining = w.data.len - w.offset
         moveMem(addr w.data[0], addr w.data[w.offset], remaining)
