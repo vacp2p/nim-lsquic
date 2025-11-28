@@ -2,7 +2,7 @@ import results
 import chronicles
 import chronos
 import chronos/osdefs
-import ./[context, io, stream]
+import ./[context, io, stream, udp]
 import ../[lsquic_ffi, tlsconfig, timeout, stream, certificates]
 import ../helpers/[sequninit, transportaddr]
 
@@ -51,12 +51,12 @@ proc new*(
     T: typedesc[ServerContext],
     tlsConfig: TLSConfig,
     incoming: AsyncQueue[QuicConnection],
-    dtp: DatagramTransport,
+    udp: UDP,
 ): Result[T, string] =
   var ctx = ServerContext()
   ctx.tlsConfig = tlsConfig
   ctx.incoming = incoming
-  ctx.dtp = dtp
+  ctx.udp = udp
   ctx.setupSSLContext()
 
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)

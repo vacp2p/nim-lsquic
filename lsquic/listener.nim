@@ -2,8 +2,9 @@ import chronicles
 import chronos
 import chronos/osdefs
 import results
-import ./[connection, tlsconfig, datagram, connectionmanager]
-import ./context/[server, context, io]
+import ./[connection, tlsconfig, connectionmanager]
+import ./context/[server, context, io, udp]
+import net
 
 export stop
 
@@ -12,22 +13,25 @@ type Listener* = ref object of ConnectionManager
 
 proc newListener*(
     tlsConfig: TLSConfig, address: TransportAddress
-): Result[Listener, string] =
+): Result[Listener, string] {.raises:[].} =
   let incoming = newAsyncQueue[QuicConnection]()
   var quicContext: ServerContext
   let listener = Listener(incoming: incoming)
 
   proc onReceive(
-      udp: DatagramTransport, remote: TransportAddress
-  ) {.async: (raises: []).} =
-    try:
-      let datagram = Datagram(data: udp.getMessage())
-      listener.quicContext.receive(datagram, udp.localAddress(), remote)
-    except TransportError as e:
-      error "Unexpect transport error", errorMsg = e.msg
+      remote: TransportAddress, data: sink seq[byte]
+  ) {.gcsafe, async: (raises: []).} =
+    listener.quicContext.receive(remote, data)
 
-  let dtp = newDatagramTransport(onReceive, local = address)
-  quicContext = ?ServerContext.new(tlsConfig, incoming, dtp)
+  let udp =
+    try:
+      let sock = newSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+      UDP(sock: sock, onReceive: onReceive, local: address)
+    except OSError as e:
+      return err(e.msg)
+
+  udp.start()
+  quicContext = ?ServerContext.new(tlsConfig, incoming, udp)
 
   listener.init(tlsConfig, quicContext)
   ok(listener)
@@ -57,4 +61,4 @@ proc accept*(
 proc localAddress*(
     listener: Listener
 ): TransportAddress {.raises: [TransportOsError].} =
-  listener.quicContext.dtp.localAddress()
+  listener.quicContext.udp.localAddress()
