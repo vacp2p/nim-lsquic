@@ -76,7 +76,7 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
     stream.abortPendingWrites("steam closed")
     stream.closeWrite = true
 
-proc readInto*(
+proc readOnce*(
     stream: Stream, dst: ptr byte, dstLen: int
 ): Future[int] {.async: (raises: [CancelledError, StreamError]).} =
   if dstLen == 0 or dst.isNil:
@@ -101,10 +101,10 @@ proc readInto*(
 
   return await doneFut
 
-template readInto*(stream: Stream, dst: var openArray[byte]): untyped =
+template readOnce*(stream: Stream, dst: var openArray[byte]): untyped =
   ## Convenience helper that forwards an openArray/seq to the pointer-based API.
-  (if dst.len == 0: stream.readInto(nil, 0)
-  else: stream.readInto(dst[0].addr, dst.len))
+  (if dst.len == 0: stream.readOnce(nil, 0)
+  else: stream.readOnce(dst[0].addr, dst.len))
 
 proc write*(
     stream: Stream, data: seq[byte]

@@ -51,7 +51,7 @@ proc runPerf(): Future[Duration] {.async.} =
     var sizeBuf = newSeq[byte](8)
     var sizeRead = 0
     while sizeRead < sizeBuf.len:
-      let n = await stream.readInto(sizeBuf[sizeRead].addr, sizeBuf.len - sizeRead)
+      let n = await stream.readOnce(sizeBuf[sizeRead].addr, sizeBuf.len - sizeRead)
       if n == 0:
         break
       sizeRead += n
@@ -62,7 +62,7 @@ proc runPerf(): Future[Duration] {.async.} =
     var totalBytesRead = 0
     var readBuf = newSeq[byte](chunkSize)
     while true:
-      let n = await stream.readInto(readBuf[0].addr, readBuf.len)
+      let n = await stream.readOnce(readBuf[0].addr, readBuf.len)
       if n == 0:
         break
       totalBytesRead += n
@@ -114,7 +114,7 @@ proc runPerf(): Future[Duration] {.async.} =
   # Reuse buffer for client-side download
   var downloadBuf = newSeq[byte](chunkSize)
   while totalDownloaded < downloadSize:
-    let n = await clientStream.readInto(downloadBuf[0].addr, downloadBuf.len)
+    let n = await clientStream.readOnce(downloadBuf[0].addr, downloadBuf.len)
     if n == 0:
       break
     totalDownloaded += n
