@@ -40,6 +40,7 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
     return
 
   let streamCtx = cast[Stream](ctx)
+  
 
   # keep going while there's pending read tasks and stream still has data (or fin)
   while streamCtx.toRead.len > 0:
@@ -49,7 +50,10 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       continue
 
     let n = lsquic_stream_read(stream, task.data, task.dataLen.csize_t)
-    if n < 0 and (errno == EAGAIN or errno == EWOULDBLOCK):
+
+    # TODO: handle errs diff from EWOULDBLOCK
+    # TODO: duplication
+    if n < 0 and errno == EWOULDBLOCK:
       streamCtx.toRead.addFirst(task)
       return
 
