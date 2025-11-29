@@ -1,4 +1,4 @@
-import std/deques
+import std/[deques, posix]
 import chronos
 import chronicles
 import ./lsquic_ffi
@@ -86,19 +86,37 @@ proc readOnce*(
   if stream.isEof or stream.closedByEngine:
     return 0
 
-  let doneFut = Future[int].Raising([CancelledError, StreamError]).init()
-  stream.toRead.addLast(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
+  let n = lsquic_stream_read(stream.quicStream, dst, dstLen.csize_t)
 
-  if lsquic_stream_wantread(stream.quicStream, 1) == -1:
-    stream.abort()
-    raise newException(StreamError, "could not set wantread")
-
-  let raceFut = await race(stream.closedWaiter, doneFut)
-  if raceFut == stream.closedWaiter:
-    await doneFut.cancelAndWait()
+  if n == 0:
     stream.isEof = true
-    stream.closeWrite = true
+    for t in stream.toRead:
+      if not t.doneFut.finished:
+        t.doneFut.complete(0)
+    stream.toRead.clear()
     return 0
+
+  if n > 0:
+    return n
+
+  let doneFut = Future[int].Raising([CancelledError, StreamError]).init()
+
+  # TODO: handle errs diff from EWOULDBLOCK
+  # TODO: duplication
+
+  if n < 0 and errno == EWOULDBLOCK:
+    stream.toRead.addLast(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
+
+    if lsquic_stream_wantread(stream.quicStream, 1) == -1:
+      stream.abort()
+      raise newException(StreamError, "could not set wantread")
+
+    let raceFut = await race(stream.closedWaiter, doneFut)
+    if raceFut == stream.closedWaiter:
+      await doneFut.cancelAndWait()
+      stream.isEof = true
+      stream.closeWrite = true
+      return 0
 
   return await doneFut
 
