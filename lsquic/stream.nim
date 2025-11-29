@@ -25,21 +25,23 @@ type Stream* = ref object
   # (no per call allocation)
   closedWaiter*: Future[void].Raising([CancelledError])
   isEof*: bool # Received a FIN from remote
-  lock: AsyncLock
-  toWrite*: WriteTask
+  toWrite*: Deque[WriteTask]
   toRead*: Deque[ReadTask]
   doProcess*: proc() {.gcsafe, raises: [].}
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let closed = newAsyncEvent()
   let closedWaiter = closed.wait()
-  let s = Stream(quicStream: quicStream, closed: closed, closedWaiter: closedWaiter, lock: newAsyncLock())
+  let s = Stream(quicStream: quicStream, closed: closed, closedWaiter: closedWaiter)
   GC_ref(s) # Keep it pinned until stream_if.on_close is executed
   s
 
 proc abortPendingWrites*(stream: Stream, reason: string = "") =
-  if not stream.toWrite.doneFut.finished:
-    stream.toWrite.doneFut.fail(newException(StreamError, reason))
+  for pendingWrite in stream.toWrite.mitems:
+    if not pendingWrite.doneFut.finished:
+      pendingWrite.doneFut.fail(newException(StreamError, reason))
+
+  stream.toWrite.clear()
 
 proc abort*(stream: Stream) =
   if stream.closeWrite and stream.isEof:
@@ -111,15 +113,8 @@ proc write*(
   if stream.closeWrite or stream.closedByEngine:
     raise newException(StreamError, "stream closed")
 
-  await stream.lock.acquire()
-  defer:
-    try:
-      stream.lock.release()
-    except AsyncLockError:
-      discard # should not happen - lock acquired directly above
-
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
-  stream.toWrite = WriteTask(data: data, doneFut: doneFut)
+  stream.toWrite.addLast(WriteTask(data: data, doneFut: doneFut))
   discard lsquic_stream_wantwrite(stream.quicStream, 1)
   stream.doProcess()
 

@@ -6,8 +6,7 @@
 {.localPassC: "-ffunction-sections -fdata-sections -fno-exceptions -fno-rtti".}
 {.passc: "-I./libs/boringssl/include".}
 
-when not defined(release):
-  {.localPassC: "-DNDEBUG".}
+{.localPassC: "-DNDEBUG".}
 
 # link stdc++/pthread as needed
 when defined(macosx):

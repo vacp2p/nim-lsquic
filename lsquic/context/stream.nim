@@ -4,8 +4,6 @@ import chronos
 import ../[lsquic_ffi, stream]
 import ../helpers/sequninit
 
-const MaxWritePageLength = 32 * 1024
-
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   debug "Stream closed"
   if ctx.isNil:
@@ -42,44 +40,36 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
     return
 
   let streamCtx = cast[Stream](ctx)
-  if streamCtx.toRead.len == 0:
-    # Nothing waiting to read yet. Stop callbacks until a reader shows up.
-    if lsquic_stream_wantread(stream, 0) == -1:
-      error "could not set stream wantread", streamId = lsquic_stream_id(stream)
-      streamCtx.abort()
-    return
 
   # keep going while there's pending read tasks and stream still has data (or fin)
   while streamCtx.toRead.len > 0:
-    var task = streamCtx.toRead.peekFirst()
+    var task = streamCtx.toRead.popFirst()
     if task.dataLen <= 0:
       task.doneFut.complete(0)
-      discard streamCtx.toRead.popFirst()
       continue
 
     let n = lsquic_stream_read(stream, task.data, task.dataLen.csize_t)
+    if n < 0 and (errno == EAGAIN or errno == EWOULDBLOCK):
+      streamCtx.toRead.addFirst(task)
+      return
 
     if n > 0:
       task.doneFut.complete(int(n))
-      discard streamCtx.toRead.popFirst()
       continue
 
     if n == 0:
       streamCtx.isEof = true
+      streamCtx.toRead.addFirst(task)
       for t in streamCtx.toRead:
         if not t.doneFut.finished:
           t.doneFut.complete(0)
       streamCtx.toRead.clear()
       break
 
-    if errno == EAGAIN or errno == EWOULDBLOCK:
-      break
-
-    for t in streamCtx.toRead:
-      if not t.doneFut.finished:
-        t.doneFut.fail(newException(StreamError, "could not read from stream"))
-    streamCtx.toRead.clear()
-    break
+  # Nothing waiting to read yet. Stop callbacks until a reader shows up.
+  if lsquic_stream_wantread(stream, 0) == -1:
+    error "could not set stream wantread", streamId = lsquic_stream_id(stream)
+    streamCtx.abort()
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "onWrite"
@@ -89,51 +79,34 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     return
 
   let streamCtx = cast[Stream](ctx)
-  if streamCtx.toWrite.data.len == 0:
-    if lsquic_stream_wantwrite(stream, 0) == -1:
-      error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
-      streamCtx.abort()
-    return
 
-  if streamCtx.toWrite.offset >= streamCtx.toWrite.data.len:
-    streamCtx.toWrite.data.setLen(0)
-    if not streamCtx.toWrite.doneFut.finished:
-      streamCtx.toWrite.doneFut.complete()
-    return
-
-  let p = streamCtx.toWrite.data[streamCtx.toWrite.offset].addr
-  let nAvail = (streamCtx.toWrite.data.len - streamCtx.toWrite.offset).csize_t
-  let n: ssize_t = lsquic_stream_write(stream, p, nAvail)
-  if n > 0:
-    streamCtx.toWrite.offset += n.int
-    if streamCtx.toWrite.offset > MaxWritePageLength and streamCtx.toWrite.offset < streamCtx.toWrite.data.len:
-      # Compact in place to avoid allocating a new seq for the remaining tail.
-      let remaining = streamCtx.toWrite.data.len - streamCtx.toWrite.offset
-      moveMem(addr streamCtx.toWrite.data[0], addr streamCtx.toWrite.data[streamCtx.toWrite.offset], remaining)
-      streamCtx.toWrite.data.setLen(remaining)
-      streamCtx.toWrite.offset = 0
-      # queuedWriteBytes already tracks remaining bytes after decrement above.
-    if streamCtx.toWrite.offset >= streamCtx.toWrite.data.len:
-      if not streamCtx.toWrite.doneFut.finished:
-        streamCtx.toWrite.doneFut.complete()
-
-  elif n == 0:
-    # Nothing to write
-    return
-
-  else:
-    streamCtx.abortPendingWrites("write failed")
-    return
+  # always drain from head of queue to preserve order
+  while streamCtx.toWrite.len > 0:
+    var w = streamCtx.toWrite.popFirst()
+    let p = w.data[w.offset].addr
+    let nAvail = (w.data.len - w.offset).csize_t
+    let n: ssize_t = lsquic_stream_write(stream, p, nAvail)
+    if n > 0:
+      w.offset += n.int
+      if w.offset >= w.data.len:
+        if not w.doneFut.finished:
+          w.doneFut.complete()
+      else:
+        streamCtx.toWrite.addFirst(w)
+    elif n == 0:
+      # Nothing to write
+      streamCtx.toWrite.addFirst(w)
+      break
+    else:
+      streamCtx.toWrite.addFirst(w)
+      streamCtx.abortPendingWrites("write failed")
+      break
 
   if lsquic_stream_flush(stream) != 0:
     streamCtx.abort()
     return
 
-  if streamCtx.toWrite.data.len == 0:
+  if streamCtx.toWrite.len == 0:
     if lsquic_stream_wantwrite(stream, 0) == -1:
       error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
       streamCtx.abort()
-
-  streamCtx.doProcess()
-
-  return
