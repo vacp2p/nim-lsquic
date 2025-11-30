@@ -68,9 +68,13 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   let streamCtx = cast[Stream](ctx)
 
-  # always drain from head of queue to preserve order
-  while streamCtx.toWrite.len > 0:
-    var w = streamCtx.toWrite.popFirst()
+  var w = streamCtx.toWrite.valueOr:
+    if lsquic_stream_wantwrite(stream, 0) == -1:
+      error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
+      streamCtx.abort()
+    return
+
+  while not w.doneFut.finished:
     let p = w.data[w.offset].addr
     let nAvail = (w.data.len - w.offset).csize_t
     let n: ssize_t = lsquic_stream_write(stream, p, nAvail)
@@ -79,14 +83,10 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       if w.offset >= w.data.len:
         if not w.doneFut.finished:
           w.doneFut.complete()
-      else:
-        streamCtx.toWrite.addFirst(w)
     elif n == 0:
-      # Nothing to write
-      streamCtx.toWrite.addFirst(w)
+      # Nothing to write, try later
       break
     else:
-      streamCtx.toWrite.addFirst(w)
       streamCtx.abortPendingWrites("write failed")
       break
 
@@ -94,7 +94,13 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     streamCtx.abort()
     return
 
-  if streamCtx.toWrite.len == 0:
-    if lsquic_stream_wantwrite(stream, 0) == -1:
-      error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
-      streamCtx.abort()
+  if not w.doneFut.finished:
+    streamCtx.toWrite = Opt.some(w)
+    return
+
+  streamCtx.toWrite = Opt.none(WriteTask)
+
+  if lsquic_stream_wantwrite(stream, 0) == -1:
+    echo "NO LONGER WANT TO WRITE"
+    error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
+    streamCtx.abort()
