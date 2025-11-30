@@ -159,8 +159,7 @@ proc write*(
   let p = data[0].addr
   let n = lsquic_stream_write(stream.quicStream, p, data.len.csize_t)
   if n >= data.len:
-    if lsquic_stream_flush(stream.quicStream) != 0:
-      stream.abort()
+    stream.doProcess()
     return
   elif n < 0:
     raise newException(StreamError, "could not write")

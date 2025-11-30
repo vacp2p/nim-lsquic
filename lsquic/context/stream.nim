@@ -91,9 +91,7 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       streamCtx.abortPendingWrites("write failed")
       break
 
-  if lsquic_stream_flush(stream) != 0:
-    streamCtx.abort()
-    return
+  streamCtx.doProcess()
 
   if not w.doneFut.finished:
     streamCtx.toWrite = Opt.some(w)
