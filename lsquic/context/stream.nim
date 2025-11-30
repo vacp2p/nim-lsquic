@@ -74,13 +74,14 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       streamCtx.abort()
     return
 
+  let dataArr = cast[ptr UncheckedArray[byte]](w.data)
   while not w.doneFut.finished:
-    let p = w.data[w.offset].addr
-    let nAvail = (w.data.len - w.offset).csize_t
+    let p = dataArr[w.offset].addr
+    let nAvail = (w.dataLen - w.offset).csize_t
     let n: ssize_t = lsquic_stream_write(stream, p, nAvail)
     if n > 0:
       w.offset += n.int
-      if w.offset >= w.data.len:
+      if w.offset >= w.dataLen:
         if not w.doneFut.finished:
           w.doneFut.complete()
     elif n == 0:
@@ -101,6 +102,5 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   streamCtx.toWrite = Opt.none(WriteTask)
 
   if lsquic_stream_wantwrite(stream, 0) == -1:
-    echo "NO LONGER WANT TO WRITE"
     error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
     streamCtx.abort()
