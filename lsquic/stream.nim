@@ -122,6 +122,8 @@ proc readOnce*(
     stream.abort()
     raise newException(StreamError, "could not set wantread")
 
+  stream.doProcess()
+
   let raceFut = await race(stream.closedWaiter, doneFut)
   if raceFut == stream.closedWaiter:
     await doneFut.cancelAndWait()
@@ -141,6 +143,9 @@ proc write*(
 ) {.async: (raises: [CancelledError, StreamError]).} =
   if stream.closeWrite or stream.closedByEngine:
     raise newException(StreamError, "stream closed")
+
+  if data.len == 0:
+    return
 
   await stream.writeLock.acquire()
 
