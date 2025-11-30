@@ -26,13 +26,20 @@ type Stream* = ref object
   closedWaiter*: Future[void].Raising([CancelledError])
   isEof*: bool # Received a FIN from remote
   toWrite*: Deque[WriteTask]
-  toRead*: Deque[ReadTask]
+
+  readLock*: AsyncLock
+  toRead*: Opt[ReadTask]
   doProcess*: proc() {.gcsafe, raises: [].}
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let closed = newAsyncEvent()
   let closedWaiter = closed.wait()
-  let s = Stream(quicStream: quicStream, closed: closed, closedWaiter: closedWaiter)
+  let s = Stream(
+    quicStream: quicStream,
+    closed: closed,
+    closedWaiter: closedWaiter,
+    readLock: newAsyncLock(),
+  )
   GC_ref(s) # Keep it pinned until stream_if.on_close is executed
   s
 
@@ -86,14 +93,18 @@ proc readOnce*(
   if stream.isEof or stream.closedByEngine:
     return 0
 
+  await stream.readLock.acquire()
+
+  defer:
+    try:
+      stream.readLock.release()
+    except AsyncLockError:
+      discard # should not happen - lock acquired directly above
+
   let n = lsquic_stream_read(stream.quicStream, dst, dstLen.csize_t)
 
   if n == 0:
     stream.isEof = true
-    for t in stream.toRead:
-      if not t.doneFut.finished:
-        t.doneFut.complete(0)
-    stream.toRead.clear()
     return 0
 
   if n > 0:
@@ -105,7 +116,7 @@ proc readOnce*(
   # TODO: duplication
 
   if n < 0 and errno == EWOULDBLOCK:
-    stream.toRead.addLast(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
+    stream.toRead = Opt.some(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
 
     if lsquic_stream_wantread(stream.quicStream, 1) == -1:
       stream.abort()

@@ -24,12 +24,10 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   if not streamCtx.closed.isSet():
     streamCtx.closed.fire()
 
-  if streamCtx.toRead.len > 0:
-    let e = newException(StreamError, "stream closed")
-    for t in streamCtx.toRead:
-      if not t.doneFut.finished:
-        t.doneFut.fail(e)
-    streamCtx.toRead.clear()
+  if streamCtx.toRead.isSome:
+    let doneFut = streamCtx.toRead.unsafeGet().doneFut
+    if not doneFut.finished:
+      doneFut.fail(newException(StreamError, "stream closed"))
 
   GC_unref(streamCtx)
 
@@ -40,40 +38,26 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
     return
 
   let streamCtx = cast[Stream](ctx)
-  
 
-  # keep going while there's pending read tasks and stream still has data (or fin)
-  while streamCtx.toRead.len > 0:
-    var task = streamCtx.toRead.popFirst()
-    if task.dataLen <= 0:
-      task.doneFut.complete(0)
-      continue
+  let task = streamCtx.toRead.valueOr:
+    if lsquic_stream_wantread(stream, 0) == -1:
+      error "could not set stream wantread", streamId = lsquic_stream_id(stream)
+      streamCtx.abort()
+    return
 
-    let n = lsquic_stream_read(stream, task.data, task.dataLen.csize_t)
+  let n = lsquic_stream_read(stream, task.data, task.dataLen.csize_t)
 
-    # TODO: handle errs diff from EWOULDBLOCK
-    # TODO: duplication
-    if n < 0 and errno == EWOULDBLOCK:
-      streamCtx.toRead.addFirst(task)
-      return
+  # TODO: handle errs diff from EWOULDBLOCK
 
-    if n > 0:
-      task.doneFut.complete(int(n))
-      continue
+  if n < 0 and errno == EWOULDBLOCK:
+    return
 
-    if n == 0:
-      streamCtx.isEof = true
-      streamCtx.toRead.addFirst(task)
-      for t in streamCtx.toRead:
-        if not t.doneFut.finished:
-          t.doneFut.complete(0)
-      streamCtx.toRead.clear()
-      break
+  if n == 0:
+    streamCtx.isEof = true
 
-  # Nothing waiting to read yet. Stop callbacks until a reader shows up.
-  if lsquic_stream_wantread(stream, 0) == -1:
-    error "could not set stream wantread", streamId = lsquic_stream_id(stream)
-    streamCtx.abort()
+  task.doneFut.complete(int(n))
+
+  streamCtx.toRead = Opt.none(ReadTask)
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "onWrite"
