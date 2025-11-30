@@ -32,9 +32,9 @@ proc start*(u: UDP) {.raises: [].} =
     var buffer = newString(bufferSize)
     var srcAddr: string
     var srcPort: Port
-    
+     
     echo "reading"
-
+    await sleepAsync(1.seconds)
     try:
       let msgLen = u.sock.recvFrom(buffer, bufferSize, srcAddr, srcPort)
       let msg = cast[seq[byte]](buffer[0 ..< msgLen])
@@ -44,7 +44,7 @@ proc start*(u: UDP) {.raises: [].} =
     except CatchableError as e:
       raiseAssert "should not happen" & e.msg
     
-    echo "readin end"
+    echo "reading end"
 
   u.loop = asyncLoop(read)
 
@@ -54,6 +54,7 @@ proc closeWait*(u: UDP) {.async: (raises: [CancelledError]).} =
 
 proc sendTo*(u: UDP, sockAddr: TransportAddress, datagram: sink seq[byte]) =
   echo "sending"
+
   if datagram.len == 0:
     return
 
