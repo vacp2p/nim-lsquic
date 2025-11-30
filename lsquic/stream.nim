@@ -6,7 +6,8 @@ import ./lsquic_ffi
 type StreamError* = object of IOError
 
 type WriteTask* = object
-  data*: seq[byte]
+  data*: ptr byte
+  dataLen*: int
   offset*: int
   doneFut*: Future[void].Raising([CancelledError, StreamError])
 
@@ -161,7 +162,9 @@ proc write*(
 
   # Enqueue otherwise
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
-  stream.toWrite = Opt.some(WriteTask(data: data, doneFut: doneFut, offset: n))
+  stream.toWrite = Opt.some(
+    WriteTask(data: data[0].addr, dataLen: data.len, doneFut: doneFut, offset: n)
+  )
 
   discard lsquic_stream_wantwrite(stream.quicStream, 1)
 
