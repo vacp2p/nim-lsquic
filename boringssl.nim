@@ -26,6 +26,9 @@ elif defined(windows):
       "-D_HAS_EXCEPTIONS=0 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS"
   .}
 
+when defined(i386):
+  {.passc: "-msse2".}
+
 const BORINGSS_USE_ASM {.booldefine.}: bool = true
 when BORINGSS_USE_ASM:
   when not defined(windows):
@@ -60,6 +63,7 @@ when BORINGSS_USE_ASM:
     {.compile: "./libs/boringssl/gen/bcm/aesni-x86-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/aesni-x86_64-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/aesni-x86_64-linux.S".}
+    {.compile: "./libs/boringssl/gen/bcm/aesni-x86-linux.S".}
     {.compile: "./libs/boringssl/gen/bcm/aesv8-armv7-linux.S".}
     {.compile: "./libs/boringssl/gen/bcm/aesv8-armv8-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/aesv8-armv8-linux.S".}
@@ -86,9 +90,11 @@ when BORINGSS_USE_ASM:
     {.compile: "./libs/boringssl/gen/bcm/ghash-ssse3-x86-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/ghash-ssse3-x86_64-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/ghash-ssse3-x86_64-linux.S".}
+    {.compile: "./libs/boringssl/gen/bcm/ghash-ssse3-x86-linux.S".}
     {.compile: "./libs/boringssl/gen/bcm/ghash-x86-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/ghash-x86_64-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/ghash-x86_64-linux.S".}
+    {.compile: "./libs/boringssl/gen/bcm/ghash-x86-linux.S".}
     {.compile: "./libs/boringssl/gen/bcm/ghashv8-armv7-linux.S".}
     {.compile: "./libs/boringssl/gen/bcm/ghashv8-armv8-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/ghashv8-armv8-linux.S".}
@@ -138,9 +144,11 @@ when BORINGSS_USE_ASM:
     {.compile: "./libs/boringssl/gen/bcm/vpaes-x86-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/vpaes-x86_64-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/vpaes-x86_64-linux.S".}
+    {.compile: "./libs/boringssl/gen/bcm/vpaes-x86-linux.S".}
     {.compile: "./libs/boringssl/gen/bcm/x86-mont-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/x86_64-mont-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/x86_64-mont-linux.S".}
+    {.compile: "./libs/boringssl/gen/bcm/x86-mont-linux.S".}
     {.compile: "./libs/boringssl/gen/bcm/x86_64-mont5-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/x86_64-mont5-linux.S".}
     {.compile: "./libs/boringssl/third_party/fiat/asm/fiat_curve25519_adx_mul.S".}
