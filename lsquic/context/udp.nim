@@ -4,7 +4,8 @@ import ../helpers/async_loop
 
 const bufferSize = 1024
 
-type OnReceive* = proc(remote: TransportAddress, datagram: sink seq[byte]) {.async: (raises: []).}
+type OnReceive* =
+  proc(remote: TransportAddress, datagram: sink seq[byte]) {.async: (raises: []).}
 
 type UDP* = ref object of RootObj
   local*: TransportAddress
@@ -12,17 +13,38 @@ type UDP* = ref object of RootObj
   onReceive*: OnReceive
   loop: Future[void]
 
+proc localAddress*(u: UDP): TransportAddress {.raises: [].} =
+  try:
+    let (address, port) = u.sock.getLocalAddr()
+    return initTAddress(address, port)
+  except CatchableError as e:
+    raiseAssert "should not happen" & e.msg
+
 proc start*(u: UDP) {.raises: [].} =
   try:
     u.sock.bindAddr(address = $u.local.host, port = u.local.port)
   except CatchableError as e:
-    discard
+    raiseAssert "should not happen" & e.msg
+
+  echo "Started at local addres ", u.localAddress()
 
   proc read() {.async: (raises: [CancelledError]).} =
     var buffer = newString(bufferSize)
-    # let (msgLen, remoteAddr) = u.sock.recvFrom(buffer, bufferSize, $u.local.host, u.local.port)
-    # let bytes = cast[seq[byte]](buffer[0 ..< msgLen])
-    # u.onReceive(remoteAddr, bytes)
+    var srcAddr: string
+    var srcPort: Port
+    
+    echo "reading"
+
+    try:
+      let msgLen = u.sock.recvFrom(buffer, bufferSize, srcAddr, srcPort)
+      let msg = cast[seq[byte]](buffer[0 ..< msgLen])
+      let remoteAddr = initTAddress(srcAddr, srcPort)
+      echo "Received from ", srcAddr, ": ", msg
+      await u.onReceive(remoteAddr, msg)
+    except CatchableError as e:
+      raiseAssert "should not happen" & e.msg
+    
+    echo "readin end"
 
   u.loop = asyncLoop(read)
 
@@ -31,14 +53,9 @@ proc closeWait*(u: UDP) {.async: (raises: [CancelledError]).} =
   u.sock.close()
 
 proc sendTo*(u: UDP, sockAddr: TransportAddress, datagram: sink seq[byte]) =
+  echo "sending"
   if datagram.len == 0:
     return
 
   let dataStr = cast[string](datagram)
   u.sock.sendTo($sockAddr.host, sockAddr.port, dataStr)
-
-proc localAddress*(u: UDP): TransportAddress {.raises:[].} =
-  var ip: string
-  var port: Port
-  # u.socket.getSockName(ip, port)
-  return TransportAddress()
