@@ -64,11 +64,14 @@ proc new*(
     except TransportError as e:
       error "Unexpected transport error", errorMsg = e.msg
 
+  let datagramTransport = newDatagramTransport(onReceive)
+
   let client = QuicClient(
-    connman: ConnectionManager.new(
-      tlsConfig, newDatagramTransport(onReceive), clientCtx, outgoing
-    )
+    connman: ConnectionManager.new(tlsConfig, datagramTransport, clientCtx, outgoing)
   )
+
+  clientCtx.fd = cint(datagramTransport.fd)
+
   client.connman.startSending()
   client
 

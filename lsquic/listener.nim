@@ -16,9 +16,7 @@ proc newListener*(
 ): Result[Listener, string] =
   let outgoing = ManyQueue[Datagram].new()
   let incoming = newAsyncQueue[QuicConnection]()
-  let quicContext = ?ServerContext.new(tlsConfig, outgoing, incoming)
   let listener = Listener(incoming: incoming)
-
   proc onReceive(
       udp: DatagramTransport, remote: TransportAddress
   ) {.async: (raises: []).} =
@@ -28,9 +26,11 @@ proc newListener*(
     except TransportError as e:
       error "Unexpect transport error", errorMsg = e.msg
 
-  listener.init(
-    tlsConfig, newDatagramTransport(onReceive, local = address), quicContext, outgoing
-  )
+  let datagramTransport = newDatagramTransport(onReceive, local = address)
+  let quicContext =
+    ?ServerContext.new(tlsConfig, outgoing, incoming, datagramTransport.fd.cint)
+
+  listener.init(tlsConfig, datagramTransport, quicContext, outgoing)
   listener.startSending()
   ok(listener)
 

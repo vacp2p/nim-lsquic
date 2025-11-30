@@ -3,6 +3,7 @@ import chronos/osdefs
 import ./context
 import ../[lsquic_ffi, datagram]
 import ../helpers/[openarray, sequninit, transportaddr, many_queue]
+import std/[nativesockets, net]
 
 proc receive*(
     ctx: QuicContext,
@@ -60,10 +61,26 @@ proc sendPacketsOut*(
       copyMem(addr data[currLen], currIov.iov_base, currIov.iov_len)
       currLen += currIov.iov_len.int
 
-    let taddr = toTransportAddress(curr.dest_sa)
-    let datagram = Datagram(data: data, ecn: curr.ecn, taddr: taddr)
+    let destAddrLen: SockLen =
+      case curr.dest_sa.sa_family.uint16
+      of AF_INET.uint16:
+        sizeof(Sockaddr_in).uint32
+      of AF_INET6.uint16:
+        sizeof(Sockaddr_in6).uint32
+      else:
+        0.uint32
 
-    quicCtx.outgoing.put(datagram)
+    let sentResult = sendto(
+      SocketHandle(quicCtx.fd),
+      data[0].addr,
+      data.len.cint,
+      0.cint,
+      curr.dest_sa,
+      destAddrLen,
+    )
+
+    if sentResult < 0:
+      break
 
     sent.inc
 
