@@ -25,6 +25,7 @@ type QuicContext* = ref object of RootObj
   tickTimeout*: Timeout
   sslCtx*: ptr SSL_CTX
   dtp*: DatagramTransport
+  fd*: cint
 
 proc engine_process*(ctx: QuicContext) =
   lsquic_engine_process_conns(ctx.engine)

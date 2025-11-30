@@ -53,11 +53,13 @@ proc new*(
     tlsConfig: TLSConfig,
     outgoing: ManyQueue[Datagram],
     incoming: AsyncQueue[QuicConnection],
+    fd: cint
 ): Result[T, string] =
   var ctx = ServerContext()
   ctx.tlsConfig = tlsConfig
   ctx.outgoing = outgoing
   ctx.incoming = incoming
+  ctx.fd = fd
   ctx.setupSSLContext()
 
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)
