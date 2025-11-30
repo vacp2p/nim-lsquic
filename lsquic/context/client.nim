@@ -2,7 +2,7 @@ import results
 import chronicles
 import chronos
 import chronos/osdefs
-import ./[context, io, stream]
+import ./[context, io, stream, udp]
 import ../[lsquic_ffi, tlsconfig, timeout, stream, certificates]
 import ../helpers/[sequninit]
 
@@ -115,11 +115,11 @@ method dial*(
 const BBRv1 = 2
 
 proc new*(
-    T: typedesc[ClientContext], tlsConfig: TLSConfig, dtp: DatagramTransport
+    T: typedesc[ClientContext], tlsConfig: TLSConfig, udp: UDP
 ): Result[T, string] =
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig
-  ctx.dtp = dtp
+  ctx.udp = udp
   ctx.setupSSLContext()
 
   lsquic_engine_init_settings(addr ctx.settings, 0)

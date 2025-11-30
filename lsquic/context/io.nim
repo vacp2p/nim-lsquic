@@ -1,17 +1,18 @@
 import chronos
 import chronos/osdefs
-import ./context
-import ../[lsquic_ffi, datagram]
+import ./[context, udp]
+import ../[lsquic_ffi,]
 import ../helpers/[openarray, sequninit, transportaddr]
 
 proc receive*(
     ctx: QuicContext,
-    datagram: sink Datagram,
-    local: TransportAddress,
-    remote: TransportAddress,
+    remote: sink TransportAddress,
+    data: sink seq[byte],
 ) =
-  if datagram.len == 0:
+  if data.len == 0:
     return
+
+  let local = ctx.udp.localAddress()
 
   var
     localAddress: Sockaddr_storage
@@ -24,12 +25,12 @@ proc receive*(
 
   discard lsquic_engine_packet_in(
     ctx.engine,
-    datagram.data.toPtr,
-    datagram.data.len.csize_t,
+    data.toPtr,
+    data.len.csize_t,
     cast[ptr SockAddr](addr localAddress),
     cast[ptr SockAddr](addr remoteAddress),
     cast[pointer](ctx),
-    datagram.ecn,
+    0,
   )
 
   ctx.processWhenReady()
@@ -60,12 +61,8 @@ proc sendPacketsOut*(
         continue
       copyMem(addr data[currLen], currIov.iov_base, currIov.iov_len)
       currLen += currIov.iov_len.int
-
-    try:
-      discard quicCtx.dtp.sendTo(taddr, data)
-    except TransportError:
-      discard
-
+      
+    quicCtx.udp.sendTo(taddr, data)
     sent.inc
 
   sent.cint

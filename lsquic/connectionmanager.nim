@@ -2,7 +2,7 @@ import chronicles
 import chronos
 import chronos/osdefs
 import ./[connection, tlsconfig]
-import ./context/context
+import ./context/[context, udp]
 
 type ConnectionManager* = ref object of RootObj
   tlsConfig*: TLSConfig
@@ -26,10 +26,10 @@ proc new*(
 proc localAddress*(
     connman: ConnectionManager
 ): TransportAddress {.raises: [TransportOsError].} =
-  connman.quicContext.dtp.localAddress()
+  connman.quicContext.udp.localAddress()
 
 proc closeUdp*(connman: ConnectionManager) {.async: (raises: []).} =
-  await connman.quicContext.dtp.closeWait()
+  connman.quicContext.udp.closeWait()
 
 proc stop*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
   if connman.closed.finished:

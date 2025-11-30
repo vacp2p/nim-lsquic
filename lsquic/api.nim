@@ -3,8 +3,9 @@ import chronos
 import chronicles
 import results
 import ./[listener, connection, tlsconfig, datagram, connectionmanager]
-import ./context/[context, io, client]
+import ./context/[context, io, client, udp]
 import lsquic_ffi
+import net
 
 type Quic = ref object of RootObj
 
@@ -52,17 +53,19 @@ proc new*(
   var clientCtx: ClientContext
 
   proc onReceive(
-      udp: DatagramTransport, remote: TransportAddress
+      remote: TransportAddress, data: sink seq[byte]
   ) {.async: (raises: []).} =
+    clientCtx.receive(remote, data)
+
+  let udp =
     try:
-      let datagram = Datagram(data: udp.getMessage())
-      clientCtx.receive(datagram, udp.localAddress(), remote)
-    except TransportError as e:
-      error "Unexpected transport error", errorMsg = e.msg
-
-  let dtp = newDatagramTransport(onReceive)
-
-  clientCtx = ClientContext.new(tlsConfig, dtp).valueOr:
+      let sock = newSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+      UDP(sock: sock, onReceive: onReceive)
+    except OSError as e:
+      raise newException(QuicError, e.msg)
+  
+  udp.start()
+  clientCtx = ClientContext.new(tlsConfig, udp).valueOr:
     raise newException(QuicError, error)
 
   let client = QuicClient(connman: ConnectionManager.new(tlsConfig, clientCtx))
@@ -72,7 +75,7 @@ proc dial*(
     self: QuicClient, address: TransportAddress
 ): Future[Connection] {.async: (raises: [CancelledError, DialError, TransportOsError]).} =
   var connection = newOutgoingConnection(
-    self.connman.quicContext, self.connman.quicContext.dtp.localAddress, address
+    self.connman.quicContext, self.connman.quicContext.udp.localAddress(), address
   )
   self.connman.addConnection(connection)
   await connection.dial()

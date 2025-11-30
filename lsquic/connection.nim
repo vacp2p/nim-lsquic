@@ -79,8 +79,8 @@ proc newIncomingConnection*(
     conn.closed.fire()
   conn
 
-proc receive*(connection: Connection, datagram: sink Datagram) =
-  connection.quicContext.receive(datagram, connection.local, connection.remote)
+# proc receive*(connection: Connection, datagram: sink Datagram) =
+#   connection.quicContext.receive(datagram, connection.local, connection.remote)
 
 proc dial*(
     connection: OutgoingConnection

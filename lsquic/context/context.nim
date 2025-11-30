@@ -2,6 +2,7 @@ import chronos
 import chronos/osdefs
 import chronicles
 import ../[lsquic_ffi, tlsconfig, timeout, certificates, certificateverifier, stream]
+import ./udp
 
 let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is global
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
@@ -19,7 +20,7 @@ type QuicContext* = ref object of RootObj
   tlsConfig*: TLSConfig
   tickTimeout*: Timeout
   sslCtx*: ptr SSL_CTX
-  dtp*: DatagramTransport
+  udp*: UDP
 
 proc engine_process*(ctx: QuicContext) =
   lsquic_engine_process_conns(ctx.engine)
@@ -196,6 +197,7 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
 
 proc stop*(ctx: QuicContext) {.raises: [].} =
   ctx.tickTimeout.stop()
+  discard ctx.udp.closeWait()
   lsquic_engine_destroy(ctx.engine)
 
 proc close*(ctx: QuicContext, conn: QuicConnection) =
