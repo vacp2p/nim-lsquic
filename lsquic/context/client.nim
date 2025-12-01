@@ -34,7 +34,7 @@ proc onHandshakeDone(
     let x509chain = lsquic_conn_get_full_cert_chain(quicClientConn.lsquicConn)
     let certChain = x509chain.getCertChain()
     OPENSSL_sk_free(cast[ptr OPENSSL_STACK](x509chain))
-    quicClientConn.clientCertChain = certChain
+    quicClientConn.certChain = certChain
 
     quicClientConn.connectedFut.complete()
 
@@ -59,11 +59,6 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
     quicClientConn.onClose()
     GC_unref(quicClientConn)
   lsquic_conn_set_ctx(conn, nil)
-
-method certificates*(
-    ctx: ClientContext, conn: QuicConnection
-): seq[seq[byte]] {.gcsafe, raises: [].} =
-  conn.clientCertChain
 
 method dial*(
     ctx: ClientContext,
