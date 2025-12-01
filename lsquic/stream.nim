@@ -170,6 +170,7 @@ proc write*(
       stream.abort()
     return
   elif n < 0:
+    error "could not write to stream", streamId = lsquic_stream_id(stream.quicStream), n
     raise newException(StreamError, "could not write")
 
   # Enqueue otherwise
