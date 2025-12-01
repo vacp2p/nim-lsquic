@@ -13,6 +13,11 @@ proc onNewConn(
   var local: ptr SockAddr
   var remote: ptr SockAddr
   discard lsquic_conn_get_sockaddr(conn, addr local, addr remote)
+
+  let x509chain = lsquic_conn_get_full_cert_chain(conn)
+  let certChain = x509chain.getCertChain()
+  OPENSSL_sk_free(cast[ptr OPENSSL_STACK](x509chain))
+
   # TODO: should use a constructor
   let quicConn = QuicConnection(
     isOutgoing: false,
@@ -20,6 +25,7 @@ proc onNewConn(
     local: local.toTransportAddress(),
     remote: remote.toTransportAddress(),
     lsquicConn: conn,
+    certChain: certChain,
     onClose: proc() =
       discard,
   )
@@ -36,14 +42,6 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
     quicConn.onClose()
     GC_unref(quicConn)
   lsquic_conn_set_ctx(conn, nil)
-
-method certificates*(
-    ctx: ServerContext, conn: QuicConnection
-): seq[seq[byte]] {.gcsafe, raises: [].} =
-  let x509chain = lsquic_conn_get_full_cert_chain(conn.lsquicConn)
-  let ret = x509chain.getCertChain()
-  OPENSSL_sk_free(cast[ptr OPENSSL_STACK](x509chain))
-  ret
 
 const Cubic = 1
 const BBRv1 = 2

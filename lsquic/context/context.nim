@@ -55,7 +55,7 @@ type QuicConnection* = ref object of RootObj
   incoming*: AsyncQueue[Stream]
   connectedFut*: Future[void]
   pendingStreams: seq[PendingStream]
-  clientCertChain*: seq[seq[byte]]
+  certChain*: seq[seq[byte]]
 
 type ClientContext* = ref object of QuicContext
 
@@ -217,11 +217,6 @@ proc abort*(ctx: QuicContext, conn: QuicConnection) =
     lsquic_conn_abort(conn.lsquicConn)
     ctx.processWhenReady()
 
-method certificates*(
-    ctx: QuicContext, conn: QuicConnection
-): seq[seq[byte]] {.gcsafe, base, raises: [].} =
-  raiseAssert "certificates not implemented"
-
 method dial*(
     ctx: QuicContext,
     local: TransportAddress,
@@ -270,3 +265,8 @@ proc onNewStream*(
       s
 
   return cast[ptr lsquic_stream_ctx_t](streamCtx)
+
+proc certificates*(
+    ctx: QuicContext, conn: QuicConnection
+): seq[seq[byte]] {.raises: [].} =
+  conn.certChain
