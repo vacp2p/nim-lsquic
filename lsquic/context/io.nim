@@ -2,7 +2,7 @@ import chronos
 import chronos/osdefs
 import ./context
 import ../[lsquic_ffi, datagram]
-import ../helpers/[openarray, sequninit, transportaddr, many_queue]
+import ../helpers/[openarray, sequninit]
 import std/[nativesockets, net]
 
 proc receive*(

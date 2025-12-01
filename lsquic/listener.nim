@@ -4,7 +4,6 @@ import chronos/osdefs
 import results
 import ./[connection, tlsconfig, datagram, connectionmanager]
 import ./context/[server, context, io]
-import ./helpers/[many_queue]
 
 export stop
 
@@ -14,7 +13,6 @@ type Listener* = ref object of ConnectionManager
 proc newListener*(
     tlsConfig: TLSConfig, address: TransportAddress
 ): Result[Listener, string] =
-  let outgoing = ManyQueue[Datagram].new()
   let incoming = newAsyncQueue[QuicConnection]()
   let listener = Listener(incoming: incoming)
   proc onReceive(
@@ -27,11 +25,9 @@ proc newListener*(
       error "Unexpect transport error", errorMsg = e.msg
 
   let datagramTransport = newDatagramTransport(onReceive, local = address)
-  let quicContext =
-    ?ServerContext.new(tlsConfig, outgoing, incoming, datagramTransport.fd.cint)
+  let quicContext = ?ServerContext.new(tlsConfig, incoming, datagramTransport.fd.cint)
 
-  listener.init(tlsConfig, datagramTransport, quicContext, outgoing)
-  listener.startSending()
+  listener.init(tlsConfig, datagramTransport, quicContext)
   ok(listener)
 
 proc waitForIncoming(
