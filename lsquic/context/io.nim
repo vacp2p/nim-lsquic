@@ -44,23 +44,6 @@ proc sendPacketsOut*(
   for i in 0 ..< nspecs.int:
     let curr = specsArr[i]
 
-    let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
-    var totalLen: int = 0
-    for j in 0 ..< curr.iovlen.int:
-      totalLen += iovArr[j].iov_len.int
-
-    if totalLen == 0:
-      continue
-
-    var data = newSeqUninit[byte](totalLen)
-    var currLen: int = 0
-    for j in 0 ..< curr.iovlen.int:
-      let currIov = iovArr[j]
-      if currIov.iov_len == 0:
-        continue
-      copyMem(addr data[currLen], currIov.iov_base, currIov.iov_len)
-      currLen += currIov.iov_len.int
-
     let destAddrLen: SockLen =
       case curr.dest_sa.sa_family.uint16
       of AF_INET.uint16:
@@ -70,16 +53,18 @@ proc sendPacketsOut*(
       else:
         0.uint32
 
-    let sentResult = sendto(
-      SocketHandle(quicCtx.fd),
-      data[0].addr,
-      data.len.cint,
-      0.cint,
-      curr.dest_sa,
-      destAddrLen,
+    let msg = Tmsghdr(
+      msg_name: cast[pointer](curr.dest_sa),
+      msg_namelen: destAddrLen,
+      msg_iov: cast[ptr IOVec](curr.iov),
+      msg_iovlen: curr.iovlen,
+      msg_control: nil,
+      msg_controllen: 0,
+      msg_flags: 0,
     )
 
-    if sentResult < 0:
+    let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
+    if res < 0:
       break
 
     sent.inc
