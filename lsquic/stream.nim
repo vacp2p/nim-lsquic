@@ -1,12 +1,13 @@
-import std/deques
+import std/[deques, posix]
 import chronos
 import chronicles
 import ./lsquic_ffi
 
 type StreamError* = object of IOError
 
-type WriteTask = object
-  data*: seq[byte]
+type WriteTask* = object
+  data*: ptr byte
+  dataLen*: int
   offset*: int
   doneFut*: Future[void].Raising([CancelledError, StreamError])
 
@@ -24,23 +25,31 @@ type Stream* = ref object
   # Reuse a single closed-event waiter to minimize allocations on hot paths.
   # (no per call allocation)
   closedWaiter*: Future[void].Raising([CancelledError])
+  writeLock*: AsyncLock
+  toWrite*: Opt[WriteTask]
+  readLock*: AsyncLock
   isEof*: bool # Received a FIN from remote
-  toWrite*: Deque[WriteTask]
-  toRead*: Deque[ReadTask]
+  toRead*: Opt[ReadTask]
   doProcess*: proc() {.gcsafe, raises: [].}
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let closed = newAsyncEvent()
   let closedWaiter = closed.wait()
-  let s = Stream(quicStream: quicStream, closed: closed, closedWaiter: closedWaiter)
+  let s = Stream(
+    quicStream: quicStream,
+    closed: closed,
+    closedWaiter: closedWaiter,
+    readLock: newAsyncLock(),
+    writeLock: newAsyncLock(),
+  )
   GC_ref(s) # Keep it pinned until stream_if.on_close is executed
   s
 
 proc abortPendingWrites*(stream: Stream, reason: string = "") =
-  for pendingWrite in stream.toWrite.mitems:
-    if not pendingWrite.doneFut.finished:
-      pendingWrite.doneFut.fail(newException(StreamError, reason))
-  stream.toWrite.clear()
+  let task = stream.toWrite.valueOr:
+    return
+  task.doneFut.fail(newException(StreamError, reason))
+  stream.toWrite = Opt.none(WriteTask)
 
 proc abort*(stream: Stream) =
   if stream.closeWrite and stream.isEof:
@@ -85,12 +94,39 @@ proc readOnce*(
   if stream.isEof or stream.closedByEngine:
     return 0
 
-  let doneFut = Future[int].Raising([CancelledError, StreamError]).init()
-  stream.toRead.addLast(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
+  await stream.readLock.acquire()
+
+  defer:
+    try:
+      stream.readLock.release()
+    except AsyncLockError:
+      discard # should not happen - lock acquired directly above
+
+  # In case stream was closed while waiting for lock being acquired
+  if stream.closedByEngine:
+    return 0
+
+  let n = lsquic_stream_read(stream.quicStream, dst, dstLen.csize_t)
+
+  if n == 0:
+    stream.isEof = true
+    return 0
+  elif n > 0:
+    return n
+
+  if n < 0 and errno != EWOULDBLOCK:
+    stream.abort()
+    raise newException(StreamError, "could not read: " & $errno)
 
   if lsquic_stream_wantread(stream.quicStream, 1) == -1:
     stream.abort()
     raise newException(StreamError, "could not set wantread")
+
+  let doneFut =
+    Future[int].Raising([CancelledError, StreamError]).init("Stream.readOnce")
+  stream.toRead = Opt.some(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
+
+  stream.doProcess()
 
   let raceFut = await race(stream.closedWaiter, doneFut)
   if raceFut == stream.closedWaiter:
@@ -109,22 +145,42 @@ template readOnce*(stream: Stream, dst: var openArray[byte]): untyped =
 proc write*(
     stream: Stream, data: seq[byte]
 ) {.async: (raises: [CancelledError, StreamError]).} =
+  if data.len == 0:
+    return
+
   if stream.closeWrite or stream.closedByEngine:
     raise newException(StreamError, "stream closed")
 
-  # Apply simple backpressure: block when queued bytes exceed the cap.
-  while stream.toWrite.len > 0:
-    let head = stream.toWrite.peekFirst()
-    if head.doneFut.finished:
-      break
-    let raceFut = await race(stream.closedWaiter, head.doneFut)
-    if raceFut == stream.closedWaiter:
-      stream.closeWrite = true
-      raise newException(StreamError, "stream closed")
+  await stream.writeLock.acquire()
 
-  let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
-  stream.toWrite.addLast(WriteTask(data: data, doneFut: doneFut))
+  defer:
+    try:
+      stream.writeLock.release()
+    except AsyncLockError:
+      discard # should not happen - lock acquired directly above
+
+  if stream.closedByEngine:
+    raise newException(StreamError, "stream closed")
+
+  # Try to write immediatly
+  let p = data[0].addr
+  let n = lsquic_stream_write(stream.quicStream, p, data.len.csize_t)
+  if n >= data.len:
+    if lsquic_stream_flush(stream.quicStream) != 0:
+      stream.abort()
+    return
+  elif n < 0:
+    error "could not write to stream", streamId = lsquic_stream_id(stream.quicStream), n
+    raise newException(StreamError, "could not write")
+
+  # Enqueue otherwise
+  let doneFut = Future[void].Raising([CancelledError, StreamError]).init("Stream.write")
+  stream.toWrite = Opt.some(
+    WriteTask(data: data[0].addr, dataLen: data.len, doneFut: doneFut, offset: n)
+  )
+
   discard lsquic_stream_wantwrite(stream.quicStream, 1)
+
   stream.doProcess()
 
   let raceFut = await race(stream.closedWaiter, doneFut)

@@ -33,10 +33,12 @@ proc engine_process*(ctx: QuicContext) =
     lsquic_engine_send_unsent_packets(ctx.engine)
 
   var diff: cint
-  if lsquic_engine_earliest_adv_tick(ctx.engine, addr diff) != 0:
-    let delta =
-      if diff < 0: LSQUIC_DF_CLOCK_GRANULARITY.microseconds else: diff.microseconds
-    ctx.tickTimeout.set(Moment.now() + delta)
+  if lsquic_engine_earliest_adv_tick(ctx.engine, addr diff) == 0:
+    return
+
+  let delta =
+    if diff < 0: LSQUIC_DF_CLOCK_GRANULARITY.microseconds else: diff.microseconds
+  ctx.tickTimeout.set(delta)
 
 type PendingStream = object
   stream: Stream
@@ -71,7 +73,9 @@ proc incomingStream*(
 proc addPendingStream*(
     quicConn: QuicConnection, s: Stream
 ): Future[void].Raising([CancelledError, ConnectionError]) {.raises: [], gcsafe.} =
-  let created = Future[void].Raising([CancelledError, ConnectionError]).init()
+  let created = Future[void].Raising([CancelledError, ConnectionError]).init(
+      "QuicConnection.addPendingStream"
+    )
   quicConn.pendingStreams.add(PendingStream(stream: s, created: created))
   created
 
