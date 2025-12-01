@@ -102,6 +102,10 @@ proc readOnce*(
     except AsyncLockError:
       discard # should not happen - lock acquired directly above
 
+  # In case stream was closed while waiting for lock being acquired
+  if stream.closedByEngine:
+    return 0
+
   let n = lsquic_stream_read(stream.quicStream, dst, dstLen.csize_t)
 
   if n == 0:
@@ -110,17 +114,17 @@ proc readOnce*(
   elif n > 0:
     return n
 
-  let doneFut = Future[int].Raising([CancelledError, StreamError]).init()
-
   if n < 0 and errno != EWOULDBLOCK:
     stream.abort()
-    raise newException(StreamError, "could not read")
-
-  stream.toRead = Opt.some(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
+    raise newException(StreamError, "could not read: " & $errno)
 
   if lsquic_stream_wantread(stream.quicStream, 1) == -1:
     stream.abort()
     raise newException(StreamError, "could not set wantread")
+
+  let doneFut =
+    Future[int].Raising([CancelledError, StreamError]).init("Stream.readOnce")
+  stream.toRead = Opt.some(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
 
   stream.doProcess()
 
@@ -141,11 +145,11 @@ template readOnce*(stream: Stream, dst: var openArray[byte]): untyped =
 proc write*(
     stream: Stream, data: seq[byte]
 ) {.async: (raises: [CancelledError, StreamError]).} =
-  if stream.closeWrite or stream.closedByEngine:
-    raise newException(StreamError, "stream closed")
-
   if data.len == 0:
     return
+
+  if stream.closeWrite or stream.closedByEngine:
+    raise newException(StreamError, "stream closed")
 
   await stream.writeLock.acquire()
 
@@ -154,6 +158,9 @@ proc write*(
       stream.writeLock.release()
     except AsyncLockError:
       discard # should not happen - lock acquired directly above
+
+  if stream.closedByEngine:
+    raise newException(StreamError, "stream closed")
 
   # Try to write immediatly
   let p = data[0].addr
@@ -166,7 +173,7 @@ proc write*(
     raise newException(StreamError, "could not write")
 
   # Enqueue otherwise
-  let doneFut = Future[void].Raising([CancelledError, StreamError]).init()
+  let doneFut = Future[void].Raising([CancelledError, StreamError]).init("Stream.write")
   stream.toWrite = Opt.some(
     WriteTask(data: data[0].addr, dataLen: data.len, doneFut: doneFut, offset: n)
   )

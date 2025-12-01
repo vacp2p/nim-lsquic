@@ -73,7 +73,9 @@ proc incomingStream*(
 proc addPendingStream*(
     quicConn: QuicConnection, s: Stream
 ): Future[void].Raising([CancelledError, ConnectionError]) {.raises: [], gcsafe.} =
-  let created = Future[void].Raising([CancelledError, ConnectionError]).init()
+  let created = Future[void].Raising([CancelledError, ConnectionError]).init(
+      "QuicConnection.addPendingStream"
+    )
   quicConn.pendingStreams.add(PendingStream(stream: s, created: created))
   created
 

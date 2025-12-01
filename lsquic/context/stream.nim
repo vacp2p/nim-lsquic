@@ -47,10 +47,14 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
 
   let n = lsquic_stream_read(stream, task.data, task.dataLen.csize_t)
 
-  # TODO: handle errs diff from EWOULDBLOCK
-
-  if n < 0 and errno == EWOULDBLOCK:
-    return
+  if n < 0:
+    if errno == EWOULDBLOCK:
+      # Try later
+      return
+    else:
+      error "could not read", streamId = lsquic_stream_id(stream), errno = errno
+      streamCtx.abort()
+      return
 
   if n == 0:
     streamCtx.isEof = true
