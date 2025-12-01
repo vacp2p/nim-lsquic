@@ -5,6 +5,9 @@ import ../[lsquic_ffi, datagram]
 import ../helpers/[openarray, sequninit]
 import std/[nativesockets, net]
 
+when not defined(windows):
+  import posix
+
 proc receive*(
     ctx: QuicContext,
     datagram: sink Datagram,
@@ -53,15 +56,27 @@ proc sendPacketsOut*(
       else:
         0.uint32
 
-    let msg = Tmsghdr(
-      msg_name: cast[pointer](curr.dest_sa),
-      msg_namelen: destAddrLen,
-      msg_iov: cast[ptr IOVec](curr.iov),
-      msg_iovlen: curr.iovlen,
-      msg_control: nil,
-      msg_controllen: 0,
-      msg_flags: 0,
-    )
+    let msg =
+      when defined(linux) and defined(x86_64):
+        Tmsghdr(
+          msg_name: cast[pointer](curr.dest_sa),
+          msg_namelen: destAddrLen,
+          msg_iov: cast[ptr IOVec](curr.iov),
+          msg_iovlen: curr.iovlen.csize_t,
+          msg_control: nil,
+          msg_controllen: 0,
+          msg_flags: 0,
+        )
+      else:
+        Tmsghdr(
+          msg_name: cast[pointer](curr.dest_sa),
+          msg_namelen: destAddrLen,
+          msg_iov: cast[ptr IOVec](curr.iov),
+          msg_iovlen: curr.iovlen.cint,
+          msg_control: nil,
+          msg_controllen: 0,
+          msg_flags: 0,
+        )
 
     let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
     if res < 0:
