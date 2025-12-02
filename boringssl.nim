@@ -20,7 +20,6 @@ elif defined(linux):
   {.localPassC: "-D_XOPEN_SOURCE=700".}
   {.localPassC: "-lstdc++".}
 elif defined(windows):
-  {.passc: "-DOPENSSL_NO_ASM".}
   {.
     localPassC:
       "-D_HAS_EXCEPTIONS=0 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS"
@@ -32,8 +31,12 @@ when defined(i386):
 const BORINGSS_USE_ASM {.booldefine.}: bool = true
 when BORINGSS_USE_ASM:
   when not defined(windows):
-    {.compile: "./libs/boringssl/crypto/curve25519/asm/x25519-asm-arm.S".}
     {.compile: "./libs/boringssl/crypto/hrss/asm/poly_rq_mul.S".}
+    {.compile: "./libs/boringssl/third_party/fiat/asm/fiat_curve25519_adx_mul.S".}
+    {.compile: "./libs/boringssl/third_party/fiat/asm/fiat_curve25519_adx_square.S".}
+    {.compile: "./libs/boringssl/third_party/fiat/asm/fiat_p256_adx_mul.S".}
+    {.compile: "./libs/boringssl/third_party/fiat/asm/fiat_p256_adx_sqr.S".}
+    {.compile: "./libs/boringssl/crypto/curve25519/asm/x25519-asm-arm.S".}
     {.compile: "./libs/boringssl/crypto/poly1305/poly1305_arm_asm.S".}
     {.compile: "./libs/boringssl/gen/crypto/aes128gcmsiv-x86_64-apple.S".}
     {.compile: "./libs/boringssl/gen/crypto/aes128gcmsiv-x86_64-linux.S".}
@@ -151,10 +154,32 @@ when BORINGSS_USE_ASM:
     {.compile: "./libs/boringssl/gen/bcm/x86-mont-linux.S".}
     {.compile: "./libs/boringssl/gen/bcm/x86_64-mont5-apple.S".}
     {.compile: "./libs/boringssl/gen/bcm/x86_64-mont5-linux.S".}
-    {.compile: "./libs/boringssl/third_party/fiat/asm/fiat_curve25519_adx_mul.S".}
-    {.compile: "./libs/boringssl/third_party/fiat/asm/fiat_curve25519_adx_square.S".}
-    {.compile: "./libs/boringssl/third_party/fiat/asm/fiat_p256_adx_mul.S".}
-    {.compile: "./libs/boringssl/third_party/fiat/asm/fiat_p256_adx_sqr.S".}
+
+  when defined(windows):
+    {.passl: "aes-gcm-avx2-x84_64-win.o".}
+    {.passl: "aes-gcm-avx512-x86_64-win.o".}
+    {.passl: "aesni-gcm-x86_64-win.o".}
+    {.passl: "aesni-x86-win.o".}
+    {.passl: "aesni-x86_64-win.o".}
+    {.passl: "ghash-ssse3-x86-win.o".}
+    {.passl: "ghash-ssse3-x86_64-win.o".}
+    {.passl: "ghash-x86-win.o".}
+    {.passl: "ghash-x86_64-win.o".}
+    {.passl: "p256-x86_64-asm-win.o".}
+    {.passl: "p256_beeu-x86_64-asm-win.o".}
+    {.passl: "rdrand-x86_64-win.o".}
+    {.passl: "rsaz-avx2-win.o".}
+    {.passl: "sha1-x86_64-win.o".}
+    {.passl: "sha256-x86_64-win.o".}
+    {.passl: "sha512-x86_64-win.o".}
+    {.passl: "vpaes-x86-win.o".}
+    {.passl: "vpaes-x86_64-win.o".}
+    {.passl: "x86-mont-win.o".}
+    {.passl: "x86_64-mont-win.o".}
+    {.passl: "x86_64-mont5-win.o".}
+    {.passl: "md5-x86_64-win.o".}
+    {.passl: "chacha20_poly1305_x86_64-win.o".}
+    {.passl: "chacha-x86_64-win.o".}
 
 # ----- generated sources -----
 {.compile: "./libs/boringssl/crypto/fipsmodule/bcm.cc".}

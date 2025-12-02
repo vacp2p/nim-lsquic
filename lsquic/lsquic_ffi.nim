@@ -9,8 +9,6 @@ import ../boringssl
 
 type ptrdiff_t* {.importc: "ptrdiff_t", header: "<stddef.h>".} = int
 
-when defined(windows):
-  {.passc: "-include stddef.h".}
 
 {.passc: "-DXXH_HEADER_NAME=\\\"lsquic_xxhash.h\\\"".}
 
