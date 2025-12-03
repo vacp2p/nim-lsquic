@@ -3,8 +3,8 @@ import chronicles
 import chronos
 import chronos/osdefs
 import ./[context, io, stream]
-import ../[lsquic_ffi, tlsconfig, datagram, timeout, stream, certificates]
-import ../helpers/[sequninit, transportaddr, many_queue]
+import ../[lsquic_ffi, tlsconfig, timeout, stream, certificates]
+import ../helpers/[sequninit, transportaddr]
 
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
@@ -49,13 +49,13 @@ const BBRv1 = 2
 proc new*(
     T: typedesc[ServerContext],
     tlsConfig: TLSConfig,
-    outgoing: ManyQueue[Datagram],
     incoming: AsyncQueue[QuicConnection],
+    fd: cint,
 ): Result[T, string] =
   var ctx = ServerContext()
   ctx.tlsConfig = tlsConfig
-  ctx.outgoing = outgoing
   ctx.incoming = incoming
+  ctx.fd = fd
   ctx.setupSSLContext()
 
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)

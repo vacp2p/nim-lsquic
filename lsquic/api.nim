@@ -4,7 +4,6 @@ import chronicles
 import results
 import ./[listener, connection, tlsconfig, datagram, connectionmanager]
 import ./context/[context, io, client]
-import ./helpers/[many_queue]
 import lsquic_ffi
 
 type Quic = ref object of RootObj
@@ -50,9 +49,7 @@ proc listen*(
 proc new*(
     t: typedesc[QuicClient], tlsConfig: TLSConfig
 ): QuicClient {.raises: [QuicError, TransportOsError].} =
-  let outgoing = ManyQueue[Datagram].new()
-
-  let clientCtx = ClientContext.new(tlsConfig, outgoing).valueOr:
+  let clientCtx = ClientContext.new(tlsConfig).valueOr:
     raise newException(QuicError, error)
 
   proc onReceive(
@@ -64,12 +61,13 @@ proc new*(
     except TransportError as e:
       error "Unexpected transport error", errorMsg = e.msg
 
-  let client = QuicClient(
-    connman: ConnectionManager.new(
-      tlsConfig, newDatagramTransport(onReceive), clientCtx, outgoing
-    )
-  )
-  client.connman.startSending()
+  let datagramTransport = newDatagramTransport(onReceive)
+
+  let client =
+    QuicClient(connman: ConnectionManager.new(tlsConfig, datagramTransport, clientCtx))
+
+  clientCtx.fd = cint(datagramTransport.fd)
+
   client
 
 proc dial*(

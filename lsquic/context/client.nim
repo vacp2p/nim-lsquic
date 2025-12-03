@@ -3,8 +3,8 @@ import chronicles
 import chronos
 import chronos/osdefs
 import ./[context, io, stream]
-import ../[lsquic_ffi, tlsconfig, datagram, timeout, stream, certificates]
-import ../helpers/[sequninit, many_queue]
+import ../[lsquic_ffi, tlsconfig, timeout, stream, certificates]
+import ../helpers/sequninit
 
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
@@ -110,12 +110,9 @@ method dial*(
 const Cubic = 1
 const BBRv1 = 2
 
-proc new*(
-    T: typedesc[ClientContext], tlsConfig: TLSConfig, outgoing: ManyQueue[Datagram]
-): Result[T, string] =
+proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig
-  ctx.outgoing = outgoing
   ctx.setupSSLContext()
 
   lsquic_engine_init_settings(addr ctx.settings, 0)
