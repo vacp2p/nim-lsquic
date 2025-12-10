@@ -10,7 +10,7 @@ import ../boringssl
 type ptrdiff_t* {.importc: "ptrdiff_t", header: "<stddef.h>".} = int
 
 
-{.passc: "-DXXH_HEADER_NAME=\\\"lsquic_xxhash.h\\\"".}
+{.passc: "-DXXH_HEADER_NAME=" & quoteShell("\"lsquic_xxhash.h\"").}
 
 const root = currentSourcePath.parentDir.parentDir
 const lsquicInclude = root / "libs/lsquic/include"
