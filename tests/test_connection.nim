@@ -1,11 +1,10 @@
 {.used.}
 
 import chronos, chronos/unittest2/asynctests, results, chronicles
-import
-  lsquic/[api, listener, connection, stream, lsquic_ffi]
+import lsquic/[api, listener, connection, stream, lsquic_ffi]
 import ./helpers/clientserver
 
-trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'" 
+trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
 initializeLsquic(true, true)
 
@@ -84,15 +83,14 @@ proc runE2ETest(address: TransportAddress) {.async.} =
   await client.stop()
   await listener.stop()
 
-
 suite "connection":
   teardown:
     lsquic_global_cleanup()
-    
+
   asyncTest "e2e:ipv4":
     await runE2ETest(initTAddress("127.0.0.1:12345"))
 
   asyncTest "e2e:ipv6":
     skip() # not supported
-    return 
+    return
     await runE2ETest(initTAddress("[::1]:12345"))

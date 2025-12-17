@@ -1,4 +1,3 @@
-
 const fast {.strdefine.} = ""
 
 proc isFast*(): bool =
