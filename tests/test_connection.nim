@@ -1,18 +1,15 @@
 {.used.}
 
-import chronos, chronos/unittest2/asynctests, results, std/sets, chronicles
+import chronos, chronos/unittest2/asynctests, results, chronicles
 import
-  lsquic/[api, listener, tlsconfig, connection, certificateverifier, stream, lsquic_ffi]
-import ./helpers/certificate
+  lsquic/[api, listener, connection, stream, lsquic_ffi]
+import ./helpers/clientserver
+
+trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'" 
 
 proc logging(ctx: pointer, buf: cstring, len: csize_t): cint {.cdecl.} =
   echo $buf
   return 0
-
-proc certificateCb(
-    serverName: string, derCertificates: seq[seq[byte]]
-): bool {.gcsafe.} =
-  return derCertificates.len > 0
 
 let address = initTAddress("127.0.0.1:12345")
 
@@ -25,22 +22,8 @@ suite "connection":
     discard lsquic_logger_lopt("engine=debug,conn=debug,stream=debug")
     #lsquic_logger_init(addr logger, nil, LLTS_HHMMSSUS)
 
-    let customCertVerif: CertificateVerifier =
-      CustomCertificateVerifier.init(certificateCb)
-    let clientTLSConfig = TLSConfig.new(
-      testCertificate(),
-      testPrivateKey(),
-      @["test"].toHashSet(),
-      Opt.some(customCertVerif),
-    )
-    let serverTLSConfig = TLSConfig.new(
-      testCertificate(),
-      testPrivateKey(),
-      @["test"].toHashSet(),
-      Opt.some(customCertVerif),
-    )
-    let client = QuicClient.new(clientTLSConfig)
-    let server = QuicServer.new(serverTLSConfig)
+    let client = makeClient()
+    let server = makeServer()
     let listener = server.listen(address)
     let accepting = listener.accept()
     let dialing = client.dial(address)

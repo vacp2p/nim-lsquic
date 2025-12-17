@@ -1,28 +1,33 @@
-import results
-import pkg/quic
+import results, std/sets
+import chronos, chronicles
+import lsquic/[api, tlsconfig, certificateverifier, lsquic_ffi]
 import ./certificate
+
+trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'" 
 
 proc certificateCb(
     serverName: string, derCertificates: seq[seq[byte]]
 ): bool {.gcsafe.} =
   return derCertificates.len > 0
 
-proc makeClient*(): QuicClient =
+proc makeClient*(): QuicClient {.raises: [QuicConfigError, QuicError, TransportOsError].} =
   let customCertVerif: CertificateVerifier =
     CustomCertificateVerifier.init(certificateCb)
-  let alpn = @["test"]
-  let tlsConfig = TLSConfig.init(
+  let clientTLSConfig = TLSConfig.new(
     testCertificate(),
     testPrivateKey(),
-    alpn,
-    certificateVerifier = Opt.some(customCertVerif),
+    @["test"].toHashSet(),
+    Opt.some(customCertVerif),
   )
-  return QuicClient.init(tlsConfig)
+  return QuicClient.new(clientTLSConfig)
 
-proc makeServer*(): QuicServer =
+proc makeServer*(): QuicServer  {.raises: [QuicConfigError].}=
   let customCertVerif: CertificateVerifier =
     CustomCertificateVerifier.init(certificateCb)
-  let alpn = @["test"]
-  let tlsConfig =
-    TLSConfig.init(testCertificate(), testPrivateKey(), alpn, Opt.some(customCertVerif))
-  return QuicServer.init(tlsConfig)
+  let serverTLSConfig = TLSConfig.new(
+    testCertificate(),
+    testPrivateKey(),
+    @["test"].toHashSet(),
+    Opt.some(customCertVerif),
+  )
+  return QuicServer.new(serverTLSConfig)

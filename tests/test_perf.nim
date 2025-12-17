@@ -1,9 +1,9 @@
 {.used.}
 
-import chronos, chronos/unittest2/asynctests, results, std/sets, stew/endians2, sequtils, chronicles
+import chronos, chronos/unittest2/asynctests, results, stew/endians2, sequtils, chronicles
 import
-  lsquic/[api, listener, tlsconfig, connection, certificateverifier, stream, lsquic_ffi]
-import ./helpers/certificate
+  lsquic/[api, listener,  connection, stream, lsquic_ffi]
+import ./helpers/clientserver
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'" 
 
@@ -15,29 +15,10 @@ const
   downloadSize = 100000000 # 100MB
   chunkSize = 65536 # 64KB chunks like perf
 
-proc certificateCb(
-    serverName: string, derCertificates: seq[seq[byte]]
-): bool {.gcsafe.} =
-  return derCertificates.len > 0
-
 proc runPerf(): Future[Duration] {.async.} =
   let address = initTAddress("127.0.0.1:12345")
-  let customCertVerif: CertificateVerifier =
-    CustomCertificateVerifier.init(certificateCb)
-  let clientTLSConfig = TLSConfig.new(
-    testCertificate(),
-    testPrivateKey(),
-    @["test"].toHashSet(),
-    Opt.some(customCertVerif),
-  )
-  let serverTLSConfig = TLSConfig.new(
-    testCertificate(),
-    testPrivateKey(),
-    @["test"].toHashSet(),
-    Opt.some(customCertVerif),
-  )
-  let client = QuicClient.new(clientTLSConfig)
-  let server = QuicServer.new(serverTLSConfig)
+  let client = makeClient()
+  let server = makeServer()
   let listener = server.listen(address)
   let accepting = listener.accept()
   let dialing = client.dial(address)
