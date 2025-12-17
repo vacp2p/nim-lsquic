@@ -3,17 +3,18 @@
 import chronos, chronos/unittest2/asynctests, results, stew/endians2, sequtils, chronicles
 import
   lsquic/[api, listener,  connection, stream, lsquic_ffi]
-import ./helpers/clientserver
+import ./helpers/[clientserver, param]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'" 
 
 initializeLsquic(true, true)
 
 const
-  runs = 10
   uploadSize = 100000 # 100KB
   downloadSize = 100000000 # 100MB
   chunkSize = 65536 # 64KB chunks like perf
+
+const runs = if isFast(): 1 else: 10
 
 proc runPerf(): Future[Duration] {.async.} =
   let address = initTAddress("127.0.0.1:12345")
@@ -118,7 +119,7 @@ suite "perf protocol simulation":
   asyncTest "test":
     var total: Duration
 
-    echo "" # new line
+    echo "\nrunning perf with runs: ", $runs
     for i in 0 ..< runs:
       let duration = await runPerf()
       total += duration
