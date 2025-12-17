@@ -108,7 +108,6 @@ method dial*(
   ok(quicClientConn)
 
 const Cubic = 1
-const BBRv1 = 2
 
 proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
   var ctx = ClientContext()

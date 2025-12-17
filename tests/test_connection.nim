@@ -7,21 +7,12 @@ import ./helpers/clientserver
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'" 
 
-proc logging(ctx: pointer, buf: cstring, len: csize_t): cint {.cdecl.} =
-  echo $buf
-  return 0
-
-let address = initTAddress("127.0.0.1:12345")
-
 initializeLsquic(true, true)
 
 suite "connection":
-  asyncTest "test":
-    let logger = struct_lsquic_logger_if(log_buf: logging)
-    discard lsquic_set_log_level("debug")
-    discard lsquic_logger_lopt("engine=debug,conn=debug,stream=debug")
-    #lsquic_logger_init(addr logger, nil, LLTS_HHMMSSUS)
+  let address = initTAddress("127.0.0.1:12345")
 
+  asyncTest "test":
     let client = makeClient()
     let server = makeServer()
     let listener = server.listen(address)
