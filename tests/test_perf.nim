@@ -5,6 +5,8 @@ import
   lsquic/[api, listener, tlsconfig, connection, certificateverifier, stream, lsquic_ffi]
 import ./helpers/certificate
 
+trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'" 
+
 initializeLsquic(true, true)
 
 const
