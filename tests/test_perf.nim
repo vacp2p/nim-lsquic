@@ -10,11 +10,10 @@ trace "chronicles has to be imported to fix Error: undeclared identifier: 'activ
 initializeLsquic(true, true)
 
 const
+  runs = if isFast(): 1 else: 10
   uploadSize = 100000 # 100KB
   downloadSize = 100000000 # 100MB
   chunkSize = 65536 # 64KB chunks like perf
-
-const runs = if isFast(): 1 else: 10
 
 proc runPerf(): Future[Duration] {.async.} =
   let address = initTAddress("127.0.0.1:12345")
