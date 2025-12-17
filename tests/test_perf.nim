@@ -112,6 +112,9 @@ proc runPerf(): Future[Duration] {.async.} =
   return duration
 
 suite "perf protocol simulation":
+  teardown:
+    lsquic_global_cleanup()
+
   asyncTest "test":
     var total: Duration
 

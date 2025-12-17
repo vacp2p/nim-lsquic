@@ -86,6 +86,9 @@ proc runE2ETest(address: TransportAddress) {.async.} =
 
 
 suite "connection":
+  teardown:
+    lsquic_global_cleanup()
+    
   asyncTest "e2e:ipv4":
     await runE2ETest(initTAddress("127.0.0.1:12345"))
 
