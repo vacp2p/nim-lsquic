@@ -9,84 +9,87 @@ trace "chronicles has to be imported to fix Error: undeclared identifier: 'activ
 
 initializeLsquic(true, true)
 
-suite "connection":
-  let address = initTAddress("127.0.0.1:12345")
+proc runE2ETest(address: TransportAddress) {.async.} =
+  let client = makeClient()
+  let server = makeServer()
+  let listener = server.listen(address)
+  let accepting = listener.accept()
+  let dialing = client.dial(address)
 
-  asyncTest "test":
-    let client = makeClient()
-    let server = makeServer()
-    let listener = server.listen(address)
-    let accepting = listener.accept()
-    let dialing = client.dial(address)
+  let outgoingConn = await dialing
+  let incomingConn = await accepting
 
-    let outgoingConn = await dialing
-    let incomingConn = await accepting
+  check:
+    outgoingConn.certificates().len == 1
+    incomingConn.certificates().len == 1
 
-    check:
-      outgoingConn.certificates().len == 1
-      incomingConn.certificates().len == 1
+  echo "Connected!"
 
-    echo "Connected!"
+  let outgoingBehaviour = proc() {.async.} =
+    let stream = await outgoingConn.openStream()
 
-    let outgoingBehaviour = proc() {.async.} =
-      let stream = await outgoingConn.openStream()
+    await stream.write(@[1'u8, 2, 3, 4, 5])
+    await stream.write(@[6'u8, 7, 8, 9, 10])
 
-      await stream.write(@[1'u8, 2, 3, 4, 5])
-      await stream.write(@[6'u8, 7, 8, 9, 10])
+    echo "Closing client stream"
 
-      echo "Closing client stream"
+    echo "Client closed"
+    await stream.close()
 
-      echo "Client closed"
+    #echo "Client aborted"
+    # stream.abort() # Not interested in RW anything else
+
+  let incomingBehaviour = proc() {.async.} =
+    try:
+      let stream = await incomingConn.incomingStream()
+      echo "Received stream in server"
+
+      var buf = newSeq[byte](16)
+      let n1 = await stream.readOnce(buf)
+      let chunk1 = buf[0 ..< n1]
+      echo "First chunk: ", chunk1
+      let n2 = await stream.readOnce(buf)
+      let chunk2 = buf[0 ..< n2]
+      echo "Second chunk: ", chunk2
+      let n3 = await stream.readOnce(buf)
+      let chunk3 = buf[0 ..< n3]
+      echo "EOF chunk: ", chunk3
+
+      check:
+        stream.isEof
+
+      echo "Server closed"
       await stream.close()
 
-      #echo "Client aborted"
-      # stream.abort() # Not interested in RW anything else
+      #echo "Server aborted"
+      #stream.abort() # Not interested in RW anything else
+    except StreamError:
+      echo "Stream error: ", getCurrentExceptionMsg()
+    except CancelledError:
+      echo "Canceled incoming behavior"
 
-    let incomingBehaviour = proc() {.async.} =
-      try:
-        let stream = await incomingConn.incomingStream()
-        echo "Received stream in server"
+  discard allFutures(outgoingBehaviour(), incomingBehaviour())
 
-        var buf = newSeq[byte](16)
-        let n1 = await stream.readOnce(buf)
-        let chunk1 = buf[0 ..< n1]
-        echo "First chunk: ", chunk1
-        let n2 = await stream.readOnce(buf)
-        let chunk2 = buf[0 ..< n2]
-        echo "Second chunk: ", chunk2
-        let n3 = await stream.readOnce(buf)
-        let chunk3 = buf[0 ..< n3]
-        echo "EOF chunk: ", chunk3
+  await sleepAsync(1.seconds)
 
-        check:
-          stream.isEof
+  outgoingConn.close()
+  incomingConn.close()
 
-        echo "Server closed"
-        await stream.close()
+  # Cannot create a stream once closed
+  expect ConnectionError:
+    discard await outgoingConn.openStream()
 
-        #echo "Server aborted"
-        #stream.abort() # Not interested in RW anything else
-      except StreamError:
-        echo "Stream error: ", getCurrentExceptionMsg()
-      except CancelledError:
-        echo "Canceled incoming behavior"
+  await sleepAsync(1.seconds)
 
-    discard allFutures(outgoingBehaviour(), incomingBehaviour())
+  await client.stop()
+  await listener.stop()
 
-    await sleepAsync(1.seconds)
 
-    outgoingConn.close()
-    incomingConn.close()
+suite "connection":
+  asyncTest "e2e:ipv4":
+    await runE2ETest(initTAddress("127.0.0.1:12345"))
 
-    # Cannot create a stream once closed
-    expect ConnectionError:
-      discard await outgoingConn.openStream()
-
-    await sleepAsync(1.seconds)
-
-    await client.stop()
-    await listener.stop()
-
-    # TODO: destructors: (nice to have:)
-    # - lsquic_global_cleanup() to free global resources. 
-    # - lsquic_engine_destroy(engine)
+  asyncTest "e2e:ipv6":
+    skip() # not supported
+    return 
+    await runE2ETest(initTAddress("[::1]:12345"))
