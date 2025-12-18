@@ -1,4 +1,4 @@
-import std/[deques, posix]
+import std/[posix]
 import chronicles
 import chronos
 import ../[lsquic_ffi, stream]

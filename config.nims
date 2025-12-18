@@ -5,7 +5,7 @@ when not defined(windows):
   else:
     switch("gcc.linkerexe", "g++")
 
-#switch("warningAsError", "UnusedImport:on")
+switch("warningAsError", "UnusedImport:on")
 switch("warningAsError", "UseBase:on")
 
 --styleCheck:
