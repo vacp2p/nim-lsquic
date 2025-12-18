@@ -156,30 +156,32 @@ when BORINGSS_USE_ASM:
     {.compile: "./libs/boringssl/gen/bcm/x86_64-mont5-linux.S".}
 
   when defined(windows):
-    {.passl: "aes-gcm-avx2-x84_64-win.o".}
-    {.passl: "aes-gcm-avx512-x86_64-win.o".}
-    {.passl: "aesni-gcm-x86_64-win.o".}
-    {.passl: "aesni-x86-win.o".}
-    {.passl: "aesni-x86_64-win.o".}
-    {.passl: "ghash-ssse3-x86-win.o".}
-    {.passl: "ghash-ssse3-x86_64-win.o".}
-    {.passl: "ghash-x86-win.o".}
-    {.passl: "ghash-x86_64-win.o".}
-    {.passl: "p256-x86_64-asm-win.o".}
-    {.passl: "p256_beeu-x86_64-asm-win.o".}
-    {.passl: "rdrand-x86_64-win.o".}
-    {.passl: "rsaz-avx2-win.o".}
-    {.passl: "sha1-x86_64-win.o".}
-    {.passl: "sha256-x86_64-win.o".}
-    {.passl: "sha512-x86_64-win.o".}
-    {.passl: "vpaes-x86-win.o".}
-    {.passl: "vpaes-x86_64-win.o".}
-    {.passl: "x86-mont-win.o".}
-    {.passl: "x86_64-mont-win.o".}
-    {.passl: "x86_64-mont5-win.o".}
-    {.passl: "md5-x86_64-win.o".}
-    {.passl: "chacha20_poly1305_x86_64-win.o".}
-    {.passl: "chacha-x86_64-win.o".}
+    import std/os
+    const curDir = currentSourcePath().parentDir()
+    {.passl: curDir & "/aes-gcm-avx2-x86_64-win.o".}
+    {.passl: curDir & "/aes-gcm-avx512-x86_64-win.o".}
+    {.passl: curDir & "/aesni-gcm-x86_64-win.o".}
+    {.passl: curDir & "/aesni-x86-win.o".}
+    {.passl: curDir & "/aesni-x86_64-win.o".}
+    {.passl: curDir & "/ghash-ssse3-x86-win.o".}
+    {.passl: curDir & "/ghash-ssse3-x86_64-win.o".}
+    {.passl: curDir & "/ghash-x86-win.o".}
+    {.passl: curDir & "/ghash-x86_64-win.o".}
+    {.passl: curDir & "/p256-x86_64-asm-win.o".}
+    {.passl: curDir & "/p256_beeu-x86_64-asm-win.o".}
+    {.passl: curDir & "/rdrand-x86_64-win.o".}
+    {.passl: curDir & "/rsaz-avx2-win.o".}
+    {.passl: curDir & "/sha1-x86_64-win.o".}
+    {.passl: curDir & "/sha256-x86_64-win.o".}
+    {.passl: curDir & "/sha512-x86_64-win.o".}
+    {.passl: curDir & "/vpaes-x86-win.o".}
+    {.passl: curDir & "/vpaes-x86_64-win.o".}
+    {.passl: curDir & "/x86-mont-win.o".}
+    {.passl: curDir & "/x86_64-mont-win.o".}
+    {.passl: curDir & "/x86_64-mont5-win.o".}
+    {.passl: curDir & "/md5-x86_64-win.o".}
+    {.passl: curDir & "/chacha20_poly1305_x86_64-win.o".}
+    {.passl: curDir & "/chacha-x86_64-win.o".}
 
 # ----- generated sources -----
 {.compile: "./libs/boringssl/crypto/fipsmodule/bcm.cc".}
