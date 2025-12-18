@@ -12,7 +12,7 @@ all: windows-boringssl
 
 windows-boringssl:
 	git -C ./libs/boringssl/third_party/fiat/ apply ../../../p256_64.h.patch
-	nasm -f win64 ./libs/boringssl/gen/bcm/aes-gcm-avx2-x86_64-win.asm -o aes-gcm-avx2-x84_64-win.o
+	nasm -f win64 ./libs/boringssl/gen/bcm/aes-gcm-avx2-x86_64-win.asm -o aes-gcm-avx2-x86_64-win.o
 	nasm -f win64 ./libs/boringssl/gen/bcm/aes-gcm-avx512-x86_64-win.asm -o aes-gcm-avx512-x86_64-win.o
 	nasm -f win64 ./libs/boringssl/gen/bcm/aesni-gcm-x86_64-win.asm -o aesni-gcm-x86_64-win.o
 	nasm -f win64 ./libs/boringssl/gen/bcm/aesni-x86-win.asm -o aesni-x86-win.o
