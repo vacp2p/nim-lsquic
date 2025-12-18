@@ -1,4 +1,4 @@
-const fast {.strdefine.} = ""
+const fast {.booldefine.}: bool = false
 
 proc isFast*(): bool =
-  return fast == "true"
+  return fast
