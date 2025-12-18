@@ -51,14 +51,14 @@ task format, "Format nim code using nph":
 
 task test, "Run tests":
   when defined(windows):
-    exec "nim c --mm:refc -d:nimDebugDlOpen --threads:on tests/test_all.nim"
+    exec "nim c --mm:refc -d:nimDebugDlOpen -d:fast --threads:on tests/test_all.nim"
   else:
-    exec "nim c --mm:refc --threads:on tests/test_all.nim"
+    exec "nim c --mm:refc -d:fast --threads:on tests/test_all.nim"
   exec "./tests/test_all --output-level=VERBOSE"
 
 task test_release, "Run tests - release":
   when defined(windows):
-    exec "nim c -d:release --mm:refc -d:nimDebugDlOpen --threads:on tests/test_all.nim"
+    exec "nim c -d:release --mm:refc -d:fast -d:nimDebugDlOpen --threads:on tests/test_all.nim"
   else:
-    exec "nim c -d:release --mm:refc --threads:on tests/test_all.nim"
+    exec "nim c -d:release --mm:refc -d:fast --threads:on tests/test_all.nim"
   exec "./tests/test_all --output-level=VERBOSE"

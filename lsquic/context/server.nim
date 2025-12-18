@@ -44,7 +44,6 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   lsquic_conn_set_ctx(conn, nil)
 
 const Cubic = 1
-const BBRv1 = 2
 
 proc new*(
     T: typedesc[ServerContext],

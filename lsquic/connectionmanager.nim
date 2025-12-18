@@ -1,9 +1,7 @@
 import chronicles
 import chronos
 import chronos/osdefs
-import results
-import ./[connection, tlsconfig, datagram]
-import ./helpers/asyncloop
+import ./[connection, tlsconfig]
 import ./context/context
 
 type ConnectionManager* = ref object of RootObj
