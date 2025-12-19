@@ -42,11 +42,20 @@ proc newListener*(
     except TransportError as e:
       error "Unexpect transport error", errorMsg = e.msg
 
+  var udp: DatagramTransport
+  case address.family
+  of AddressFamily.IPv4:
+    udp = newDatagramTransport(onReceive, local = address)
+  of AddressFamily.IPv6:
+    udp = newDatagramTransport6(onReceive, local = address)
+  else:
+    error "newListener supports only IPv4/IPv6 address"
+
   let listener = Listener(
     tlsConfig: tlsConfig,
     quicContext: quicContext,
     connman: ConnectionManager.new(),
-    udp: newDatagramTransport(onReceive, local = address),
+    udp: udp,
   )
   quicContext.fd = cint(listener.udp.fd)
 

@@ -33,7 +33,7 @@ proc new*(
 
   let client = QuicClient(
     quicContext: clientCtx,
-    udp: newDatagramTransport(onReceive),
+    udp: newDatagramTransport6(onReceive),
     connman: ConnectionManager.new(),
   )
   clientCtx.fd = cint(client.udp.fd)
