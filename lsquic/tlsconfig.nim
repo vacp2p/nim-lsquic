@@ -1,8 +1,6 @@
 import std/sets
 import results
-import ./[certificateverifier, lsquic_ffi]
-
-type QuicConfigError* = object of CatchableError
+import ./[errors, certificateverifier, lsquic_ffi]
 
 type TLSConfig* = ref object
   certVerifier*: Opt[CertificateVerifier]

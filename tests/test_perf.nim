@@ -2,7 +2,7 @@
 
 import
   chronos, chronos/unittest2/asynctests, results, stew/endians2, sequtils, chronicles
-import lsquic/[api, listener, connection, stream, lsquic_ffi]
+import lsquic/api
 import ./helpers/[clientserver, param]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
@@ -113,7 +113,7 @@ proc runPerf(): Future[Duration] {.async.} =
 
 suite "perf protocol simulation":
   teardown:
-    lsquic_global_cleanup()
+    cleanupLsquic()
 
   asyncTest "test":
     var total: Duration

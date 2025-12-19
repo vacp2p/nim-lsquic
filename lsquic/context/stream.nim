@@ -1,7 +1,7 @@
 import std/[posix]
 import chronicles
 import chronos
-import ../[lsquic_ffi, stream]
+import ../[lsquic_ffi, errors, stream]
 import ../helpers/sequninit
 
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =

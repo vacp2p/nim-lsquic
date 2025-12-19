@@ -1,11 +1,17 @@
-import chronicles
-import chronos
-import chronos/osdefs
-import results
-import ./[connection, tlsconfig, datagram, connectionmanager]
+import std/sets, chronos, chronicles, results
+import ./[errors, connection, tlsconfig, datagram, connectionmanager]
 import ./context/[server, context, io]
 
-export stop
+type QuicServer* = ref object of RootObj
+  tlsConfig: TLSConfig
+
+proc new*(
+    t: typedesc[QuicServer], tlsConfig: TLSConfig
+): QuicServer {.raises: [QuicConfigError].} =
+  if tlsConfig.certificate.len == 0:
+    raise newException(QuicConfigError, "tlsConfig does not contain a certificate")
+
+  return QuicServer(tlsConfig: tlsConfig)
 
 type Listener* = ref object of RootObj
   quicContext: ServerContext
@@ -73,3 +79,9 @@ proc stop*(listener: Listener) {.async: (raises: [CancelledError]).} =
   # stop the udp transport.
   await noCancel sleepAsync(300.milliseconds)
   await noCancel listener.udp.closeWait()
+
+proc listen*(
+    self: QuicServer, address: TransportAddress
+): Listener {.raises: [QuicError, TransportOsError].} =
+  newListener(self.tlsConfig, address).valueOr:
+    raise newException(QuicError, error)
