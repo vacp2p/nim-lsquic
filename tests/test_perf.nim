@@ -2,7 +2,7 @@
 
 import
   chronos, chronos/unittest2/asynctests, results, stew/endians2, sequtils, chronicles
-import lsquic/api
+import lsquic
 import ./helpers/[clientserver, param]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
