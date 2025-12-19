@@ -1,7 +1,8 @@
 import chronos
 import chronos/osdefs
 import chronicles
-import ../[lsquic_ffi, errors, tlsconfig, timeout, certificates, certificateverifier, stream]
+import
+  ../[lsquic_ffi, errors, tlsconfig, timeout, certificates, certificateverifier, stream]
 
 let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is global
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
