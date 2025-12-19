@@ -1,3 +1,3 @@
-import ./[errors, client, server, connection, stream, lsquic]
+import ./[errors, client, server, connection, stream, lsquic, tlsconfig, certificateverifier]
 
-export client, server, errors, connection, stream, lsquic
+export errors, client, server, connection, stream, lsquic, tlsconfig, certificateverifier
