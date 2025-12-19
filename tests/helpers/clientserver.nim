@@ -1,6 +1,5 @@
-import results, std/sets
-import chronos, chronicles
-import lsquic/api
+import results, std/sets, chronos, chronicles
+import lsquic
 import ./certificate
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
