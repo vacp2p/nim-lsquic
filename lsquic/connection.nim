@@ -1,7 +1,7 @@
 import chronicles
 import chronos
-import ./[errors, stream, tlsconfig, datagram, lsquic_ffi]
-import ./context/[context, io]
+import ./[errors, stream, tlsconfig, lsquic_ffi]
+import ./context/context
 
 type
   Connection* = ref object of RootObj
@@ -74,9 +74,6 @@ proc newIncomingConnection*(
   conn.quicConn.onClose = proc() {.raises: [].} =
     conn.closed.fire()
   conn
-
-proc receive*(connection: Connection, datagram: sink Datagram) =
-  connection.quicContext.receive(datagram, connection.local, connection.remote)
 
 proc dial*(
     connection: OutgoingConnection
