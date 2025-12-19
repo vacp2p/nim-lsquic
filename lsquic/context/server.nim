@@ -45,16 +45,10 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
 
 const Cubic = 1
 
-proc new*(
-    T: typedesc[ServerContext],
-    tlsConfig: TLSConfig,
-    incoming: AsyncQueue[QuicConnection],
-    fd: cint,
-): Result[T, string] =
+proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
   var ctx = ServerContext()
   ctx.tlsConfig = tlsConfig
-  ctx.incoming = incoming
-  ctx.fd = fd
+  ctx.incoming = newAsyncQueue[QuicConnection]()
   ctx.setupSSLContext()
 
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)
