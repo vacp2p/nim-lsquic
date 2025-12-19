@@ -3,10 +3,6 @@ import chronos
 import ./[errors, stream, tlsconfig, datagram, lsquic_ffi]
 import ./context/[context, io]
 
-export ConnectionError
-export ConnectionClosedError
-export DialError
-
 type
   Connection* = ref object of RootObj
     local: TransportAddress
