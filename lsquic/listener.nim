@@ -7,14 +7,21 @@ import ./context/[server, context, io]
 
 export stop
 
-type Listener* = ref object of ConnectionManager
+type Listener* = ref object of RootObj
+  quicContext: ServerContext
+  connman: ConnectionManager
+  udp: DatagramTransport
+  tlsConfig: TLSConfig
   incoming: AsyncQueue[QuicConnection]
 
 proc newListener*(
     tlsConfig: TLSConfig, address: TransportAddress
 ): Result[Listener, string] =
-  let incoming = newAsyncQueue[QuicConnection]()
-  let listener = Listener(incoming: incoming)
+  let listener = Listener(
+    tlsConfig: tlsConfig,
+    incoming: newAsyncQueue[QuicConnection](),
+    connman: ConnectionManager.new(),
+  )
   proc onReceive(
       udp: DatagramTransport, remote: TransportAddress
   ) {.async: (raises: []).} =
@@ -24,10 +31,10 @@ proc newListener*(
     except TransportError as e:
       error "Unexpect transport error", errorMsg = e.msg
 
-  let datagramTransport = newDatagramTransport(onReceive, local = address)
-  let quicContext = ?ServerContext.new(tlsConfig, incoming, datagramTransport.fd.cint)
+  let udp = newDatagramTransport(onReceive, local = address)
+  listener.udp = udp
+  listener.quicContext = ?ServerContext.new(tlsConfig, listener.incoming, udp.fd.cint)
 
-  listener.init(tlsConfig, datagramTransport, quicContext)
   ok(listener)
 
 proc waitForIncoming(
@@ -40,7 +47,7 @@ proc accept*(
 ): Future[Connection] {.async: (raises: [CancelledError, TransportError]).} =
   let
     incomingFut = listener.waitForIncoming()
-    closedFut = listener.closed
+    closedFut = listener.connman.closed
     raceFut = await race(closedFut, incomingFut)
 
   if raceFut == closedFut:
@@ -49,10 +56,20 @@ proc accept*(
 
   let quicConn = await incomingFut
   let conn = newIncomingConnection(listener.tlsConfig, listener.quicContext, quicConn)
-  listener.addConnection(conn)
+  listener.connman.addConnection(conn)
   conn
 
 proc localAddress*(
     listener: Listener
 ): TransportAddress {.raises: [TransportOsError].} =
   listener.udp.localAddress()
+
+proc stop*(listener: Listener) {.async: (raises: [CancelledError]).} =
+  await noCancel listener.connman.stop()
+  # Politely wait before closing udp so connections closure go out
+  # TODO: this should be ~ 3 times the PTO.
+  # Find out if it's possible to react to shutting down the context and
+  # lsquic engine. Maybe there's a callback that one can hook to and safely
+  # stop the udp transport.
+  await noCancel sleepAsync(300.milliseconds)
+  await noCancel listener.udp.closeWait()

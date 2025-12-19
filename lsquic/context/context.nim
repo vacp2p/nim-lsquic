@@ -19,7 +19,6 @@ type QuicContext* = ref object of RootObj
   tlsConfig*: TLSConfig
   tickTimeout*: Timeout
   sslCtx*: ptr SSL_CTX
-  dtp*: DatagramTransport
   fd*: cint
 
 proc engine_process*(ctx: QuicContext) =
