@@ -12,35 +12,35 @@ type Listener* = ref object of RootObj
   connman: ConnectionManager
   udp: DatagramTransport
   tlsConfig: TLSConfig
-  incoming: AsyncQueue[QuicConnection]
 
 proc newListener*(
     tlsConfig: TLSConfig, address: TransportAddress
 ): Result[Listener, string] =
-  let listener = Listener(
-    tlsConfig: tlsConfig,
-    incoming: newAsyncQueue[QuicConnection](),
-    connman: ConnectionManager.new(),
-  )
+  let quicContext = ?ServerContext.new(tlsConfig)
+
   proc onReceive(
       udp: DatagramTransport, remote: TransportAddress
   ) {.async: (raises: []).} =
     try:
       let datagram = Datagram(data: udp.getMessage())
-      listener.quicContext.receive(datagram, udp.localAddress(), remote)
+      quicContext.receive(datagram, udp.localAddress(), remote)
     except TransportError as e:
       error "Unexpect transport error", errorMsg = e.msg
 
-  let udp = newDatagramTransport(onReceive, local = address)
-  listener.udp = udp
-  listener.quicContext = ?ServerContext.new(tlsConfig, listener.incoming, udp.fd.cint)
+  let listener = Listener(
+    tlsConfig: tlsConfig,
+    quicContext: quicContext,
+    connman: ConnectionManager.new(),
+    udp: newDatagramTransport(onReceive, local = address),
+  )
+  quicContext.fd = cint(listener.udp.fd)
 
   ok(listener)
 
 proc waitForIncoming(
     listener: Listener
 ): Future[QuicConnection] {.async: (raises: [CancelledError]).} =
-  await listener.incoming.get()
+  await listener.quicContext.incoming.get()
 
 proc accept*(
     listener: Listener
