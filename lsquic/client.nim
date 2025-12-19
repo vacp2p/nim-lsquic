@@ -1,7 +1,6 @@
 import chronos, chronicles, results
 import ./[errors, connection, tlsconfig, datagram, connectionmanager]
 import ./context/[context, io, client]
-import lsquic_ffi
 
 type QuicClient* = ref object of RootObj
   quicContext: ClientContext
