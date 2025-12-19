@@ -1,9 +1,7 @@
 import std/[deques, posix]
 import chronos
 import chronicles
-import ./lsquic_ffi
-
-type StreamError* = object of IOError
+import ./[lsquic_ffi, errors]
 
 type WriteTask* = object
   data*: ptr byte

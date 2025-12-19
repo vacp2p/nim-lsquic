@@ -1,6 +1,6 @@
 import chronicles
 import chronos
-import ./[stream, tlsconfig, datagram, lsquic_ffi]
+import ./[errors, stream, tlsconfig, datagram, lsquic_ffi]
 import ./context/[context, io]
 
 export ConnectionError
