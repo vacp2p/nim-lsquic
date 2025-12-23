@@ -44,7 +44,7 @@ proc createCtxUdp(
     of AddressFamily.IPv6:
       newDatagramTransport6(onReceive)
     else:
-      raiseAssert "client supports only IPv4/IPv6 address"
+      raise newException(QuicError, "client supports only IPv4/IPv6 address")
 
   ctx.fd = cint(udp.fd)
 
@@ -73,7 +73,9 @@ proc getCtxUdp(
 
 proc dial*(
     self: QuicClient, address: TransportAddress
-): Future[Connection] {.async: (raises: [CancelledError, QuicError, DialError, TransportOsError]).} =
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
   let (ctx, udp) = self.getCtxUdp(address.family)
   let connection = newOutgoingConnection(ctx, udp.localAddress, address)
   self.connman.addConnection(connection)
