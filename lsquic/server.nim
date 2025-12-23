@@ -49,7 +49,7 @@ proc newListener*(
   of AddressFamily.IPv6:
     udp = newDatagramTransport6(onReceive, local = address)
   else:
-    error "newListener supports only IPv4/IPv6 address"
+    return err("only IPv4/IPv6 address is supported")
 
   let listener = Listener(
     tlsConfig: tlsConfig,
