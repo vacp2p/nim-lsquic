@@ -50,12 +50,12 @@ task format, "Format nim code using nph":
   exec "nph ./. *.nim"
 
 task test, "Run tests":
-  let nimc = "nim c -d:fast --threads:on " & flags
+  var nimc = "nim c -d:fast --threads:on " & flags
 
   when defined(windows):
-    exec nimc & " -d:nimDebugDlOpen tests/test_all.nim"
-  else:
-    exec nimc & " tests/test_all.nim"
+    nimc &= " -d:nimDebugDlOpen"
+
+  exec nimc & " tests/test_all.nim"
   exec "./tests/test_all --output-level=VERBOSE"
 
 task test_release, "Run tests - release":
