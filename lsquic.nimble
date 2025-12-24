@@ -8,7 +8,6 @@ installFiles = @["lsquic.nim", "boringssl.nim"]
 
 requires "nim >= 2.0.0"
 requires "zlib"
-requires "nim >= 2.0.0"
 requires "stew >= 0.4.0"
 requires "chronos >= 4.0.4"
 requires "nimcrypto >= 0.6.0"
@@ -16,9 +15,9 @@ requires "unittest2"
 requires "chronicles >= 0.11.0"
 
 before install:
-  exec "git submodule update --init --recursive"
   when defined(windows):
     # On Windows MinGW there's no assembly for adx so we fall back to portable implementation via patch
+    exec "git submodule update --init --recursive"
     exec "git -C ./libs/boringssl/third_party/fiat/ apply ../../../p256_64.h.patch"
     exec "nasm -f win64 ./libs/boringssl/gen/bcm/aes-gcm-avx2-x86_64-win.asm -o aes-gcm-avx2-x86_64-win.o"
     exec "nasm -f win64 ./libs/boringssl/gen/bcm/aes-gcm-avx512-x86_64-win.asm -o aes-gcm-avx512-x86_64-win.o"
