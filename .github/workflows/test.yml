@@ -34,6 +34,8 @@ jobs:
             memory_management: refc
           - ref: version-2-2
             memory_management: refc
+          - ref: version-2-2
+            memory_management: orc
         include:
           - platform:
               os: linux
@@ -56,7 +58,7 @@ jobs:
       run:
         shell: ${{ matrix.shell }}
 
-    name: "${{ matrix.platform.os }}-${{ matrix.platform.cpu }} (Nim ${{ matrix.nim.ref }})"
+    name: "${{ matrix.platform.os }}-${{ matrix.platform.cpu }} (Nim ${{ matrix.nim.ref }} --mm=${{ matrix.nim.memory_management }})"
     runs-on: ${{ matrix.builder }}
     steps:
       - name: Checkout
