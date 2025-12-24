@@ -14,6 +14,8 @@ requires "nimcrypto >= 0.6.0"
 requires "unittest2"
 requires "chronicles >= 0.11.0"
 
+var flags = getEnv("NIMFLAGS", "") # Extra flags for the compiler
+
 before install:
   when defined(windows):
     # On Windows MinGW there's no assembly for adx so we fall back to portable implementation via patch
@@ -45,19 +47,17 @@ before install:
     exec "nasm -f win64 ./libs/boringssl/gen/crypto/chacha-x86_64-win.asm -o chacha-x86_64-win.o"
 
 task format, "Format nim code using nph":
-  exec "nimble install nph"
-  exec "nph ."
+  exec "nph ./. *.nim"
 
 task test, "Run tests":
+  var nimc = "nim c -d:fast --threads:on " & flags
+
   when defined(windows):
-    exec "nim c --mm:refc -d:nimDebugDlOpen -d:fast --threads:on tests/test_all.nim"
-  else:
-    exec "nim c --mm:refc -d:fast --threads:on tests/test_all.nim"
+    nimc &= " -d:nimDebugDlOpen"
+
+  exec nimc & " tests/test_all.nim"
   exec "./tests/test_all --output-level=VERBOSE"
 
 task test_release, "Run tests - release":
-  when defined(windows):
-    exec "nim c -d:release --mm:refc -d:fast -d:nimDebugDlOpen --threads:on tests/test_all.nim"
-  else:
-    exec "nim c -d:release --mm:refc -d:fast --threads:on tests/test_all.nim"
-  exec "./tests/test_all --output-level=VERBOSE"
+  flags = flags & " -d:release "
+  testTask()
