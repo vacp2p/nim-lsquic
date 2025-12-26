@@ -17,10 +17,12 @@ trace "chronicles has to be imported to fix Error: undeclared identifier: 'activ
 
 initializeLsquic(true, true)
 
-proc runE2ETest(address: TransportAddress) {.async.} =
+proc runConnectionTest(address: TransportAddress) {.async.} =
   let client = makeClient()
   let server = makeServer()
   let listener = server.listen(address)
+  defer:
+    await allFutures(client.stop(), listener.stop())
   let accepting = listener.accept()
   let dialing = client.dial(address)
 
@@ -89,17 +91,12 @@ proc runE2ETest(address: TransportAddress) {.async.} =
 
   await sleepAsync(1.seconds)
 
-  await client.stop()
-  await listener.stop()
-
 suite "connection":
   teardown:
     cleanupLsquic()
 
-  asyncTest "e2e:ipv4":
-    await runE2ETest(initTAddress("127.0.0.1:12345"))
+  asyncTest "ipv4":
+    await runConnectionTest(initTAddress("127.0.0.1:12345"))
 
-  asyncTest "e2e:ipv6":
-    skip() # not supported
-    return
-    await runE2ETest(initTAddress("[::1]:12345"))
+  asyncTest "ipv6":
+    await runConnectionTest(initTAddress("[::1]:12345"))
