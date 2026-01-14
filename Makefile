@@ -13,8 +13,9 @@ ASM_LIST := $(filter-out ,$(strip $(ASM_LIST)))
 all: windows-boringssl
 
 windows-boringssl:
+	git submodule update --init --recursive
 	for f in $(ASM_LIST); do \
-		nasm -f win64 $$f -o $$(basename $$f .asm).o; \
+		nasm -f win64 $$f -o ./libs/$$(basename $$f .asm).o; \
 	done
 	
 else

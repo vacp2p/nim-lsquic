@@ -22,10 +22,10 @@ before install:
   when defined(windows):
     exec "git submodule update --init --recursive"
 
-    let asmListPath = "scripts/boringssl_win_nasm.list"
+    let asmListPath = "./scripts/boringssl_win_nasm.list"
     let asmFiles = readFile(asmListPath).splitLines().filterIt(it.len > 0)
     for asmPath in asmFiles:
-      let outObj = asmPath.splitFile.name & ".o"
+      let outObj = "./libs/" & asmPath.splitFile.name & ".o"
       exec "nasm -f win64 " & asmPath & " -o " & outObj
 
 task format, "Format nim code using nph":
