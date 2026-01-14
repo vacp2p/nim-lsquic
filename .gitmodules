@@ -1,6 +1,3 @@
 [submodule "libs/lsquic"]
 	path = libs/lsquic
 	url = https://github.com/litespeedtech/lsquic.git
-[submodule "libs/boringssl"]
-	path = libs/boringssl
-	url = https://github.com/vacp2p/boringssl.git
