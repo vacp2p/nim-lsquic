@@ -13,15 +13,6 @@ ASM_LIST := $(filter-out ,$(strip $(ASM_LIST)))
 all: windows-boringssl
 
 windows-boringssl:
-	@cd ./libs/boringssl/third_party/fiat/ && \
-	if git apply --check ../../../p256_64.h.patch; then \
-		git apply ../../../p256_64.h.patch; \
-	elif git apply --reverse --check ../../../p256_64.h.patch; then \
-		echo "p256_64.h.patch already applied; skipping"; \
-	else \
-		echo "p256_64.h.patch does not apply cleanly; aborting"; \
-		exit 1; \
-	fi
 	for f in $(ASM_LIST); do \
 		nasm -f win64 $$f -o $$(basename $$f .asm).o; \
 	done

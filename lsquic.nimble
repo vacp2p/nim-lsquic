@@ -28,8 +28,6 @@ before install:
       let outObj = asmPath.splitFile.name & ".o"
       exec "nasm -f win64 " & asmPath & " -o " & outObj
 
-    # On Windows MinGW there's no assembly for fiat_p256_adx_mul and fiat_p256_adx_sqr so we fall back to portable implementation via patch
-    exec "git -C ./libs/boringssl/third_party/fiat/ apply --ignore-space-change ../../../p256_64.h.patch"
 
 task format, "Format nim code using nph":
   exec "nph ./. *.nim"
