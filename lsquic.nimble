@@ -28,7 +28,6 @@ before install:
       let outObj = asmPath.splitFile.name & ".o"
       exec "nasm -f win64 " & asmPath & " -o " & outObj
 
-
 task format, "Format nim code using nph":
   exec "nph ./. *.nim"
 
