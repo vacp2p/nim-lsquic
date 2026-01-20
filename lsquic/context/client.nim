@@ -60,8 +60,7 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
       let msg = $cast[cstring](addr buf[0])
       quicClientConn.connectedFut.fail(
         newException(
-          ConnectionError,
-          "could not connect to server. Status: " & $connStatus & ". " & msg,
+          DialError, "could not connect to server. Status: " & $connStatus & ". " & msg
         )
       )
     quicClientConn.cancelPending()

@@ -87,7 +87,8 @@ proc newIncomingConnection*(
 proc dial*(
     connection: OutgoingConnection
 ) {.async: (raw: true, raises: [CancelledError, DialError]).} =
-  let retFut = newFuture[void]()
+  let retFut =
+    Future[void].Raising([CancelledError, DialError]).init("OutgoingConnection.dial")
   let onClose = proc() {.raises: [].} =
     connection.closed.fire()
 
