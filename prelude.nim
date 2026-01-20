@@ -9,8 +9,6 @@ import ../boringssl
 
 type ptrdiff_t* {.importc: "ptrdiff_t", header: "<stddef.h>".} = int
 
-{.passc: "-DXXH_HEADER_NAME=\\\"lsquic_xxhash.h\\\"".}
-
 const root = currentSourcePath.parentDir.parentDir
 const lsquicInclude = root / "libs/lsquic/include"
 const boringsslInclude = root / "libs/vac_boringssl/include"
@@ -30,11 +28,12 @@ when defined(windows):
 {.passc: fmt"-I{lshpack}".}
 {.passc: fmt"-I{xxhash}".}
 
-{.passc: "-DHAVE_BORINGSSL".}
+const HAVE_BORINGSSL = "-DHAVE_BORINGSSL"
+const XXH_HEADER_NAME = "-DXXH_HEADER_NAME=\\\"lsquic_xxhash.h\\\""
 
 {.compile: "../libs/lsquic/src/liblsquic/lsquic_xxhash.c".}
-{.compile: "../libs/lsquic/src/liblsquic/ls-qpack/lsqpack.c".}
-{.compile: "../libs/lsquic/src/lshpack/lshpack.c".}
+{.compile("../libs/lsquic/src/liblsquic/ls-qpack/lsqpack.c", XXH_HEADER_NAME).}
+{.compile("../libs/lsquic/src/lshpack/lshpack.c", XXH_HEADER_NAME).}
 {.compile: "../libs/lsquic/src/liblsquic/ls-sfparser.c".}
 {.compile: "../libs/lsquic/src/liblsquic/lsquic_adaptive_cc.c".}
 {.compile: "../libs/lsquic/src/liblsquic/lsquic_alarmset.c".}
@@ -47,7 +46,7 @@ when defined(windows):
 {.compile: "../libs/lsquic/src/liblsquic/lsquic_conn.c".}
 {.compile: "../libs/lsquic/src/liblsquic/lsquic_crand.c".}
 {.compile: "../libs/lsquic/src/liblsquic/lsquic_crt_compress.c".}
-{.compile: "../libs/lsquic/src/liblsquic/lsquic_crypto.c".}
+{.compile("../libs/lsquic/src/liblsquic/lsquic_crypto.c", HAVE_BORINGSSL).}
 {.compile: "../libs/lsquic/src/liblsquic/lsquic_cubic.c".}
 {.compile: "../libs/lsquic/src/liblsquic/lsquic_di_error.c".}
 {.compile: "../libs/lsquic/src/liblsquic/lsquic_di_hash.c".}
