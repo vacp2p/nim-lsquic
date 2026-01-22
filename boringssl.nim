@@ -11,7 +11,7 @@
 # TODO: look into use assembly files for perf
 
 # ----- toolchain + includes -----
-{.passc: "-DBORINGSSL_IMPLEMENTATION -DS2N_BN_HIDE_SYMBOLS".}
+{.localPassC: "-DBORINGSSL_IMPLEMENTATION -DS2N_BN_HIDE_SYMBOLS".}
 
 {.
   localPassC:
