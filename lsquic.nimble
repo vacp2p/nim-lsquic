@@ -6,10 +6,10 @@ license = "MIT"
 installDirs = @["libs"]
 installFiles = @["lsquic.nim", "boringssl.nim"]
 
-requires "nim >= 2.0.0"
+requires "nim >= 2.0.16"
 requires "zlib"
 requires "stew >= 0.4.0"
-requires "chronos >= 4.0.4"
+requires "chronos >= 4.2.0"
 requires "nimcrypto >= 0.6.0"
 requires "unittest2"
 requires "chronicles >= 0.11.0"
