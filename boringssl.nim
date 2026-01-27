@@ -29,6 +29,7 @@ elif defined(linux):
   {.localPassC: "-D_XOPEN_SOURCE=700".}
   {.localPassC: "-lstdc++".}
 elif defined(windows):
+  {.passl: "-lwinpthread".}
   {.
     localPassC:
       "-D_HAS_EXCEPTIONS=0 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS"
