@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# Copyright (c) Status Research & Development GmbH 
+
 when defined(windows):
   {.passc: "-D_WIN32_WINNT=0x0600".}
   {.passl: "-lws2_32".}
