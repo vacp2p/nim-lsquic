@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# Copyright (c) Status Research & Development GmbH 
+
 # Windows-only NASM build helpers for BoringSSL objects.
 ifeq ($(OS),Windows_NT)
 WINDOWS := 1
