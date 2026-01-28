@@ -32,11 +32,7 @@ when defined(windows):
 {.passc: fmt"-I{xxhash}".}
 
 const HAVE_BORINGSSL = "-DHAVE_BORINGSSL"
-
-when defined(windows) and defined(clang):
-  const XXH_HEADER_NAME = "-DXXH_HEADER_NAME='<lsquic_xxhash.h>'"
-else:
-  const XXH_HEADER_NAME = "-DXXH_HEADER_NAME=\\\"lsquic_xxhash.h\\\""
+const XXH_HEADER_NAME = "-DXXH_HEADER_NAME='<lsquic_xxhash.h>'"
 
 {.compile: "../libs/lsquic/src/liblsquic/lsquic_xxhash.c".}
 {.compile("../libs/lsquic/src/liblsquic/ls-qpack/lsqpack.c", XXH_HEADER_NAME).}
