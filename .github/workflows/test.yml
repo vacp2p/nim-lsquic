@@ -71,8 +71,8 @@ jobs:
         id: windows-mingw-cache
         uses: actions/cache@v4
         with:
-          path: external/mingw-${{ matrix.target.cpu }}
-          key: 'mingw-llvm-17-${{ matrix.target.cpu }}'
+          path: external/mingw-${{ matrix.platform.cpu }}
+          key: 'mingw-llvm-17-${{ matrix.platform.cpu }}'
 
       - name: Install llvm-mingw dependency (Windows)
         if: >
@@ -82,17 +82,15 @@ jobs:
           mkdir -p external
           MINGW_BASE="https://github.com/mstorsjo/llvm-mingw/releases/download/20230905"
           MINGW_URL="$MINGW_BASE/llvm-mingw-20230905-ucrt-x86_64.zip"
-          curl -L "$MINGW_URL" -o "external/mingw-${{ matrix.target.cpu }}.zip"
-          7z x -y "external/mingw-${{ matrix.target.cpu }}.zip" -oexternal/mingw-${{ matrix.target.cpu }}/
-          mv external/mingw-${{ matrix.target.cpu }}/**/* ./external/mingw-${{ matrix.target.cpu }}
+          curl -L "$MINGW_URL" -o "external/mingw-${{ matrix.platform.cpu }}.zip"
+          7z x -y "external/mingw-${{ matrix.platform.cpu }}.zip" -oexternal/mingw-${{ matrix.platform.cpu }}/
+          mv external/mingw-${{ matrix.platform.cpu }}/**/* ./external/mingw-${{ matrix.platform.cpu }}
 
       - name: Path to cached dependencies (Windows)
         if: >
           runner.os == 'Windows'
         run: |
-          echo '${{ github.workspace }}'"/external/mingw-${{ matrix.target.cpu }}/bin" >> $GITHUB_PATH
-          echo "${{ github.workspace }}/external/dlls-${{ matrix.target.cpu }}" >> $GITHUB_PATH
-          # for miniupnp that runs "wingenminiupnpcstrings.exe" from the current dir
+          echo '${{ github.workspace }}'"/external/mingw-${{ matrix.platform.cpu }}/bin" >> $GITHUB_PATH
           echo "." >> $GITHUB_PATH
 
       - name: Install nasm (Windows)
