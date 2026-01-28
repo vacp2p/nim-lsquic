@@ -4,9 +4,7 @@
 when defined(windows):
   {.passc: "-D_WIN32_WINNT=0x0600".}
   {.passl: "-lws2_32".}
-  # lsquic requires windows specific pthread otherwise the compiler will complain
-  # about missing pthread functions
-  {.passl: "-lwinpthread".}
+  {.passl: "-lpthread".}
 
 import std/[os, strformat, strutils]
 import chronos/osdefs
