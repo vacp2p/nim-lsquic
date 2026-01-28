@@ -52,7 +52,7 @@ jobs:
           - platform:
               os: windows
             builder: windows-2022
-            shell: msys2 {0}
+            shell: bash
 
     defaults:
       run:
@@ -65,6 +65,42 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: "recursive"
+
+      - name: Restore llvm-mingw (Windows) from cache
+        if: runner.os == 'Windows'
+        id: windows-mingw-cache
+        uses: actions/cache@v4
+        with:
+          path: external/mingw-${{ matrix.target.cpu }}
+          key: 'mingw-llvm-17-${{ matrix.target.cpu }}'
+
+      - name: Install llvm-mingw dependency (Windows)
+        if: >
+          steps.windows-mingw-cache.outputs.cache-hit != 'true' &&
+          runner.os == 'Windows'
+        run: |
+          mkdir -p external
+          MINGW_BASE="https://github.com/mstorsjo/llvm-mingw/releases/download/20230905"
+          MINGW_URL="$MINGW_BASE/llvm-mingw-20230905-ucrt-x86_64.zip"
+          curl -L "$MINGW_URL" -o "external/mingw-${{ matrix.target.cpu }}.zip"
+          7z x -y "external/mingw-${{ matrix.target.cpu }}.zip" -oexternal/mingw-${{ matrix.target.cpu }}/
+          mv external/mingw-${{ matrix.target.cpu }}/**/* ./external/mingw-${{ matrix.target.cpu }}
+
+      - name: Path to cached dependencies (Windows)
+        if: >
+          runner.os == 'Windows'
+        run: |
+          echo '${{ github.workspace }}'"/external/mingw-${{ matrix.target.cpu }}/bin" >> $GITHUB_PATH
+          echo "${{ github.workspace }}/external/dlls-${{ matrix.target.cpu }}" >> $GITHUB_PATH
+          # for miniupnp that runs "wingenminiupnpcstrings.exe" from the current dir
+          echo "." >> $GITHUB_PATH
+
+      - name: Install nasm (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nasm --no-progress -y
+          "C:\Program Files\NASM" | Out-File -FilePath $Env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Setup Nim
         uses: "./.github/actions/install_nim"
@@ -83,10 +119,6 @@ jobs:
           # The change happened on Nimble v0.14.0. Also forcing the deps to be reinstalled on each os and cpu.
           key: nimbledeps-${{ matrix.nim.ref }}-${{ matrix.builder }}-${{ matrix.platform.cpu }}-${{ hashFiles('.pinned') }} # hashFiles returns a different value on windows
 
-      - name: Install deps (windows)
-        if: ${{ matrix.platform.os == 'windows'}}
-        run: |
-          pacman -S --noconfirm base-devel gcc nasm
 
       - name: Install deps
         if: ${{ steps.deps-cache.outputs.cache-hit != 'true' }}
@@ -108,5 +140,10 @@ jobs:
           nimble --version
           gcc --version
 
-          NIMFLAGS="${NIMFLAGS} --mm:${{ matrix.nim.memory_management }}"
+          export NIMFLAGS="${NIMFLAGS} --mm:${{ matrix.nim.memory_management }}"
+
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            export NIMFLAGS="${NIMFLAGS} --cc:clang"
+          fi
+
           nimble test --styleCheck:off --verbose --debug
