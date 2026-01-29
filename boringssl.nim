@@ -206,8 +206,7 @@ when BORINGSS_USE_ASM:
       for asmPathRel in asmFiles:
         let asmPath = baseDir / asmPathRel
         let outObj = outDir / (asmPath.splitFile.name & ".obj")
-        if not fileExists(outObj) or
-            getLastModificationTime(outObj) < getLastModificationTime(asmPath):
+        if not fileExists(outObj):
           let cmd = "nasm -f win64 " & quoteShell(asmPath) & " -o " & quoteShell(outObj)
           doAssert gorgeEx(cmd).exitCode == 0
 
