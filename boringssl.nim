@@ -161,32 +161,64 @@ when BORINGSS_USE_ASM:
     {.compile: "./libs/vac_boringssl/gen/bcm/x86_64-mont5-linux.S".}
 
   when defined(windows):
-    import std/os
-    const curDir = currentSourcePath().parentDir()
-    {.passl: curDir & "/libs/aes-gcm-avx2-x86_64-win.o".}
-    {.passl: curDir & "/libs/aes-gcm-avx512-x86_64-win.o".}
-    {.passl: curDir & "/libs/aesni-gcm-x86_64-win.o".}
-    {.passl: curDir & "/libs/aesni-x86-win.o".}
-    {.passl: curDir & "/libs/aesni-x86_64-win.o".}
-    {.passl: curDir & "/libs/ghash-ssse3-x86-win.o".}
-    {.passl: curDir & "/libs/ghash-ssse3-x86_64-win.o".}
-    {.passl: curDir & "/libs/ghash-x86-win.o".}
-    {.passl: curDir & "/libs/ghash-x86_64-win.o".}
-    {.passl: curDir & "/libs/p256-x86_64-asm-win.o".}
-    {.passl: curDir & "/libs/p256_beeu-x86_64-asm-win.o".}
-    {.passl: curDir & "/libs/rdrand-x86_64-win.o".}
-    {.passl: curDir & "/libs/rsaz-avx2-win.o".}
-    {.passl: curDir & "/libs/sha1-x86_64-win.o".}
-    {.passl: curDir & "/libs/sha256-x86_64-win.o".}
-    {.passl: curDir & "/libs/sha512-x86_64-win.o".}
-    {.passl: curDir & "/libs/vpaes-x86-win.o".}
-    {.passl: curDir & "/libs/vpaes-x86_64-win.o".}
-    {.passl: curDir & "/libs/x86-mont-win.o".}
-    {.passl: curDir & "/libs/x86_64-mont-win.o".}
-    {.passl: curDir & "/libs/x86_64-mont5-win.o".}
-    {.passl: curDir & "/libs/md5-x86_64-win.o".}
-    {.passl: curDir & "/libs/chacha20_poly1305_x86_64-win.o".}
-    {.passl: curDir & "/libs/chacha-x86_64-win.o".}
+    import std/[macros, md5, os]
+    const baseDir = currentSourcePath.parentDir
+    const outDir = baseDir / "libs"
+    const asmFiles = [
+      "./libs/vac_boringssl/gen/bcm/aes-gcm-avx2-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/aes-gcm-avx512-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/aesni-gcm-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/aesni-x86-win.asm",
+      "./libs/vac_boringssl/gen/bcm/aesni-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/ghash-ssse3-x86-win.asm",
+      "./libs/vac_boringssl/gen/bcm/ghash-ssse3-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/ghash-x86-win.asm",
+      "./libs/vac_boringssl/gen/bcm/ghash-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/p256-x86_64-asm-win.asm",
+      "./libs/vac_boringssl/gen/bcm/p256_beeu-x86_64-asm-win.asm",
+      "./libs/vac_boringssl/gen/bcm/rdrand-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/rsaz-avx2-win.asm",
+      "./libs/vac_boringssl/gen/bcm/sha1-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/sha256-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/sha512-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/vpaes-x86-win.asm",
+      "./libs/vac_boringssl/gen/bcm/vpaes-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/bcm/x86-mont-win.asm",
+      "./libs/vac_boringssl/gen/bcm/x86_64-mont-win.asm",
+      "./libs/vac_boringssl/gen/bcm/x86_64-mont5-win.asm",
+      "./libs/vac_boringssl/gen/crypto/md5-x86_64-win.asm",
+      "./libs/vac_boringssl/gen/crypto/chacha20_poly1305_x86_64-win.asm",
+      "./libs/vac_boringssl/gen/crypto/chacha-x86_64-win.asm",
+    ]
+
+    macro linkAsmFiles(
+        files: static[openArray[string]], outDir: static[string]
+    ): untyped =
+      result = newStmtList()
+      for f in files:
+        let (_, name, _) = splitFile(f)
+        let obj = (outDir / name) & ".obj"
+        let objLit = newLit(obj)
+        result.add quote do:
+          {.link: `objLit`.}
+
+    static:
+      for asmPathRel in asmFiles:
+        let asmPath = baseDir / asmPathRel
+        let outObj = outDir / (asmPath.splitFile.name & ".obj")
+        let hashPath = outObj & ".md5"
+        let srcHash = getMD5(staticRead(asmPath))
+        let cachedHash =
+          if fileExists(hashPath):
+            readFile(hashPath)
+          else:
+            ""
+        if (not fileExists(outObj)) or (cachedHash != srcHash):
+          let cmd = "nasm -f win64 " & quoteShell(asmPath) & " -o " & quoteShell(outObj)
+          doAssert gorgeEx(cmd).exitCode == 0
+          writeFile(hashPath, srcHash)
+
+    linkAsmFiles(asmFiles, outDir)
 
 # ----- generated sources -----
 {.compile: "./libs/vac_boringssl/crypto/fipsmodule/bcm.cc".}
