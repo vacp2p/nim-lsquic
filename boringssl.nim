@@ -161,7 +161,7 @@ when BORINGSS_USE_ASM:
     {.compile: "./libs/vac_boringssl/gen/bcm/x86_64-mont5-linux.S".}
 
   when defined(windows):
-    import std/[macros, os, times]
+    import std/[macros, md5, os]
     const baseDir = currentSourcePath.parentDir
     const outDir = baseDir / "libs"
     const asmFiles = [
@@ -206,9 +206,17 @@ when BORINGSS_USE_ASM:
       for asmPathRel in asmFiles:
         let asmPath = baseDir / asmPathRel
         let outObj = outDir / (asmPath.splitFile.name & ".obj")
-        if not fileExists(outObj):
+        let hashPath = outObj & ".md5"
+        let srcHash = getMD5(staticRead(asmPath))
+        let cachedHash =
+          if fileExists(hashPath):
+            readFile(hashPath)
+          else:
+            ""
+        if (not fileExists(outObj)) or (cachedHash != srcHash):
           let cmd = "nasm -f win64 " & quoteShell(asmPath) & " -o " & quoteShell(outObj)
           doAssert gorgeEx(cmd).exitCode == 0
+          writeFile(hashPath, srcHash)
 
     linkAsmFiles(asmFiles, outDir)
 
