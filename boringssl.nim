@@ -161,7 +161,7 @@ when BORINGSS_USE_ASM:
     {.compile: "./libs/vac_boringssl/gen/bcm/x86_64-mont5-linux.S".}
 
   when defined(windows):
-    import std/[macros, md5, os]
+    import std/[macros, md5, os, pathnorm]
     const baseDir = currentSourcePath.parentDir
     const outDir = baseDir / "libs"
     const asmFiles = [
@@ -204,7 +204,7 @@ when BORINGSS_USE_ASM:
 
     static:
       for asmPathRel in asmFiles:
-        let asmPath = baseDir / asmPathRel
+        let asmPath = normalizePath(baseDir / asmPathRel, dirSep = '/')
         let outObj = outDir / (asmPath.splitFile.name & ".obj")
         let hashPath = outObj & ".md5"
         let srcHash = getMD5(staticRead(asmPath))
