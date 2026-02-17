@@ -220,8 +220,13 @@ method dial*(
 ): Result[QuicConnection, string] {.base, gcsafe, raises: [].} =
   raiseAssert "dial not implemented"
 
-proc makeStream*(ctx: QuicContext, quicConn: QuicConnection) {.raises: [].} =
+proc makeStream*(
+    ctx: QuicContext, quicConn: QuicConnection
+) {.raises: [ConnectionClosedError].} =
   debug "Creating stream"
+  if quicConn.isNil or quicConn.lsquicConn.isNil:
+    debug "Cannot create stream: connection is nil"
+    raise newException(ConnectionClosedError, "connection closed")
   lsquic_conn_make_stream(quicConn.lsquicConn)
 
 proc onNewStream*(

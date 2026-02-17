@@ -43,6 +43,7 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   if not conn_ctx.isNil:
     let quicConn = cast[QuicConnection](conn_ctx)
     quicConn.onClose()
+    quicConn.lsquicConn = nil
     GC_unref(quicConn)
   lsquic_conn_set_ctx(conn, nil)
 
