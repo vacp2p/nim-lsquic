@@ -59,6 +59,7 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
       )
     quicClientConn.cancelPending()
     quicClientConn.onClose()
+    quicClientConn.lsquicConn = nil
     GC_unref(quicClientConn)
   lsquic_conn_set_ctx(conn, nil)
 
