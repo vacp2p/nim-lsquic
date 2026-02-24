@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
-when defined(windows) and defined(clang):
-  {.passl: "-lpthread".}
+when defined(windows):
+  {.passl: "-lws2_32".}
+  when defined(clang):
+    {.passl: "-lpthread".}
 
 import std/[os, strformat, strutils]
 import chronos/osdefs
