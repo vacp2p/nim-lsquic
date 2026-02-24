@@ -2,9 +2,9 @@
 # Copyright (c) Status Research & Development GmbH 
 
 when defined(windows):
-  {.passc: "-D_WIN32_WINNT=0x0600".}
   {.passl: "-lws2_32".}
-  {.passl: "-lpthread".}
+  when defined(clang):
+    {.passl: "-lpthread".}
 
 import std/[os, strformat, strutils]
 import chronos/osdefs
