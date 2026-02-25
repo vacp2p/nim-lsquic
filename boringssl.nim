@@ -206,7 +206,8 @@ when BORINGSS_USE_ASM:
     static:
       for asmPathRel in asmFiles:
         let asmPath = normalizePath(baseDir / asmPathRel, dirSep = '/')
-        let outObj = normalizePath(outDir / (asmPath.splitFile.name & ".obj"), dirSep = '/')
+        let outObj =
+          normalizePath(outDir / (asmPath.splitFile.name & ".obj"), dirSep = '/')
         let hashPath = outObj & ".md5"
         let srcHash = getMD5(staticRead(asmPath))
         let cachedHash =
