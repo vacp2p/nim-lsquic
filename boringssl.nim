@@ -27,6 +27,7 @@ elif defined(windows):
     localPassC:
       "-D_HAS_EXCEPTIONS=0 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS"
   .}
+  {.passl: "-lstdc++".}
 
 when defined(i386):
   {.passc: "-msse2".}
@@ -197,7 +198,7 @@ when BORINGSS_USE_ASM:
       result = newStmtList()
       for f in files:
         let (_, name, _) = splitFile(f)
-        let obj = (outDir / name) & ".obj"
+        let obj = normalizePath((outDir / name) & ".obj", dirSep = '/')
         let objLit = newLit(obj)
         result.add quote do:
           {.link: `objLit`.}
@@ -205,7 +206,7 @@ when BORINGSS_USE_ASM:
     static:
       for asmPathRel in asmFiles:
         let asmPath = normalizePath(baseDir / asmPathRel, dirSep = '/')
-        let outObj = outDir / (asmPath.splitFile.name & ".obj")
+        let outObj = normalizePath(outDir / (asmPath.splitFile.name & ".obj"), dirSep = '/')
         let hashPath = outObj & ".md5"
         let srcHash = getMD5(staticRead(asmPath))
         let cachedHash =
