@@ -169,6 +169,8 @@ proc write*(
   if n >= data.len:
     if lsquic_stream_flush(stream.quicStream) != 0:
       stream.abort()
+    else:
+      stream.doProcess()
     return
   elif n < 0:
     error "could not write to stream", streamId = lsquic_stream_id(stream.quicStream), n
