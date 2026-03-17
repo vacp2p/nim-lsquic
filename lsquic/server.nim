@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
-import std/sets, chronos, chronicles, results
+import chronos, chronicles, results
 import ./[errors, connection, tlsconfig, datagram, connectionmanager]
 import ./context/[server, context, io]
 
@@ -20,7 +20,6 @@ type Listener* = ref object of RootObj
   quicContext: ServerContext
   connman: ConnectionManager
   udp: DatagramTransport
-  tlsConfig: TLSConfig
 
 proc newListener*(
     tlsConfig: TLSConfig, address: TransportAddress
@@ -46,7 +45,6 @@ proc newListener*(
     return err("only IPv4/IPv6 address is supported")
 
   let listener = Listener(
-    tlsConfig: tlsConfig,
     quicContext: quicContext,
     connman: ConnectionManager.new(),
     udp: udp,
@@ -73,7 +71,7 @@ proc accept*(
     raise newException(TransportError, "listener is stopped")
 
   let quicConn = await incomingFut
-  let conn = newIncomingConnection(listener.tlsConfig, listener.quicContext, quicConn)
+  let conn = newIncomingConnection(listener.quicContext, quicConn)
   listener.connman.addConnection(conn)
   conn
 
@@ -91,6 +89,7 @@ proc stop*(listener: Listener) {.async: (raises: [CancelledError]).} =
   # stop the udp transport.
   await noCancel sleepAsync(300.milliseconds)
   await noCancel listener.udp.closeWait()
+  listener.quicContext.stop()
 
 proc listen*(
     self: QuicServer, address: TransportAddress

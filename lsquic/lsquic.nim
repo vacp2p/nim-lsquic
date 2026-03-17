@@ -8,7 +8,6 @@ var initialized: bool
 proc initializeLsquic*(client: bool = true, server: bool = true) =
   if initialized:
     return
-
   initialized = true
   var flags = 0.cint
   if client:
@@ -20,4 +19,7 @@ proc initializeLsquic*(client: bool = true, server: bool = true) =
     raiseAssert "lsquic initialization failed"
 
 proc cleanupLsquic*() =
+  if not initialized:
+    return
   lsquic_global_cleanup()
+  initialized = false

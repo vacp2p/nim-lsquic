@@ -86,5 +86,9 @@ proc stop*(self: QuicClient) {.async: (raises: [CancelledError]).} =
   await noCancel sleepAsync(300.milliseconds)
   if not self.udp4.isNil:
     await noCancel self.udp4.closeWait()
+  if not self.ctx4.isNil:
+    self.ctx4.stop()
   if not self.udp6.isNil:
     await noCancel self.udp6.closeWait()
+  if not self.ctx6.isNil:
+    self.ctx6.stop()

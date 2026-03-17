@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
+import std/deques
 import chronos
 import chronos/osdefs
 import chronicles
@@ -48,7 +49,7 @@ type QuicConnection* = ref object of RootObj
   closedRemote*: bool
   incoming*: AsyncQueue[Stream]
   connectedFut*: Future[void]
-  pendingStreams: seq[PendingStream]
+  pendingStreams: Deque[PendingStream]
   certChain*: seq[seq[byte]]
 
 type ClientContext* = ref object of QuicContext
@@ -70,7 +71,7 @@ proc addPendingStream*(
   let created = Future[void].Raising([CancelledError, ConnectionError]).init(
       "QuicConnection.addPendingStream"
     )
-  quicConn.pendingStreams.add(PendingStream(stream: s, created: created))
+  quicConn.pendingStreams.addLast(PendingStream(stream: s, created: created))
   created
 
 proc popPendingStream*(
@@ -80,7 +81,7 @@ proc popPendingStream*(
     debug "no pending streams!"
     return Opt.none(Stream)
 
-  let pending = quicConn.pendingStreams.pop()
+  let pending = quicConn.pendingStreams.popFirst()
   pending.stream.quicStream = stream
   pending.created.complete()
   Opt.some(pending.stream)
@@ -198,8 +199,14 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
   quicCtx.sslCtx
 
 proc stop*(ctx: QuicContext) {.raises: [].} =
-  ctx.tickTimeout.stop()
-  lsquic_engine_destroy(ctx.engine)
+  if not ctx.tickTimeout.isNil:
+    ctx.tickTimeout.stop()
+  if not ctx.engine.isNil:
+    lsquic_engine_destroy(ctx.engine)
+    ctx.engine = nil
+  if not ctx.sslCtx.isNil:
+    SSL_CTX_free(ctx.sslCtx)
+    ctx.sslCtx = nil
 
 proc close*(ctx: QuicContext, conn: QuicConnection) =
   if conn != nil and conn.lsquicConn != nil:

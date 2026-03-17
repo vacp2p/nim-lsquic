@@ -18,8 +18,22 @@ proc stop*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
     return
 
   connman.closed.complete()
-  for conn in connman.connections:
+  let active = connman.connections
+  connman.connections = @[]
+  for conn in active:
     conn.abort()
+
+proc removeConnection(connman: ConnectionManager, conn: Connection) {.raises: [].} =
+  for i in 0 ..< connman.connections.len:
+    if connman.connections[i] == conn:
+      let last = connman.connections.high
+      connman.connections[i] = connman.connections[last]
+      connman.connections.setLen(last)
+      break
 
 proc addConnection*(connman: ConnectionManager, conn: Connection) =
   connman.connections.add(conn)
+  conn.closedFuture().addCallback(
+    proc(_: pointer) {.gcsafe, raises: [].} =
+      connman.removeConnection(conn)
+  )

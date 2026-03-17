@@ -3,7 +3,7 @@
 
 import chronicles
 import chronos
-import ./[errors, stream, tlsconfig, lsquic_ffi]
+import ./[errors, stream, lsquic_ffi]
 import ./context/context
 
 type
@@ -61,7 +61,7 @@ proc newOutgoingConnection*(
   conn
 
 proc newIncomingConnection*(
-    tlsConfig: TLSConfig, quicContext: QuicContext, quicConn: QuicConnection
+    quicContext: QuicContext, quicConn: QuicConnection
 ): Connection =
   let closed = newAsyncEvent()
   let closedWaiter = closed.wait()
@@ -77,6 +77,9 @@ proc newIncomingConnection*(
   conn.quicConn.onClose = proc() {.raises: [].} =
     conn.closed.fire()
   conn
+
+proc closedFuture*(connection: Connection): Future[void] {.raises: [].} =
+  connection.ensureClosedFut
 
 proc dial*(
     connection: OutgoingConnection
