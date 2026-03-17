@@ -11,14 +11,16 @@ trace "chronicles has to be imported to fix Error: undeclared identifier: 'activ
 
 initializeLsquic(true, true)
 
-proc runConnectionTest(address: TransportAddress) {.async.} =
+proc runConnectionTest(
+    listenAddress: TransportAddress, dialAddress: TransportAddress
+) {.async.} =
   let client = makeClient()
   let server = makeServer()
-  let listener = server.listen(address)
+  let listener = server.listen(listenAddress)
   defer:
     await allFutures(client.stop(), listener.stop())
   let accepting = listener.accept()
-  let dialing = client.dial(address)
+  let dialing = client.dial(dialAddress)
 
   let outgoingConn = await dialing
   let incomingConn = await accepting
@@ -85,6 +87,9 @@ proc runConnectionTest(address: TransportAddress) {.async.} =
 
   await sleepAsync(1.seconds)
 
+proc runConnectionTest(address: TransportAddress) {.async.} =
+  await runConnectionTest(address, address)
+
 proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
   const streamCount = 16
 
@@ -137,6 +142,9 @@ suite "connection":
 
   asyncTest "ipv6":
     await runConnectionTest(initTAddress("[::1]:12345"))
+
+  asyncTest "ipv6 dual-stack listener accepts ipv4 dial":
+    await runConnectionTest(initTAddress("[::]:12347"), initTAddress("127.0.0.1:12347"))
 
   asyncTest "multiple concurrent stream opens":
     await runConcurrentStreamOpenTest(initTAddress("127.0.0.1:12346"))

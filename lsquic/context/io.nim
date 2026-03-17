@@ -45,7 +45,8 @@ proc prepareDestAddr(
   let
     localAddress = localSa.toTransportAddress()
     destAddress = destSa.toTransportAddress()
-  if localAddress.family == AddressFamily.IPv6 and destAddress.family == AddressFamily.IPv4:
+  if localAddress.family == AddressFamily.IPv6 and
+      destAddress.family == AddressFamily.IPv4:
     let mappedDest = destAddress.toIPv6()
     mappedDest.toSAddr(destStorage, destAddrLen)
   else:
