@@ -85,6 +85,49 @@ proc runConnectionTest(address: TransportAddress) {.async.} =
 
   await sleepAsync(1.seconds)
 
+proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
+  const streamCount = 16
+
+  let client = makeClient()
+  let server = makeServer()
+  let listener = server.listen(address)
+  defer:
+    await allFutures(client.stop(), listener.stop())
+
+  let accepting = listener.accept()
+  let dialing = client.dial(address)
+
+  let outgoingConn = await dialing
+  let incomingConn = await accepting
+
+  var received = newSeq[bool](streamCount)
+
+  let receiveAll = proc() {.async.} =
+    for _ in 0 ..< streamCount:
+      let stream = await incomingConn.incomingStream()
+      var id: array[1, byte]
+      let n = await stream.readOnce(id[0].addr, id.len)
+      check n == 1
+      check id[0].int < streamCount
+      received[id[0].int] = true
+      await stream.close()
+
+  var sendAll: seq[Future[void]]
+  for i in 0 ..< streamCount:
+    sendAll.add(
+      (
+        proc(idx: int): Future[void] {.async.} =
+          let stream = await outgoingConn.openStream()
+          await stream.write(@[byte(idx)])
+          await stream.close()
+      )(i)
+    )
+
+  await allFutures(receiveAll(), allFutures(sendAll))
+
+  for seen in received:
+    check seen
+
 suite "connection":
   teardown:
     cleanupLsquic()
@@ -94,3 +137,6 @@ suite "connection":
 
   asyncTest "ipv6":
     await runConnectionTest(initTAddress("[::1]:12345"))
+
+  asyncTest "multiple concurrent stream opens":
+    await runConcurrentStreamOpenTest(initTAddress("127.0.0.1:12346"))
