@@ -2,6 +2,7 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import std/deques
+import std/unittest
 import chronos
 import chronos/osdefs
 import chronicles
@@ -89,6 +90,34 @@ proc popPendingStream*(
 proc cancelPending*(quicConn: QuicConnection) =
   for pending in quicConn.pendingStreams:
     pending.created.fail(newException(ConnectionError, "can't open new streams"))
+
+suite "QuicConnection pendingStreams ordering":
+  test "pending streams are matched in FIFO order":
+    ## Initialize a connection with an empty pendingStreams deque
+    var conn = QuicConnection(pendingStreams: initDeque[PendingStream]())
+
+    ## Prepare distinct streams to track ordering
+    var s1, s2, s3: Stream
+
+    ## Enqueue the streams as pending in the order s1, s2, s3
+    discard conn.addPendingStream(s1)
+    discard conn.addPendingStream(s2)
+    discard conn.addPendingStream(s3)
+
+    ## Dequeue (match) the pending streams via popPendingStream
+    let r1 = conn.popPendingStream(nil)
+    let r2 = conn.popPendingStream(nil)
+    let r3 = conn.popPendingStream(nil)
+
+    ## All pending streams should have been matched
+    check r1.isSome
+    check r2.isSome
+    check r3.isSome
+
+    ## And the order must be FIFO: first added, first matched
+    check r1.get() == s1
+    check r2.get() == s2
+    check r3.get() == s3
 
 proc alpnSelectProtoCB(
     ssl: ptr SSL,
