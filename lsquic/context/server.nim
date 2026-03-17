@@ -63,10 +63,10 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
   ctx.settings.es_max_plpmtu = 0
   ctx.settings.es_pace_packets = 1
 
-  ctx.settings.es_cfcw = 1 * 1024 * 1024
-  ctx.settings.es_max_cfcw = 2 * 1024 * 1024
-  ctx.settings.es_sfcw = 256 * 1024
-  ctx.settings.es_max_sfcw = 512 * 1024
+  ctx.settings.es_cfcw = 1536 * 1024 # 1.5 MB
+  ctx.settings.es_max_cfcw = 4 * 1024 * 1024
+  ctx.settings.es_sfcw = 512 * 1024
+  ctx.settings.es_max_sfcw = 1 * 1024 * 1024
   ctx.settings.es_init_max_stream_data_bidi_local = ctx.settings.es_sfcw
   ctx.settings.es_init_max_stream_data_bidi_remote = ctx.settings.es_sfcw
   ctx.settings.es_max_batch_size = 32

@@ -5,11 +5,22 @@ import chronos
 import chronos/osdefs
 import ./context
 import ../[lsquic_ffi, datagram]
-import ../helpers/[openarray, sequninit, transportaddr]
-import std/[nativesockets, net]
+import ../helpers/[openarray, transportaddr]
+import std/nativesockets
 
 when not defined(windows):
   import posix
+
+when defined(linux):
+  {.passc: "-D_GNU_SOURCE".}
+
+  type MMsgHdr {.importc: "struct mmsghdr", header: "<sys/socket.h>", bycopy.} = object
+    msg_hdr: Tmsghdr
+    msg_len: cuint
+
+  proc sendmmsg(
+      sockfd: SocketHandle, msgvec: ptr MMsgHdr, vlen: cuint, flags: cint
+  ): cint {.importc, header: "<sys/socket.h>".}
 
 when defined(windows):
   import std/winlean
@@ -66,63 +77,102 @@ proc sendPacketsOut*(
     ctx: pointer, specs: ptr struct_lsquic_out_spec, nspecs: cuint
 ): cint {.cdecl.} =
   let quicCtx = cast[QuicContext](ctx)
-  var sent = 0
+  if nspecs == 0:
+    return 0
+
   let specsArr = cast[ptr UncheckedArray[struct_lsquic_out_spec]](specs)
-  for i in 0 ..< nspecs.int:
-    let curr = specsArr[i]
 
-    let destAddrLen: SockLen = sockAddrLen(curr.dest_sa.sa_family.int)
-
-    when defined(windows):
-      let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
-
-      var bufs = newSeq[WSABUF](curr.iovlen.int)
-      for j in 0 ..< curr.iovlen.int:
-        let src = iovArr[j]
-        bufs[j].len = culong(src.iov_len)
-        bufs[j].buf = cast[ptr char](src.iov_base)
-
-      var bytesSent: culong = 0
-      let res = WSASendTo(
-        SocketHandle(quicCtx.fd),
-        addr bufs[0],
-        culong(curr.iovlen),
-        addr bytesSent,
-        0, # flags
-        cast[ptr SockAddr](curr.dest_sa),
-        cint(destAddrLen),
-        nil,
-        nil, # no overlapped
+  when defined(linux):
+    var msgs = newSeq[MMsgHdr](nspecs.int)
+    for i in 0 ..< nspecs.int:
+      let curr = specsArr[i]
+      let destAddrLen: SockLen = sockAddrLen(curr.dest_sa.sa_family.int)
+      msgs[i] = MMsgHdr(
+        msg_hdr:
+          when defined(x86_64):
+            Tmsghdr(
+              msg_name: cast[pointer](curr.dest_sa),
+              msg_namelen: destAddrLen,
+              msg_iov: cast[ptr IOVec](curr.iov),
+              msg_iovlen: curr.iovlen.csize_t,
+              msg_control: nil,
+              msg_controllen: 0,
+              msg_flags: 0,
+            )
+          else:
+            Tmsghdr(
+              msg_name: cast[pointer](curr.dest_sa),
+              msg_namelen: destAddrLen,
+              msg_iov: cast[ptr IOVec](curr.iov),
+              msg_iovlen: curr.iovlen.cint,
+              msg_control: nil,
+              msg_controllen: 0,
+              msg_flags: 0,
+            ),
+        msg_len: 0,
       )
-      if res != 0:
-        break
-    else:
-      let msg =
-        when defined(linux) and defined(x86_64):
-          Tmsghdr(
-            msg_name: cast[pointer](curr.dest_sa),
-            msg_namelen: destAddrLen,
-            msg_iov: cast[ptr IOVec](curr.iov),
-            msg_iovlen: curr.iovlen.csize_t,
-            msg_control: nil,
-            msg_controllen: 0,
-            msg_flags: 0,
-          )
-        else:
-          Tmsghdr(
-            msg_name: cast[pointer](curr.dest_sa),
-            msg_namelen: destAddrLen,
-            msg_iov: cast[ptr IOVec](curr.iov),
-            msg_iovlen: curr.iovlen.cint,
-            msg_control: nil,
-            msg_controllen: 0,
-            msg_flags: 0,
-          )
 
-      let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
-      if res < 0:
-        break
+    let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nspecs, 0)
+    if res < 0:
+      return 0
+    return res
+  else:
+    var sent = 0
+    for i in 0 ..< nspecs.int:
+      let curr = specsArr[i]
 
-    sent.inc
+      let destAddrLen: SockLen = sockAddrLen(curr.dest_sa.sa_family.int)
 
-  sent.cint
+      when defined(windows):
+        let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
+
+        var bufs = newSeq[WSABUF](curr.iovlen.int)
+        for j in 0 ..< curr.iovlen.int:
+          let src = iovArr[j]
+          bufs[j].len = culong(src.iov_len)
+          bufs[j].buf = cast[ptr char](src.iov_base)
+
+        var bytesSent: culong = 0
+        let res = WSASendTo(
+          SocketHandle(quicCtx.fd),
+          addr bufs[0],
+          culong(curr.iovlen),
+          addr bytesSent,
+          0, # flags
+          cast[ptr SockAddr](curr.dest_sa),
+          cint(destAddrLen),
+          nil,
+          nil, # no overlapped
+        )
+        if res != 0:
+          break
+      else:
+        let msg =
+          when defined(x86_64):
+            Tmsghdr(
+              msg_name: cast[pointer](curr.dest_sa),
+              msg_namelen: destAddrLen,
+              msg_iov: cast[ptr IOVec](curr.iov),
+              msg_iovlen: curr.iovlen.csize_t,
+              msg_control: nil,
+              msg_controllen: 0,
+              msg_flags: 0,
+            )
+          else:
+            Tmsghdr(
+              msg_name: cast[pointer](curr.dest_sa),
+              msg_namelen: destAddrLen,
+              msg_iov: cast[ptr IOVec](curr.iov),
+              msg_iovlen: curr.iovlen.cint,
+              msg_control: nil,
+              msg_controllen: 0,
+              msg_flags: 0,
+            )
+
+        let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
+        if res < 0:
+          break
+
+      sent.inc
+
+    sent.cint
