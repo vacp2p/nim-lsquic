@@ -44,11 +44,8 @@ proc newListener*(
   else:
     return err("only IPv4/IPv6 address is supported")
 
-  let listener = Listener(
-    quicContext: quicContext,
-    connman: ConnectionManager.new(),
-    udp: udp,
-  )
+  let listener =
+    Listener(quicContext: quicContext, connman: ConnectionManager.new(), udp: udp)
   quicContext.fd = cint(listener.udp.fd)
 
   ok(listener)
