@@ -32,6 +32,26 @@ when defined(windows):
     lpCompletionRoutine: pointer,
   ): cint {.wsa, importc: "WSASendTo".}
 
+proc prepareDestAddr(
+    localSa: ptr SockAddr,
+    destSa: ptr SockAddr,
+    destStorage: var Sockaddr_storage,
+    destAddrLen: var SockLen,
+) =
+  ## Chronos normalizes IPv4 peers on dual-stack `::` sockets back to IPv4.
+  ## When lsquic later asks us to send on that IPv6 socket, sending directly to
+  ## an AF_INET destination can fail with EINVAL. Re-map the destination to an
+  ## IPv6-mapped address when the local path is IPv6.
+  let
+    localAddress = localSa.toTransportAddress()
+    destAddress = destSa.toTransportAddress()
+  if localAddress.family == AddressFamily.IPv6 and destAddress.family == AddressFamily.IPv4:
+    let mappedDest = destAddress.toIPv6()
+    mappedDest.toSAddr(destStorage, destAddrLen)
+  else:
+    destAddrLen = sockAddrLen(destSa.sa_family.int)
+    copyMem(addr destStorage, destSa, destAddrLen)
+
 proc receive*(
     ctx: QuicContext,
     datagram: sink Datagram,
@@ -70,8 +90,10 @@ proc sendPacketsOut*(
   let specsArr = cast[ptr UncheckedArray[struct_lsquic_out_spec]](specs)
   for i in 0 ..< nspecs.int:
     let curr = specsArr[i]
-
-    let destAddrLen: SockLen = sockAddrLen(curr.dest_sa.sa_family.int)
+    var
+      destStorage: Sockaddr_storage
+      destAddrLen: SockLen
+    prepareDestAddr(curr.local_sa, curr.dest_sa, destStorage, destAddrLen)
 
     when defined(windows):
       let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
@@ -89,7 +111,7 @@ proc sendPacketsOut*(
         culong(curr.iovlen),
         addr bytesSent,
         0, # flags
-        cast[ptr SockAddr](curr.dest_sa),
+        cast[ptr SockAddr](addr destStorage),
         cint(destAddrLen),
         nil,
         nil, # no overlapped
@@ -100,7 +122,7 @@ proc sendPacketsOut*(
       let msg =
         when defined(linux) and defined(x86_64):
           Tmsghdr(
-            msg_name: cast[pointer](curr.dest_sa),
+            msg_name: cast[pointer](addr destStorage),
             msg_namelen: destAddrLen,
             msg_iov: cast[ptr IOVec](curr.iov),
             msg_iovlen: curr.iovlen.csize_t,
@@ -110,7 +132,7 @@ proc sendPacketsOut*(
           )
         else:
           Tmsghdr(
-            msg_name: cast[pointer](curr.dest_sa),
+            msg_name: cast[pointer](addr destStorage),
             msg_namelen: destAddrLen,
             msg_iov: cast[ptr IOVec](curr.iov),
             msg_iovlen: curr.iovlen.cint,
