@@ -33,7 +33,11 @@ proc removeConnection(connman: ConnectionManager, conn: Connection) {.raises: []
 
 proc addConnection*(connman: ConnectionManager, conn: Connection) =
   connman.connections.add(conn)
-  conn.closedFuture().addCallback(
-    proc(_: pointer) {.gcsafe, raises: [].} =
-      connman.removeConnection(conn)
-  )
+  let fut = conn.closedFuture()
+  if fut.finished:
+    connman.removeConnection(conn)
+  else:
+    fut.addCallback(
+      proc(_: pointer) {.gcsafe, raises: [].} =
+        connman.removeConnection(conn)
+    )
