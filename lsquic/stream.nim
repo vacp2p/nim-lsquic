@@ -163,7 +163,7 @@ proc write*(
   if stream.closedByEngine:
     raise newException(StreamError, "stream closed")
 
-  # Try to write immediatly
+  # Try to write immediately
   let p = data[0].addr
   let n = lsquic_stream_write(stream.quicStream, p, data.len.csize_t)
   if n >= data.len:
