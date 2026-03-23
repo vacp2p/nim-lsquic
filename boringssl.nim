@@ -16,18 +16,13 @@
 
 {.localPassC: "-DNDEBUG".}
 
-# link stdc++/pthread as needed
-when defined(macosx):
-  {.localPassC: "-lc++".}
-elif defined(linux):
+when defined(linux):
   {.localPassC: "-D_XOPEN_SOURCE=700".}
-  {.localPassC: "-lstdc++".}
 elif defined(windows):
   {.
     localPassC:
       "-D_HAS_EXCEPTIONS=0 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS"
   .}
-  {.passl: "-lstdc++".}
 
 when defined(i386):
   {.passc: "-msse2".}
