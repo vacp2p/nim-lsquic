@@ -4,8 +4,7 @@
 # libcrypto + libssl sources without cmake, no-asm, no fips, no tests, tools
 # TODO: look into use assembly files for perf
 
-import
-  std/[os, strutils]
+import std/[os, strutils]
 
 # ----- toolchain + includes -----
 {.localPassC: "-DBORINGSSL_IMPLEMENTATION -DS2N_BN_HIDE_SYMBOLS".}
@@ -18,7 +17,7 @@ import
 const
   # use rsplit as a workaround for cross compilation path separator issue
   srcPath = currentSourcePath.rsplit({DirSep, AltSep}, 1)[0]
-  
+
 {.passc: "-I" & srcPath & "/libs/vac_boringssl/include".}
 
 {.localPassC: "-DNDEBUG".}
