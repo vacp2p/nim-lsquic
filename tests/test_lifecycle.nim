@@ -1,0 +1,205 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# Copyright (c) Status Research & Development GmbH
+
+{.used.}
+
+import chronos, chronos/unittest2/asynctests, results, chronicles
+import lsquic
+import ./helpers/clientserver
+
+trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
+
+initializeLsquic(true, true)
+
+type ConnectedPeers = tuple[
+  client: QuicClient,
+  listener: Listener,
+  outgoing: Connection,
+  incoming: Connection,
+]
+
+proc connectPeers(): Future[ConnectedPeers] {.async.} =
+  let client = makeClient()
+  let server = makeServer()
+  let listener = server.listen(initTAddress("127.0.0.1:0"))
+  let accepting = listener.accept()
+  let outgoing = await client.dial(listener.localAddress())
+  let incoming = await accepting
+
+  (client, listener, outgoing, incoming)
+
+proc stopPeers(peers: ConnectedPeers) {.async.} =
+  if not peers.outgoing.isNil:
+    peers.outgoing.close()
+  if not peers.incoming.isNil:
+    peers.incoming.close()
+  await allFutures(peers.client.stop(), peers.listener.stop())
+
+proc readAll(stream: Stream): Future[seq[byte]] {.async.} =
+  var buf = newSeq[byte](64)
+  while true:
+    let n = await stream.readOnce(buf)
+    if n == 0:
+      break
+    result.add(buf[0 ..< n])
+
+suite "lifecycle":
+  teardown:
+    cleanupLsquic()
+
+  asyncTest "listener stop makes accept fail":
+    let server = makeServer()
+    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let accepting = listener.accept()
+
+    await listener.stop()
+
+    expect TransportError:
+      discard await accepting
+
+  asyncTest "listener stop fails all pending accepts":
+    let server = makeServer()
+    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let accepting1 = listener.accept()
+    let accepting2 = listener.accept()
+    let accepting3 = listener.accept()
+
+    await listener.stop()
+
+    expect TransportError:
+      discard await accepting1
+    expect TransportError:
+      discard await accepting2
+    expect TransportError:
+      discard await accepting3
+
+  asyncTest "connection close propagates to peer":
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    peers.outgoing.close()
+
+    check (await peers.outgoing.closedFuture().withTimeout(2.seconds))
+    check (await peers.incoming.closedFuture().withTimeout(2.seconds))
+    check peers.incoming.isClosed
+
+  asyncTest "client stop closes active connections":
+    let peers = await connectPeers()
+
+    await peers.client.stop()
+
+    check (await peers.outgoing.closedFuture().withTimeout(2.seconds))
+    check (await peers.incoming.closedFuture().withTimeout(2.seconds))
+
+    peers.incoming.close()
+    await peers.listener.stop()
+
+  asyncTest "operations fail after connection close":
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    peers.outgoing.close()
+    check (await peers.outgoing.closedFuture().withTimeout(2.seconds))
+    check (await peers.incoming.closedFuture().withTimeout(2.seconds))
+
+    expect ConnectionClosedError:
+      discard await peers.outgoing.openStream()
+
+    expect ConnectionClosedError:
+      discard await peers.incoming.incomingStream()
+
+  asyncTest "abort wakes pending incoming stream":
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    let incomingWaiting = peers.incoming.incomingStream()
+    await sleepAsync(100.milliseconds)
+    peers.outgoing.abort()
+
+    expect ConnectionClosedError:
+      discard await incomingWaiting
+
+  asyncTest "abort after open stream still closes connection":
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    let opening = peers.outgoing.openStream()
+    peers.outgoing.abort()
+    check (await opening.withTimeout(2.seconds))
+    let stream = await opening
+    check (await peers.outgoing.closedFuture().withTimeout(2.seconds))
+
+    expect StreamError:
+      await stream.write(@[1'u8])
+
+  asyncTest "write after close raises stream error":
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[1'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+    var kickoff = newSeq[byte](1)
+    check (await incomingStream.readOnce(kickoff)) == 1
+    check kickoff[0] == 1
+
+    await outgoingStream.close()
+
+    expect StreamError:
+      await outgoingStream.write(@[1'u8])
+
+    var buf = newSeq[byte](8)
+    check (await incomingStream.readOnce(buf)) == 0
+    await incomingStream.close()
+
+  asyncTest "read once returns zero repeatedly after eof":
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[9'u8, 8, 7, 6])
+    let incomingStream = await peers.incoming.incomingStream()
+    await outgoingStream.close()
+
+    check (await incomingStream.readAll()) == @[9'u8, 8, 7, 6]
+
+    var buf = newSeq[byte](8)
+    check (await incomingStream.readOnce(buf)) == 0
+    check (await incomingStream.readOnce(buf)) == 0
+    await incomingStream.close()
+
+  asyncTest "blocked read completes when peer half closes":
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[42'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+    var firstChunk = newSeq[byte](1)
+    check (await incomingStream.readOnce(firstChunk)) == 1
+    check firstChunk[0] == 42
+
+    var buf = newSeq[byte](8)
+    let reading = incomingStream.readOnce(buf)
+
+    await sleepAsync(100.milliseconds)
+    check not reading.finished
+
+    await outgoingStream.close()
+
+    check (await reading.withTimeout(2.seconds))
+    check (await reading) == 0
+    await incomingStream.close()
+
+  asyncTest "zero length reads return zero":
+    let stream = Stream.new()
+    var empty: seq[byte] = @[]
+
+    check (await stream.readOnce(empty)) == 0

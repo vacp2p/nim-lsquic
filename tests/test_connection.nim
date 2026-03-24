@@ -17,6 +17,7 @@ proc runConnectionTest(
   let client = makeClient()
   let server = makeServer()
   let listener = server.listen(listenAddress)
+  let boundAddress = listener.localAddress()
   defer:
     await allFutures(client.stop(), listener.stop())
   let accepting = listener.accept()
@@ -28,6 +29,11 @@ proc runConnectionTest(
   check:
     outgoingConn.certificates().len == 1
     incomingConn.certificates().len == 1
+    outgoingConn.remoteAddress().family == dialAddress.family
+    outgoingConn.remoteAddress().port == dialAddress.port
+    incomingConn.localAddress().family == boundAddress.family
+    incomingConn.localAddress().port == boundAddress.port
+    outgoingConn.localAddress().port == incomingConn.remoteAddress().port
 
   echo "Connected!"
 
@@ -51,18 +57,18 @@ proc runConnectionTest(
       echo "Received stream in server"
 
       var buf = newSeq[byte](16)
-      let n1 = await stream.readOnce(buf)
-      let chunk1 = buf[0 ..< n1]
-      echo "First chunk: ", chunk1
-      let n2 = await stream.readOnce(buf)
-      let chunk2 = buf[0 ..< n2]
-      echo "Second chunk: ", chunk2
-      let n3 = await stream.readOnce(buf)
-      let chunk3 = buf[0 ..< n3]
-      echo "EOF chunk: ", chunk3
+      var received: seq[byte]
+      while true:
+        let n = await stream.readOnce(buf)
+        if n == 0:
+          break
+        received.add(buf[0 ..< n])
+      let eofRead = await stream.readOnce(buf)
 
       check:
+        received == @[1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         stream.isEof
+        eofRead == 0
 
       echo "Server closed"
       await stream.close()
@@ -82,7 +88,7 @@ proc runConnectionTest(
   incomingConn.close()
 
   # Cannot create a stream once closed
-  expect ConnectionError:
+  expect ConnectionClosedError:
     discard await outgoingConn.openStream()
 
   await sleepAsync(1.seconds)
