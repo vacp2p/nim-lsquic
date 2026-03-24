@@ -1,36 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# Copyright (c) Status Research & Development GmbH 
+# Copyright (c) Status Research & Development GmbH
 
 when defined(windows):
   {.passl: "-lws2_32".}
   when defined(clang):
     {.passl: "-lpthread".}
 
-import std/[os, strformat, strutils]
+import std/[os, strutils]
 import chronos/osdefs
 import zlib
 import ../boringssl
 
 type ptrdiff_t* {.importc: "ptrdiff_t", header: "<stddef.h>".} = int
 
-const root = currentSourcePath.parentDir.parentDir
-const lsquicInclude = root / "libs/lsquic/include"
-const boringsslInclude = root / "libs/vac_boringssl/include"
-const liblsquicInclude = root / "libs/lsquic/src/liblsquic"
-const lsqpack = root / "libs/lsquic/src/liblsquic/ls-qpack"
-const lshpack = root / "libs/lsquic/src/lshpack"
-const xxhash = root / "libs/lsquic/src/lshpack/deps/xxhash"
+# use rsplit as a workaround for cross compilation path separator issue
+const root = currentSourcePath.rsplit({DirSep, AltSep}, 2)[0]
+const lsquicInclude = root & "/libs/lsquic/include"
+const boringsslInclude = root & "/libs/vac_boringssl/include"
+const liblsquicInclude = root & "/libs/lsquic/src/liblsquic"
+const lsqpack = root & "/libs/lsquic/src/liblsquic/ls-qpack"
+const lshpack = root & "/libs/lsquic/src/lshpack"
+const xxhash = root & "/libs/lsquic/src/lshpack/deps/xxhash"
 
 when defined(windows):
-  const wincompat = root / "libs/lsquic/wincompat"
-  {.passc: fmt"-I{wincompat}".}
+  const wincompat = root & "/libs/lsquic/wincompat"
+  {.passc: "-I" & wincompat.}
 
-{.passc: fmt"-I{lsquicInclude}".}
-{.passc: fmt"-I{boringsslInclude}".}
-{.passc: fmt"-I{liblsquicInclude}".}
-{.passc: fmt"-I{lsqpack}".}
-{.passc: fmt"-I{lshpack}".}
-{.passc: fmt"-I{xxhash}".}
+{.passc: "-I" & lsquicInclude.}
+{.passc: "-I" & boringsslInclude.}
+{.passc: "-I" & liblsquicInclude.}
+{.passc: "-I" & lsqpack.}
+{.passc: "-I" & lshpack.}
+{.passc: "-I" & xxhash.}
 
 const HAVE_BORINGSSL = "-DHAVE_BORINGSSL"
 const XXH_HEADER_NAME = "-DXXH_HEADER_NAME=\"<lsquic_xxhash.h>\""

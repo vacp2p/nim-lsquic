@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# Copyright (c) Status Research & Development GmbH 
+# Copyright (c) Status Research & Development GmbH
 
 # libcrypto + libssl sources without cmake, no-asm, no fips, no tests, tools
 # TODO: look into use assembly files for perf
+
+import
+  std/[os, strutils]
 
 # ----- toolchain + includes -----
 {.localPassC: "-DBORINGSSL_IMPLEMENTATION -DS2N_BN_HIDE_SYMBOLS".}
@@ -12,7 +15,11 @@
     "-fno-common -fvisibility=hidden -fno-strict-aliasing -Werror -Wformat=2 -Wsign-compare -Wwrite-strings -Wvla -Wshadow -Wtype-limits -Wmissing-field-initializers -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti"
 .}
 
-{.passc: "-I./libs/vac_boringssl/include".}
+const
+  # use rsplit as a workaround for cross compilation path separator issue
+  srcPath = currentSourcePath.rsplit({DirSep, AltSep}, 1)[0]
+  
+{.passc: "-I" & srcPath & "/libs/vac_boringssl/include".}
 
 {.localPassC: "-DNDEBUG".}
 
