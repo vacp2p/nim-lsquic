@@ -19,7 +19,7 @@ when defined(linux):
     msg_len: cuint
 
   proc sendmmsg(
-      sockfd: SocketHandle, msgvec: ptr MMsgHdr, vlen: cuint, flags: cint
+    sockfd: SocketHandle, msgvec: ptr MMsgHdr, vlen: cuint, flags: cint
   ): cint {.importc, header: "<sys/socket.h>".}
 
 when defined(windows):
@@ -113,8 +113,12 @@ proc sendPacketsOut*(
       )
 
     let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nspecs, 0)
-    if res < 0:
-      return 0
+    let savedErrno = errno
+    if res < nspecs.cint:
+      if res < 0:
+        errno = savedErrno
+      else:
+        errno = EAGAIN
     return res
   else:
     var sent = 0
@@ -145,6 +149,8 @@ proc sendPacketsOut*(
           nil, # no overlapped
         )
         if res != 0:
+          if sent == 0:
+            return -1
           break
       else:
         let msg =
@@ -171,6 +177,8 @@ proc sendPacketsOut*(
 
         let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
         if res < 0:
+          if sent == 0:
+            return -1
           break
 
       sent.inc
