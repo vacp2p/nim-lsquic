@@ -89,7 +89,10 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
 proc readOnce*(
     stream: Stream, dst: ptr byte, dstLen: int
 ): Future[int] {.async: (raises: [CancelledError, StreamError]).} =
-  if dstLen == 0 or dst.isNil:
+  if dstLen == 0:
+    return 0
+
+  if dst.isNil:
     raiseAssert "dst cannot be nil"
 
   if stream.isEof or stream.closedByEngine:

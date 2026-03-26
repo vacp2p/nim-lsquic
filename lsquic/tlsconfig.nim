@@ -37,17 +37,35 @@ proc new*(
   )
 
 proc toX509*(pemCertificate: seq[byte]): Result[ptr X509, string] =
-  var
-    bio = BIO_new_mem_buf(addr pemCertificate[0], ossl_ssize_t(pemCertificate.len))
-    x509 = PEM_read_bio_X509(bio, nil, nil, nil)
+  if pemCertificate.len == 0:
+    return err("certificate is empty")
+
+  let bio = BIO_new_mem_buf(addr pemCertificate[0], ossl_ssize_t(pemCertificate.len))
+  if bio.isNil:
+    return err("could not create x509 bio")
+
+  let x509 = PEM_read_bio_X509(bio, nil, nil, nil)
   if BIO_free(bio) != 1:
+    if not x509.isNil:
+      X509_free(x509)
     return err("could not free x509 bio")
+  if x509.isNil:
+    return err("could not parse x509 certificate")
   ok(x509)
 
 proc toPKey*(pemKey: seq[byte]): Result[ptr EVP_PKEY, string] =
-  var
-    bio = BIO_new_mem_buf(addr pemKey[0], ossl_ssize_t(pemKey.len))
-    p = PEM_read_bio_PrivateKey(bio, nil, nil, nil)
+  if pemKey.len == 0:
+    return err("key is empty")
+
+  let bio = BIO_new_mem_buf(addr pemKey[0], ossl_ssize_t(pemKey.len))
+  if bio.isNil:
+    return err("could not create pkey bio")
+
+  let p = PEM_read_bio_PrivateKey(bio, nil, nil, nil)
   if BIO_free(bio) != 1:
+    if not p.isNil:
+      EVP_PKEY_free(p)
     return err("could not free pkey bio")
+  if p.isNil:
+    return err("could not parse private key")
   ok(p)
