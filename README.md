@@ -156,7 +156,7 @@ The CI matrix exercises:
 - Linux with GCC 14
 - macOS arm64
 - Windows amd64
-- Nim 2.0 and 2.2 with both `refc` and `orc`
+- Nim 2.0 (`refc`) and Nim 2.2 (`refc` and `orc`)
 
 ### Format
 
