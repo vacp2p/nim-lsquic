@@ -63,12 +63,13 @@ proc runConnectionTest(
         if n == 0:
           break
         received.add(buf[0 ..< n])
-      let eofRead = await stream.readOnce(buf)
 
       check:
         received == @[1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         stream.isEof
-        eofRead == 0
+
+      let eofRead = await stream.readOnce(buf)
+      check eofRead == 0
 
       echo "Server closed"
       await stream.close()
@@ -76,9 +77,9 @@ proc runConnectionTest(
       #echo "Server aborted"
       #stream.abort() # Not interested in RW anything else
     except StreamError:
-      echo "Stream error: ", getCurrentExceptionMsg()
+      raiseAssert "Stream error: " & getCurrentExceptionMsg()
     except CancelledError:
-      echo "Canceled incoming behavior"
+      raiseAssert "Canceled incoming behavior"
 
   discard allFutures(outgoingBehaviour(), incomingBehaviour())
 

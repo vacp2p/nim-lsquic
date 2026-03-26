@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results, chronicles
 import lsquic
-import ./helpers/[clientserver, param]
+import ./helpers/[clientserver, param, stream]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -15,23 +15,23 @@ const
   SequentialRounds = if isFast(): 2 else: 5
   StreamsPerRound = if isFast(): 2 else: 3
   ConcurrentClients = if isFast(): 2 else: 4
-  LargeWriteSize = if isFast(): 512 * 1024 else: 2 * 1024 * 1024
+  LargeWriteSize =
+    if isFast():
+      512 * 1024
+    else:
+      2 * 1024 * 1024
   ConcurrentWriteChunks = if isFast(): 4 else: 8
-  ConcurrentWriteChunkSize = if isFast(): 16 * 1024 else: 64 * 1024
+  ConcurrentWriteChunkSize =
+    if isFast():
+      16 * 1024
+    else:
+      64 * 1024
 
 proc payload(id: int, size: int): seq[byte] =
   result = newSeq[byte](size)
   result[0] = byte(id)
   for i in 1 ..< size:
     result[i] = byte((id + i) mod 251)
-
-proc readAll(stream: Stream): Future[seq[byte]] {.async.} =
-  var buf = newSeq[byte](4096)
-  while true:
-    let n = await stream.readOnce(buf)
-    if n == 0:
-      break
-    result.add(buf[0 ..< n])
 
 proc connectPeers(): Future[(QuicClient, Listener, Connection, Connection)] {.async.} =
   let client = makeClient()
@@ -62,7 +62,7 @@ proc runSequentialRound(round: int) {.async.} =
     let incomingStream = await incoming.incomingStream()
     await outgoingStream.close()
 
-    check (await incomingStream.readAll()) == sent
+    check (await incomingStream.readStreamTillEOF()) == sent
     await incomingStream.close()
 
   outgoing.close()
@@ -88,7 +88,7 @@ suite "stress":
     let outgoingStream = await outgoing.openStream()
     let writing = outgoingStream.write(sent)
     let incomingStream = await incoming.incomingStream()
-    let reading = incomingStream.readAll()
+    let reading = incomingStream.readStreamTillEOF()
 
     await writing
     await outgoingStream.close()
@@ -109,7 +109,7 @@ suite "stress":
       writes.add(outgoingStream.write(payload(chunkId, ConcurrentWriteChunkSize)))
 
     let incomingStream = await incoming.incomingStream()
-    let reading = incomingStream.readAll()
+    let reading = incomingStream.readStreamTillEOF()
 
     await allFutures(writes)
     await outgoingStream.close()
@@ -149,7 +149,7 @@ suite "stress":
           (
             proc(conn: Connection): Future[void] {.async.} =
               let stream = await conn.incomingStream()
-              let got = await stream.readAll()
+              let got = await stream.readStreamTillEOF()
               check got.len >= 1
               check got[0].int < ConcurrentClients
               received[got[0].int] = true

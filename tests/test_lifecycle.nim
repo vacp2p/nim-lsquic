@@ -5,18 +5,16 @@
 
 import chronos, chronos/unittest2/asynctests, results, chronicles
 import lsquic
-import ./helpers/clientserver
+import ./helpers/[clientserver, stream]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
 initializeLsquic(true, true)
 
-type ConnectedPeers = tuple[
-  client: QuicClient,
-  listener: Listener,
-  outgoing: Connection,
-  incoming: Connection,
-]
+type ConnectedPeers =
+  tuple[
+    client: QuicClient, listener: Listener, outgoing: Connection, incoming: Connection
+  ]
 
 proc connectPeers(): Future[ConnectedPeers] {.async.} =
   let client = makeClient()
@@ -34,14 +32,6 @@ proc stopPeers(peers: ConnectedPeers) {.async.} =
   if not peers.incoming.isNil:
     peers.incoming.close()
   await allFutures(peers.client.stop(), peers.listener.stop())
-
-proc readAll(stream: Stream): Future[seq[byte]] {.async.} =
-  var buf = newSeq[byte](64)
-  while true:
-    let n = await stream.readOnce(buf)
-    if n == 0:
-      break
-    result.add(buf[0 ..< n])
 
 suite "lifecycle":
   teardown:
@@ -167,7 +157,7 @@ suite "lifecycle":
     let incomingStream = await peers.incoming.incomingStream()
     await outgoingStream.close()
 
-    check (await incomingStream.readAll()) == @[9'u8, 8, 7, 6]
+    check (await incomingStream.readStreamTillEOF()) == @[9'u8, 8, 7, 6]
 
     var buf = newSeq[byte](8)
     check (await incomingStream.readOnce(buf)) == 0

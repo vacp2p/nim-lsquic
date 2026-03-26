@@ -12,7 +12,8 @@ trace "chronicles has to be imported to fix Error: undeclared identifier: 'activ
 
 initializeLsquic(true, true)
 
-var serverRejectVerifierCalls: int
+type RejectVerifierRecorder = ref object
+  rejectCount: int
 
 proc singleAlpn(name: string = "test"): HashSet[string] =
   result = initHashSet[string]()
@@ -31,28 +32,27 @@ proc rejectingCertificateCb(
   discard derCertificates
   false
 
-proc countingRejectingServerCertificateCb(
-    serverName: string, derCertificates: seq[seq[byte]]
-): bool {.gcsafe.} =
-  discard serverName
-  discard derCertificates
-  inc serverRejectVerifierCalls
-  false
+proc makeRejectingCertificateCb(
+    recorder: RejectVerifierRecorder
+): certificateVerifierCB =
+  return proc(serverName: string, derCertificates: seq[seq[byte]]): bool {.gcsafe.} =
+    discard serverName
+    discard derCertificates
+    inc recorder.rejectCount
+    false
 
 proc makeClientWithVerifier(
     verifier: CertificateVerifier, alpn: HashSet[string] = singleAlpn()
 ): QuicClient =
-  let tlsConfig = TLSConfig.new(
-    testCertificate(), testPrivateKey(), alpn, Opt.some(verifier)
-  )
+  let tlsConfig =
+    TLSConfig.new(testCertificate(), testPrivateKey(), alpn, Opt.some(verifier))
   QuicClient.new(tlsConfig)
 
 proc makeServerWithVerifier(
     verifier: CertificateVerifier, alpn: HashSet[string] = singleAlpn()
 ): QuicServer =
-  let tlsConfig = TLSConfig.new(
-    testCertificate(), testPrivateKey(), alpn, Opt.some(verifier)
-  )
+  let tlsConfig =
+    TLSConfig.new(testCertificate(), testPrivateKey(), alpn, Opt.some(verifier))
   QuicServer.new(tlsConfig)
 
 suite "certificate verifier":
@@ -60,8 +60,10 @@ suite "certificate verifier":
     cleanupLsquic()
 
   asyncTest "accepting custom verifier allows handshake":
-    let client = makeClientWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
-    let server = makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let client =
+      makeClientWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let server =
+      makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
     let listener = server.listen(initTAddress("127.0.0.1:0"))
     defer:
       await allFutures(client.stop(), listener.stop())
@@ -78,8 +80,10 @@ suite "certificate verifier":
     incoming.close()
 
   asyncTest "rejecting client verifier rejects handshake":
-    let client = makeClientWithVerifier(CustomCertificateVerifier.init(rejectingCertificateCb))
-    let server = makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let client =
+      makeClientWithVerifier(CustomCertificateVerifier.init(rejectingCertificateCb))
+    let server =
+      makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
     let listener = server.listen(initTAddress("127.0.0.1:0"))
     defer:
       await allFutures(client.stop(), listener.stop())
@@ -102,10 +106,12 @@ suite "certificate verifier":
       discard await client.dial(listener.localAddress())
 
   asyncTest "server-side verifier callback does not fail handshake without client auth":
-    serverRejectVerifierCalls = 0
-    let client = makeClientWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
-    let server =
-      makeServerWithVerifier(CustomCertificateVerifier.init(countingRejectingServerCertificateCb))
+    let recorder = RejectVerifierRecorder()
+    let client =
+      makeClientWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let server = makeServerWithVerifier(
+      CustomCertificateVerifier.init(recorder.makeRejectingCertificateCb())
+    )
     let listener = server.listen(initTAddress("127.0.0.1:0"))
     defer:
       await allFutures(client.stop(), listener.stop())
@@ -115,13 +121,14 @@ suite "certificate verifier":
 
     check:
       outgoing.certificates().len == 1
-      serverRejectVerifierCalls == 1
+      recorder.rejectCount == 1
 
     outgoing.close()
 
   asyncTest "insecure verifier allows handshake":
     let client = makeClientWithVerifier(InsecureCertificateVerifier.init())
-    let server = makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let server =
+      makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
     let listener = server.listen(initTAddress("127.0.0.1:0"))
     defer:
       await allFutures(client.stop(), listener.stop())

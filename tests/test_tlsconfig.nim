@@ -57,7 +57,8 @@ suite "tls config":
     check @[].toPKey().isErr()
 
   test "invalid pem values are rejected":
-    let invalidPem = @['n'.byte, 'o'.byte, 't'.byte, ' '.byte, 'p'.byte, 'e'.byte, 'm'.byte]
+    let invalidPem =
+      @['n'.byte, 'o'.byte, 't'.byte, ' '.byte, 'p'.byte, 'e'.byte, 'm'.byte]
 
     check invalidPem.toX509().isErr()
     check invalidPem.toPKey().isErr()
