@@ -218,8 +218,8 @@ when BORINGSS_USE_ASM:
             ""
         if (not fileExists(outObj)) or (cachedHash != srcHash):
           let cmd = "nasm -f win64 " & quoteShell(asmPath) & " -o " & quoteShell(outObj)
-          let cmdRes = gorgeEx(cmd)
-          doAssert cmdRes.exitCode == 0, "Failed cmd output: " & cmdRes.output
+          let res = gorgeEx(cmd)
+          doAssert res.exitCode == 0, "Failed cmd exit-code: " & $res.exitCode & " output: " & res.output
           writeFile(hashPath, srcHash)
 
     linkAsmFiles(asmFiles, outDir)
