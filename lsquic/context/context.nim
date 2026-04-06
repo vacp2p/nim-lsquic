@@ -20,8 +20,16 @@ type QuicContext* = ref object of RootObj
   tickTimeout*: Timeout
   sslCtx*: ptr SSL_CTX
   fd*: cint
+  processing: bool
 
 proc engine_process*(ctx: QuicContext) =
+  if ctx.processing:
+    ctx.tickTimeout.set(Moment.now())
+    return
+
+  ctx.processing = true
+  defer: ctx.processing = false
+
   lsquic_engine_process_conns(ctx.engine)
 
   if lsquic_engine_has_unsent_packets(ctx.engine) != 0:
@@ -58,7 +66,7 @@ type ServerContext* = ref object of QuicContext
   incoming*: AsyncQueue[QuicConnection]
 
 proc processWhenReady*(quicContext: QuicContext) =
-  quicContext.tickTimeout.set(Moment.now())
+  quicContext.engine_process()
 
 proc incomingStream*(
     quicConn: QuicConnection
