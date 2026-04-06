@@ -28,7 +28,8 @@ proc engine_process*(ctx: QuicContext) =
     return
 
   ctx.processing = true
-  defer: ctx.processing = false
+  defer:
+    ctx.processing = false
 
   lsquic_engine_process_conns(ctx.engine)
 
