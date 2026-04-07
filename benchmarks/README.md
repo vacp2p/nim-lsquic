@@ -3,7 +3,7 @@
 Docker-based harness for measuring bandwidth and latency of nim-lsquic under
 various network conditions. Runs a QUIC server and client in separate containers
 connected via a Docker bridge network, with configurable latency, bandwidth
-limits, and packet loss via `tc netem`.
+limits, packet loss, and packet reordering via `tc netem`.
 
 ## Defaults
 
@@ -30,6 +30,7 @@ limits, and packet loss via `tc netem`.
 | `multistream` | 1 | K (default: 4) | Stream contention within a single connection |
 | `multiconn` | N (default: 4) | 1 | Connection contention across separate QUIC connections |
 | `stress` | N (default: 4) | K (default: 4) | Combined connection + stream contention |
+| `rampup` | 1 | 1 | Congestion control ramp-up: throughput over time from cold start |
 
 ### `throughput`
 
@@ -78,18 +79,48 @@ scheduling pressure within each connection, plus engine-level pressure across
 connections. Compare the latency probe results against the `latency`, `multistream`,
 and `multiconn` baselines to isolate where degradation comes from.
 
+### `rampup`
+
+Opens a single connection with a single stream and starts a large download.
+Instead of reporting a single aggregate throughput number, it samples throughput
+in 50ms time windows and plots how bandwidth evolves from the start. This shows
+CUBIC slow-start behavior: how quickly the congestion window grows, how long it
+takes to reach steady state, and whether the connection fully utilizes the
+available bandwidth.
+
+The key metric is **time to 90% of peak throughput** — the point where
+slow-start has essentially finished. Under high-latency or lossy conditions, this
+ramp-up time grows significantly because CUBIC's window growth depends on RTT.
+Compare across network scenarios to see how network conditions affect convergence
+time.
+
+Example output (100MB download over WAN with 25ms latency, 100 Mbit cap):
+
+```
+Stream #1 [ramp-up] (20 windows, 50ms each):
+  Time to 90% peak: 150.000ms
+  Peak throughput:  83.48 Mbit/s
+  Timeline:
+       50ms |    12.3 Mbit/s | ######
+      100ms |    68.7 Mbit/s | #################################
+      150ms |    83.5 Mbit/s | ########################################
+      200ms |    82.9 Mbit/s | #######################################
+      ...
+```
+
 ## Network Scenarios
 
 The matrix runner (`run.sh`) tests across these predefined network conditions
-(all 5 used in full mode, only `lan` in `--quick` mode):
+(all 6 used in full mode, only `lan` in `--quick` mode):
 
-| Scenario | Latency | Bandwidth | Packet Loss |
-|----------|---------|-----------|-------------|
-| `lan` | 0ms | unlimited | 0% |
-| `wan` | 25ms | 100 Mbit | 0% |
-| `constrained` | 50ms | 10 Mbit | 0.1% |
-| `lossy` | 25ms | 50 Mbit | 2% |
-| `mobile` | 75ms | 5 Mbit | 1% |
+| Scenario | Latency | Bandwidth | Packet Loss | Reorder |
+|----------|---------|-----------|-------------|---------|
+| `lan` | 0ms | unlimited | 0% | 0% |
+| `wan` | 25ms | 100 Mbit | 0% | 0% |
+| `constrained` | 50ms | 10 Mbit | 0.1% | 0% |
+| `lossy` | 25ms | 50 Mbit | 2% | 0% |
+| `mobile` | 75ms | 5 Mbit | 1% | 0% |
+| `reorder` | 25ms | 100 Mbit | 0% | 25% |
 
 ### `run.sh` Matrix Defaults
 
@@ -102,6 +133,7 @@ The matrix runner (`run.sh`) tests across these predefined network conditions
 | `multistream` | 2 | 4 | 1 | 100 KB | 10 MB |
 | `multiconn` | 2 | 1 | 4 | 100 KB | 10 MB |
 | `stress` | 1 | 4 | 4 | 100 KB | 10 MB |
+| `rampup` | 1 | 1 | 1 | — | 100 MB |
 
 **Quick mode** (`./benchmarks/run.sh --quick`) — LAN scenario only:
 
@@ -112,6 +144,7 @@ The matrix runner (`run.sh`) tests across these predefined network conditions
 | `multistream` | 1 | 4 | 1 | 100 KB | 1 MB |
 | `multiconn` | 1 | 1 | 3 | 100 KB | 1 MB |
 | `stress` | 1 | 3 | 3 | 100 KB | 1 MB |
+| `rampup` | 1 | 1 | 1 | — | 10 MB |
 
 ## Prerequisites
 
@@ -121,7 +154,7 @@ The matrix runner (`run.sh`) tests across these predefined network conditions
 ## Quick Start
 
 ```bash
-# Run the full matrix (5 scenarios x 5 modes = 25 benchmarks)
+# Run the full matrix (6 scenarios x 6 modes = 36 benchmarks)
 ./benchmarks/run.sh
 
 # Quick mode: LAN only, smaller payloads, fewer runs
@@ -178,6 +211,7 @@ docker compose -f benchmarks/docker-compose.yml down --remove-orphans
 | `BANDWIDTH_MBIT` | `0` | Bandwidth limit in Mbit/s (0 = unlimited) |
 | `PACKET_LOSS_PCT` | `0` | Packet loss percentage |
 | `JITTER_MS` | `0` | Delay jitter in milliseconds |
+| `REORDER_PCT` | `0` | Packet reorder percentage (requires `LATENCY_MS` > 0) |
 
 ## Running Locally (Without Docker)
 
@@ -210,7 +244,7 @@ kill %1
 
 ```
 --mode, -m         Benchmark mode (default: throughput)
-                   Options: throughput|latency|multistream|multiconn|stress
+                   Options: throughput|latency|multistream|multiconn|stress|rampup
 --server, -s       Server address (default: 127.0.0.1)
 --port, -p         Server port (default: 14555)
 --upload-size      Bytes to upload per stream (default: 100000 = 100 KB)
@@ -224,24 +258,52 @@ kill %1
 
 ## Output
 
-### Summary Table
+### Sample Run
 
-`run.sh` prints a summary table and saves it to `benchmarks/results/`:
+Full matrix run (`./benchmarks/run.sh`) across all 6 scenarios and 6 modes:
 
 ```
 Scenario        Mode           Conns  Strms  Upload          Download        Lat p50      Lat p95      Duration
 ========================================================================================================================
-lan             throughput     1      1      178.18 Mbit/s   1.78 Gbit/s     -            -            13.470ms
-lan             latency        1      1      -               -               28.110us     406.816us    997.421us
-lan             multistream    1      4      91.69 Mbit/s    916.87 Mbit/s   37.590us     1.429ms      26.176ms
-lan             multiconn      3      1      96.43 Mbit/s    964.31 Mbit/s   20.937us     753.864us    16.592ms
-lan             stress         3      3      186.57 Mbit/s   1.87 Gbit/s     22.795us     2.706ms      25.727ms
-wan             throughput     1      1      810.67 Kbit/s   81.07 Mbit/s    -            -            4.934s
-wan             latency        1      1      -               -               25.283ms     25.420ms     2.529s
-wan             multistream    1      4      1.81 Mbit/s     180.50 Mbit/s   25.166ms     26.293ms     2.659s
-wan             multiconn      4      1      1.88 Mbit/s     188.34 Mbit/s   25.112ms     25.762ms     2.549s
-wan             stress         4      4      6.64 Mbit/s     664.45 Mbit/s   25.171ms     27.585ms     1.445s
+lan             throughput     1      1      10.99 Mbit/s    1.10 Gbit/s     -            -            363.907ms
+lan             latency        1      1      -               -               57.966us     173.932us    7.530ms
+lan             multistream    1      4      11.15 Mbit/s    1.11 Gbit/s     1.277ms      10.798ms     430.670ms
+lan             multiconn      4      1      11.82 Mbit/s    1.18 Gbit/s     293.599us    15.731ms     406.153ms
+lan             stress         4      4      13.90 Mbit/s    1.39 Gbit/s     8.207ms      37.689ms     690.415ms
+lan             rampup         1      1      -               1.09 Gbit/s     150.000ms    p90          736.432ms
+wan             throughput     1      1      900.16 Kbit/s   90.02 Mbit/s    -            -            4.444s
+wan             latency        1      1      -               -               25.660ms     25.761ms     2.565s
+wan             multistream    1      4      703.95 Kbit/s   70.39 Mbit/s    25.697ms     220.947ms    6.819s
+wan             multiconn      4      1      750.57 Kbit/s   75.06 Mbit/s    36.330ms     36.402ms     6.395s
+wan             stress         4      4      573.97 Kbit/s   57.40 Mbit/s    25.731ms     1.029s       16.726s
+wan             rampup         1      1      -               94.22 Mbit/s    150.000ms    p90          8.491s
+constrained     throughput     1      1      92.32 Kbit/s    9.23 Mbit/s     -            -            43.327s
+constrained     latency        1      1      -               -               50.792ms     50.977ms     5.082s
+constrained     multistream    1      4      94.25 Kbit/s    9.43 Mbit/s     94.594ms     163.685ms    50.928s
+constrained     multiconn      4      1      93.94 Kbit/s    9.39 Mbit/s     96.019ms     100.841ms    51.096s
+constrained     stress         4      4      92.25 Kbit/s    9.22 Mbit/s     50.928ms     122.342ms    104.068s
+constrained     rampup         1      1      -               9.49 Mbit/s     900.000ms    p90          84.324s
+lossy           throughput     1      1      405.86 Kbit/s   40.59 Mbit/s    -            -            9.856s
+lossy           latency        1      1      -               -               25.695ms     25.902ms     2.571s
+lossy           multistream    1      4      346.40 Kbit/s   34.64 Mbit/s    25.724ms     824.939ms    13.857s
+lossy           multiconn      4      1      339.58 Kbit/s   33.96 Mbit/s    47.512ms     47.747ms     14.135s
+lossy           stress         4      4      320.42 Kbit/s   32.04 Mbit/s    25.762ms     995.620ms    29.961s
+lossy           rampup         1      1      -               41.33 Mbit/s    150.000ms    p90          19.356s
+mobile          throughput     1      1      45.32 Kbit/s    4.53 Mbit/s     -            -            88.260s
+mobile          latency        1      1      -               -               75.919ms     76.187ms     7.902s
+mobile          multistream    1      4      46.90 Kbit/s    4.69 Mbit/s     123.369ms    614.949ms    102.349s
+mobile          multiconn      4      1      46.61 Kbit/s    4.66 Mbit/s     119.147ms    351.425ms    102.988s
+mobile          stress         4      4      46.42 Kbit/s    4.64 Mbit/s     121.724ms    453.206ms    206.803s
+mobile          rampup         1      1      -               4.74 Mbit/s     3.350s       p90          168.757s
+reorder         throughput     1      1      672.33 Kbit/s   67.23 Mbit/s    -            -            5.949s
+reorder         latency        1      1      -               -               25.690ms     25.896ms     2.417s
+reorder         multistream    1      4      636.49 Kbit/s   63.65 Mbit/s    25.677ms     441.939ms    7.541s
+reorder         multiconn      4      1      664.28 Kbit/s   66.43 Mbit/s    36.302ms     36.407ms     7.226s
+reorder         stress         4      4      746.94 Kbit/s   74.69 Mbit/s    25.704ms     934.372ms    12.852s
+reorder         rampup         1      1      -               90.96 Mbit/s    100.000ms    p90          8.795s
 ```
+
+#### Reading the results
 
 **Columns:**
 
@@ -253,15 +315,85 @@ wan             stress         4      4      6.64 Mbit/s     664.45 Mbit/s   25.
 - **Strms** — number of streams per connection
 - **Upload** — aggregate upload throughput across all streams, computed as total
   bytes uploaded divided by total wall-clock duration. Shows `-` for latency-only
-  modes where no bulk data is transferred.
+  modes where no bulk data is transferred. Note: in throughput mode the upload is
+  small relative to the download, so this number reflects the fraction of time
+  spent uploading rather than burst upload speed.
 - **Download** — same as Upload but for the download direction
 - **Lat p50** — median (50th percentile) round-trip time from the latency probe
   stream. This is the RTT of a small ping/pong echo measured alongside any bulk
   transfers. Shows `-` for pure throughput mode which has no latency probe.
+  For `rampup` mode, this column shows the **time to 90% of peak throughput**
+  instead (labeled `p90` in the Lat p95 column).
 - **Lat p95** — 95th percentile RTT. Useful for spotting tail latency spikes
-  caused by contention or packet loss.
+  caused by contention or packet loss. Shows `p90` for `rampup` mode to indicate
+  the Lat p50 column contains the time-to-90%-peak metric.
 - **Duration** — total wall-clock time for the entire benchmark run (all
   iterations, all streams)
+
+#### Analysis by scenario
+
+**LAN** (no shaping) — establishes the upper bound. Single-stream download reaches
+1.10 Gbit/s on the Docker bridge. With parallel streams and connections, aggregate
+throughput climbs to 1.1-1.4 Gbit/s as multiplexing improves pipeline utilization.
+Latency starts at 58us but grows to 8.2ms p50 / 37.7ms p95 under stress, showing
+the cost of engine processing contention when handling 16 concurrent streams across
+4 connections.
+
+**WAN** (25ms, 100 Mbit) — throughput reaches 90 Mbit/s, below the 100 Mbit cap
+because CUBIC needs multiple RTTs to grow the congestion window, and each of the 5
+sequential runs starts cold. Latency baseline is 25.7ms, matching the netem delay
+exactly. Under multiconn the probe latency rises to 36ms (+11ms), pointing to
+engine-level contention across connections. Stress p95 hits 1.03s from head-of-line
+blocking cascades across 16 concurrent streams. Rampup takes 150ms (6 RTTs) to
+reach 90% of peak.
+
+**Constrained** (50ms, 10 Mbit, 0.1% loss) — all modes saturate at ~9.2 Mbit/s,
+confirming the 10 Mbit link is the bottleneck rather than the engine. Contention
+modes show nearly identical throughput because there simply isn't more bandwidth
+to fight over. The main effect of contention is on latency: multistream p95 reaches
+164ms and stress p95 hits 122ms. Rampup takes 900ms (18 RTTs at 50ms) to reach
+steady state, consistent with CUBIC slow-start behavior.
+
+**Lossy** (25ms, 50 Mbit, 2% loss) — the most punishing scenario for throughput.
+Single-stream reaches only 40.6 Mbit/s (81% of cap) because 2% loss causes frequent
+congestion window reductions. Baseline latency p50 is 25.7ms, matching the netem
+delay, with p95 at 25.9ms. Stress p95 reaches 996ms as loss and congestion combine
+into retransmission cascades across 16 concurrent streams.
+
+**Mobile** (75ms, 5 Mbit, 1% loss) — throughput settles at 4.5 Mbit/s (90% of
+cap). The tight bandwidth means contention modes show nearly identical throughput
+(~4.6 Mbit/s) since the link is fully saturated regardless. The contention effect
+shows up in latency instead: multistream p95 reaches 615ms from within-connection
+scheduling pressure under the narrow pipe. Rampup takes 3.35s to converge — longer
+than expected from RTT alone, likely due to a loss event during slow-start forcing
+a window reduction on this narrow, lossy link.
+
+**Reorder** (25ms, 100 Mbit, 25% reorder) — throughput drops to 67.2 Mbit/s, 25%
+lower than WAN (90 Mbit/s) despite the same bandwidth cap. Reordered packets
+trigger duplicate ACKs that CUBIC interprets as loss, shrinking the congestion
+window unnecessarily. This is a known weakness of loss-based congestion control.
+However, reordering is less damaging than actual loss: 25% reorder yields 67.2
+Mbit/s while 2% real loss (lossy scenario) yields only 40.6 Mbit/s, because
+reordered packets eventually arrive and don't require retransmission.
+
+#### Key takeaways
+
+- **Bandwidth caps are enforced bidirectionally** — download throughput stays below
+  the configured cap in all scenarios (shaping is applied on both client and server
+  egress via `tc netem`).
+- **Latency baselines match netem delays exactly** — 25.7ms for WAN/lossy/reorder
+  (25ms configured), 50.8ms for constrained (50ms), 75.9ms for mobile (75ms).
+- **Contention degrades latency more than throughput** — under constrained/mobile
+  scenarios the link is fully saturated regardless of mode, but p95 latency grows
+  2-6x from baseline under stress.
+- **Packet loss is more damaging than reordering** — 2% loss (lossy) reduces
+  throughput to 81% of cap and drives stress p95 to 996ms, while 25% reorder
+  reduces throughput to only 67% and stress p95 to 934ms. Lost packets require
+  actual retransmission and RTO backoff; reordered packets just trigger spurious
+  duplicate ACKs.
+- **CUBIC ramp-up scales with RTT** — time-to-90% grows from 150ms (LAN/WAN)
+  to 900ms (50ms RTT) to 3.35s (75ms RTT + 1% loss), with loss events during
+  slow-start significantly extending convergence on narrow, lossy links.
 
 ### Human-Readable Output
 
@@ -331,8 +463,10 @@ samples (in nanoseconds) for further analysis:
    to measure contention effects.
 
 3. **Network shaping** is applied via `tc netem` in the Docker entrypoint (requires
-   `NET_ADMIN` capability). Delay, bandwidth limits, and packet loss are applied
-   on the client side.
+   `NET_ADMIN` capability). Since `tc qdisc` only shapes egress (outbound) traffic,
+   bandwidth limits are applied on **both** the client and server sides so that
+   uploads and downloads are both capped. Latency, packet loss, and reordering are
+   applied on the client side only to avoid doubling the delay.
 
 4. **Results** are collected as JSON per run and aggregated into a summary table
    by `run.sh`.

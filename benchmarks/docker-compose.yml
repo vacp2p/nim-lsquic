@@ -1,5 +1,6 @@
 services:
   bench-server:
+    image: nim-lsquic-bench:latest
     build:
       context: ..
       dockerfile: benchmarks/Dockerfile
@@ -15,19 +16,22 @@ services:
       - BANDWIDTH_MBIT=${SERVER_BANDWIDTH_MBIT:-0}
       - PACKET_LOSS_PCT=${SERVER_PACKET_LOSS_PCT:-0}
       - JITTER_MS=${SERVER_JITTER_MS:-0}
+      - REORDER_PCT=${SERVER_REORDER_PCT:-0}
     healthcheck:
-      test: ["CMD-SHELL", "ss -uln | grep -q 14555 || exit 0"]
+      test: ["CMD-SHELL", "ss -ulnH | grep -q ':14555'"]
       interval: 1s
       timeout: 5s
-      retries: 10
+      retries: 30
+      start_period: 1s
 
   bench-client:
+    image: nim-lsquic-bench:latest
     build:
       context: ..
       dockerfile: benchmarks/Dockerfile
     depends_on:
       bench-server:
-        condition: service_started
+        condition: service_healthy
     networks:
       benchnet:
         ipv4_address: 172.28.0.20
@@ -39,6 +43,7 @@ services:
       - BANDWIDTH_MBIT=${BANDWIDTH_MBIT:-0}
       - PACKET_LOSS_PCT=${PACKET_LOSS_PCT:-0}
       - JITTER_MS=${JITTER_MS:-0}
+      - REORDER_PCT=${REORDER_PCT:-0}
     # Override command via run.sh; default = throughput
     command: >
       bench_client

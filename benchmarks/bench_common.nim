@@ -32,15 +32,23 @@ type
     MultiStream = "multistream"
     MultiConn = "multiconn"
     Stress = "stress"
+    RampUp = "rampup"
 
   LatencySample* = object
     rttNs*: int64
+
+  RampUpSample* = object
+    elapsedMs*: int64 ## ms since download start
+    throughputMbps*: float ## throughput in this window (Mbit/s)
+    cumulativeBytes*: int ## total bytes received so far
 
   StreamResult* = object
     uploadBytes*: int
     downloadBytes*: int
     durationNs*: int64
     latencySamples*: seq[LatencySample]
+    rampUpSamples*: seq[RampUpSample]
+    timeToP90Ns*: int64 ## time to reach 90% of peak throughput (rampup only)
 
   ConnectionResult* = object
     streamResults*: seq[StreamResult]
@@ -147,23 +155,35 @@ proc toJson*(r: RunResult): JsonNode =
       var latArr = newJArray()
       for l in sr.latencySamples:
         latArr.add(%l.rttNs)
-      streamArr.add(%*{
-        "upload_bytes": sr.uploadBytes,
-        "download_bytes": sr.downloadBytes,
-        "duration_ns": sr.durationNs,
-        "latency_samples_ns": latArr,
-      })
-    connArr.add(%*{
-      "streams": streamArr,
-      "duration_ns": cr.durationNs,
-    })
-  result = %*{
-    "mode": $r.mode,
-    "connections": r.connections,
-    "streams_per_conn": r.streamsPerConn,
-    "upload_size": r.uploadSize,
-    "download_size": r.downloadSize,
-    "chunk_size": r.chunkSize,
-    "duration_ns": r.durationNs,
-    "connections_results": connArr,
-  }
+      var rampArr = newJArray()
+      for s in sr.rampUpSamples:
+        rampArr.add(
+          %*{
+            "elapsed_ms": s.elapsedMs,
+            "throughput_mbps": s.throughputMbps,
+            "cumulative_bytes": s.cumulativeBytes,
+          }
+        )
+      var streamNode =
+        %*{
+          "upload_bytes": sr.uploadBytes,
+          "download_bytes": sr.downloadBytes,
+          "duration_ns": sr.durationNs,
+          "latency_samples_ns": latArr,
+        }
+      if sr.rampUpSamples.len > 0:
+        streamNode["ramp_up_samples"] = rampArr
+        streamNode["time_to_p90_ns"] = %sr.timeToP90Ns
+      streamArr.add(streamNode)
+    connArr.add(%*{"streams": streamArr, "duration_ns": cr.durationNs})
+  result =
+    %*{
+      "mode": $r.mode,
+      "connections": r.connections,
+      "streams_per_conn": r.streamsPerConn,
+      "upload_size": r.uploadSize,
+      "download_size": r.downloadSize,
+      "chunk_size": r.chunkSize,
+      "duration_ns": r.durationNs,
+      "connections_results": connArr,
+    }

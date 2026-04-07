@@ -17,6 +17,39 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 RESULTS_DIR="$SCRIPT_DIR/results"
+LOCK_DIR="$RESULTS_DIR/.run.lock"
+WAIT_TIMEOUT=30
+COMPOSE_ARGS=(-f "$COMPOSE_FILE")
+
+acquire_lock() {
+  local pid
+
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo $$ > "$LOCK_DIR/pid"
+    return
+  fi
+
+  if [ -f "$LOCK_DIR/pid" ]; then
+    pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+      rm -rf "$LOCK_DIR"
+      mkdir "$LOCK_DIR"
+      echo $$ > "$LOCK_DIR/pid"
+      return
+    fi
+  fi
+
+  echo "Another benchmark run is already active. Stop it before starting a new one."
+  exit 1
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT INT TERM HUP
+  docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans >/dev/null 2>&1 || true
+  rm -rf "$LOCK_DIR"
+  exit "$status"
+}
 
 QUICK=false
 FILTER_MODE=""
@@ -38,20 +71,26 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "$RESULTS_DIR"
+acquire_lock
+trap cleanup EXIT INT TERM HUP
+
+# Start from a clean project state in case a previous run was interrupted.
+docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans >/dev/null 2>&1 || true
 
 # -- Network scenarios --
-# Format: NAME|LATENCY_MS|BANDWIDTH_MBIT|PACKET_LOSS_PCT
+# Format: NAME|LATENCY_MS|BANDWIDTH_MBIT|PACKET_LOSS_PCT|REORDER_PCT
 if [ "$QUICK" = true ]; then
   SCENARIOS=(
-    "lan|0|0|0"
+    "lan|0|0|0|0"
   )
 else
   SCENARIOS=(
-    "lan|0|0|0"
-    "wan|25|100|0"
-    "constrained|50|10|0.1"
-    "lossy|25|50|2"
-    "mobile|75|5|1"
+    "lan|0|0|0|0"
+    "wan|25|100|0|0"
+    "constrained|50|10|0.1|0"
+    "lossy|25|50|2|0"
+    "mobile|75|5|1|0"
+    "reorder|25|100|0|25"
   )
 fi
 
@@ -64,6 +103,7 @@ if [ "$QUICK" = true ]; then
     "multistream|1|4|1|100000|1000000"
     "multiconn|1|1|3|100000|1000000"
     "stress|1|3|3|100000|1000000"
+    "rampup|1|1|1|0|10000000"
   )
 else
   BENCHMARKS=(
@@ -72,13 +112,14 @@ else
     "multistream|2|4|1|100000|10000000"
     "multiconn|2|1|4|100000|10000000"
     "stress|1|4|4|100000|10000000"
+    "rampup|1|1|1|0|100000000"
   )
 fi
 
 # -- Build --
 if [ "$NO_BUILD" = false ]; then
-  echo "Building Docker images..."
-  docker compose -f "$COMPOSE_FILE" build --quiet 2>&1
+  echo "Building Docker image..."
+  docker compose "${COMPOSE_ARGS[@]}" build --quiet bench-server 2>&1
   echo "Build complete."
 fi
 
@@ -96,7 +137,7 @@ run_bench() {
   local scenario_str="$1"
   local bench_str="$2"
 
-  IFS='|' read -r sc_name sc_lat sc_bw sc_loss <<< "$scenario_str"
+  IFS='|' read -r sc_name sc_lat sc_bw sc_loss sc_reorder <<< "$scenario_str"
   IFS='|' read -r bm_mode bm_runs bm_streams bm_conns bm_upload bm_download <<< "$bench_str"
 
   # Apply filters
@@ -110,15 +151,19 @@ run_bench() {
   local run_name="${sc_name}_${bm_mode}"
   echo -n "Running ${run_name}... "
 
-  # Latency is applied half on each side (client sends, server sends)
-  # to simulate realistic RTT. For simplicity, apply full delay on client only.
+  # tc netem only shapes egress (outbound) traffic. To cap bandwidth in both
+  # directions we mirror the bandwidth limit on the server side so that the
+  # server's outgoing download data is also shaped.
+  # Latency/loss/reorder are kept client-only to avoid doubling the delay.
   local env_args=(
     "LATENCY_MS=$sc_lat"
     "BANDWIDTH_MBIT=$sc_bw"
     "PACKET_LOSS_PCT=$sc_loss"
+    "REORDER_PCT=${sc_reorder:-0}"
     "SERVER_LATENCY_MS=0"
-    "SERVER_BANDWIDTH_MBIT=0"
+    "SERVER_BANDWIDTH_MBIT=$sc_bw"
     "SERVER_PACKET_LOSS_PCT=0"
+    "SERVER_REORDER_PCT=0"
     "BENCH_MODE=$bm_mode"
     "BENCH_RUNS=$bm_runs"
     "BENCH_STREAMS=$bm_streams"
@@ -127,29 +172,52 @@ run_bench() {
     "BENCH_DOWNLOAD_SIZE=$bm_download"
   )
 
-  local env_file="$JSON_DIR/.env_${run_name}"
-  printf "%s\n" "${env_args[@]}" > "$env_file"
+  # Make each scenario self-contained even if the previous one was interrupted.
+  env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans \
+    >/dev/null 2>&1 || true
 
-  # Start server, run client, capture JSON output.
-  # Docker compose prefixes lines with "bench-client-1  | ", so we strip that
-  # and reconstruct just the JSON block.
-  local raw_output
+  # Bring up the server first and wait for the healthcheck to pass before
+  # running the client. This removes the client/server startup race.
+  if ! env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" up \
+      -d \
+      --wait \
+      --wait-timeout "$WAIT_TIMEOUT" \
+      bench-server >/dev/null 2>&1; then
+    echo "FAILED (server startup)"
+    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s\n" \
+      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" \
+      | tee -a "$SUMMARY_FILE"
+    env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans \
+      >/dev/null 2>&1 || true
+    return
+  fi
+
+  # Only attach to bench-client so the output contains bench_client logs only.
+  local raw_output client_status output
+  set +e
   raw_output=$(
-    env "${env_args[@]}" docker compose -f "$COMPOSE_FILE" up \
+    env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" up \
+      --no-deps \
       --abort-on-container-exit \
       --exit-code-from bench-client \
-      2>/dev/null || true
+      --no-color \
+      --no-log-prefix \
+      bench-client 2>/dev/null
   )
+  client_status=$?
+  set -e
 
-  # Extract the JSON from bench-client output lines
-  local output
-  output=$(echo "$raw_output" | sed -n 's/^bench-client-1  | //p' | sed -n '/^{/,/^}/p' || true)
+  output=$(printf "%s\n" "$raw_output" | sed -n '/^{/,/^}/p' || true)
 
-  # Tear down
-  env "${env_args[@]}" docker compose -f "$COMPOSE_FILE" down --remove-orphans 2>/dev/null || true
+  env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans \
+    >/dev/null 2>&1 || true
 
   if [ -z "$output" ]; then
-    echo "FAILED (no JSON output)"
+    if [ "$client_status" -ne 0 ]; then
+      echo "FAILED (bench-client exit $client_status)"
+    else
+      echo "FAILED (no JSON output)"
+    fi
     printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s\n" \
       "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" \
       | tee -a "$SUMMARY_FILE"
@@ -172,7 +240,10 @@ import sys, json
 d = json.load(sys.stdin)
 dur_ns = d['duration_ns']
 
-# Aggregate throughput
+# Aggregate bytes across all streams, then compute throughput as
+# total_bytes / total_run_duration. This is correct for both sequential
+# runs (gives average throughput) and parallel streams/conns (gives
+# aggregate bandwidth).
 total_up = 0
 total_down = 0
 latencies = []
@@ -212,6 +283,15 @@ else:
     lat_p50_str = '-'
     lat_p95_str = '-'
 
+# For rampup mode, show time-to-p90 in the latency columns
+if d.get('mode') == 'rampup':
+    for cr in d.get('connections_results', []):
+        for sr in cr.get('streams', []):
+            t90 = sr.get('time_to_p90_ns', 0)
+            if t90 > 0:
+                lat_p50_str = fmt_dur(t90)
+                lat_p95_str = 'p90'
+
 dur_str = fmt_dur(dur_ns)
 
 print(f'{up_str}|{down_str}|{lat_p50_str}|{lat_p95_str}|{dur_str}')
@@ -224,7 +304,6 @@ print(f'{up_str}|{down_str}|{lat_p50_str}|{lat_p95_str}|{dur_str}')
       | tee -a "$SUMMARY_FILE"
   }
 
-  rm -f "$env_file"
 }
 
 for scenario in "${SCENARIOS[@]}"; do

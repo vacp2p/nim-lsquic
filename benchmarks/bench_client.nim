@@ -48,16 +48,12 @@ proc runThroughputStream(
 
   let duration = Moment.now() - start
   return StreamResult(
-    uploadBytes: uploadSize,
-    downloadBytes: totalDown,
-    durationNs: duration.nanoseconds,
+    uploadBytes: uploadSize, downloadBytes: totalDown, durationNs: duration.nanoseconds
   )
 
 # -- Latency ping/pong on a single stream --
 
-proc runLatencyStream(
-    conn: Connection, runs: int
-): Future[StreamResult] {.async.} =
+proc runLatencyStream(conn: Connection, runs: int): Future[StreamResult] {.async.} =
   let stream = await conn.openStream()
 
   # Send type header
@@ -111,8 +107,7 @@ proc runLatencyStream(
 # -- Mode: throughput (1 conn, 1 stream) --
 
 proc modeThroughput(
-    serverAddr: TransportAddress,
-    uploadSize, downloadSize, chunkSize, runs: int,
+    serverAddr: TransportAddress, uploadSize, downloadSize, chunkSize, runs: int
 ): Future[RunResult] {.async.} =
   var result = RunResult(
     mode: Throughput,
@@ -142,14 +137,8 @@ proc modeThroughput(
 
 # -- Mode: latency (1 conn, 1 stream) --
 
-proc modeLatency(
-    serverAddr: TransportAddress, runs: int
-): Future[RunResult] {.async.} =
-  var result = RunResult(
-    mode: Latency,
-    connections: 1,
-    streamsPerConn: 1,
-  )
+proc modeLatency(serverAddr: TransportAddress, runs: int): Future[RunResult] {.async.} =
+  var result = RunResult(mode: Latency, connections: 1, streamsPerConn: 1)
 
   let client = makeClient()
   let conn = await client.dial(serverAddr)
@@ -296,9 +285,7 @@ proc modeStress(
       # On each connection: K-1 throughput streams + 1 latency probe
       let throughputStreams = max(numStreams - 1, 0)
       for s in 0 ..< throughputStreams:
-        allFuts.add(
-          runThroughputStream(conns[ci], uploadSize, downloadSize, chunkSize)
-        )
+        allFuts.add(runThroughputStream(conns[ci], uploadSize, downloadSize, chunkSize))
         futConnIdx.add(ci)
 
       # Latency probe
@@ -325,6 +312,118 @@ proc modeStress(
 
   return result
 
+# -- Mode: rampup (1 conn, 1 stream, measure throughput over time) --
+
+const
+  RampUpWindowMs = 50 ## sample window in milliseconds
+  RampUpDownloadSize = 100_000_000 ## 100MB default for rampup
+
+proc modeRampUp(
+    serverAddr: TransportAddress, downloadSize: int, chunkSize: int
+): Future[RunResult] {.async.} =
+  var result = RunResult(
+    mode: RampUp,
+    connections: 1,
+    streamsPerConn: 1,
+    downloadSize: downloadSize,
+    chunkSize: chunkSize,
+  )
+
+  let client = makeClient()
+  let conn = await client.dial(serverAddr)
+
+  let stream = await conn.openStream()
+
+  # Send throughput header: no upload, just download
+  await stream.write(@[MsgThroughput])
+  await stream.write(toSeq(0'u64.toBytesBE())) # upload size = 0
+  await stream.write(toSeq(downloadSize.uint64.toBytesBE()))
+  await stream.close() # signal no upload data
+
+  # Now read download data, recording (timestamp, cumulative bytes)
+  type DataPoint = object
+    elapsedNs: int64
+    cumulativeBytes: int
+
+  var buf = newSeq[byte](chunkSize)
+  var totalDown = 0
+  var points: seq[DataPoint]
+
+  let start = Moment.now()
+
+  while totalDown < downloadSize:
+    let n = await stream.readOnce(buf[0].addr, buf.len)
+    if n == 0:
+      break
+    totalDown += n
+    let elapsed = Moment.now() - start
+    points.add(DataPoint(elapsedNs: elapsed.nanoseconds, cumulativeBytes: totalDown))
+
+  let totalDuration = Moment.now() - start
+
+  # Bucket into time windows
+  var samples: seq[RampUpSample]
+  let windowNs = RampUpWindowMs.int64 * 1_000_000
+
+  if points.len > 0:
+    var windowStart: int64 = 0
+    var prevBytes = 0
+    var pi = 0
+
+    while windowStart < totalDuration.nanoseconds:
+      let windowEnd = windowStart + windowNs
+      # Advance to last point within this window
+      while pi < points.len and points[pi].elapsedNs <= windowEnd:
+        inc pi
+
+      let cumBytes =
+        if pi > 0:
+          points[pi - 1].cumulativeBytes
+        else:
+          0
+      let bytesInWindow = cumBytes - prevBytes
+      let mbps = float(bytesInWindow) * 8.0 / float(windowNs) * 1e9 / 1e6
+
+      samples.add(
+        RampUpSample(
+          elapsedMs: (windowStart + windowNs) div 1_000_000,
+          throughputMbps: mbps,
+          cumulativeBytes: cumBytes,
+        )
+      )
+
+      prevBytes = cumBytes
+      windowStart = windowEnd
+
+  # Find peak throughput and time to reach 90% of peak
+  var peakMbps = 0.0
+  for s in samples:
+    if s.throughputMbps > peakMbps:
+      peakMbps = s.throughputMbps
+
+  var timeToP90Ns: int64 = totalDuration.nanoseconds
+  let threshold = peakMbps * 0.9
+  for s in samples:
+    if s.throughputMbps >= threshold:
+      timeToP90Ns = s.elapsedMs * 1_000_000
+      break
+
+  var sr = StreamResult(
+    downloadBytes: totalDown,
+    durationNs: totalDuration.nanoseconds,
+    rampUpSamples: samples,
+    timeToP90Ns: timeToP90Ns,
+  )
+
+  var connRes =
+    ConnectionResult(streamResults: @[sr], durationNs: totalDuration.nanoseconds)
+  result.connResults.add(connRes)
+  result.durationNs = totalDuration.nanoseconds
+
+  conn.close()
+  await client.stop()
+  return result
+
 # -- Print results --
 
 proc printResults(result: RunResult) =
@@ -341,10 +440,10 @@ proc printResults(result: RunResult) =
     for si, sr in cr.streamResults:
       if sr.uploadBytes > 0 or sr.downloadBytes > 0:
         echo "    Stream #", si + 1, " [throughput]:"
-        echo "      Upload:   ", sr.uploadBytes, " bytes -> ",
-          formatBps(sr.uploadBytes, sr.durationNs)
-        echo "      Download: ", sr.downloadBytes, " bytes -> ",
-          formatBps(sr.downloadBytes, sr.durationNs)
+        echo "      Upload:   ",
+          sr.uploadBytes, " bytes -> ", formatBps(sr.uploadBytes, sr.durationNs)
+        echo "      Download: ",
+          sr.downloadBytes, " bytes -> ", formatBps(sr.downloadBytes, sr.durationNs)
         echo "      Duration: ", formatDuration(sr.durationNs)
 
       if sr.latencySamples.len > 0:
@@ -356,6 +455,27 @@ proc printResults(result: RunResult) =
         echo "      p99:   ", formatDuration(rtts.percentile(0.99))
         echo "      Min:   ", formatDuration(rtts.min())
         echo "      Max:   ", formatDuration(rtts.max())
+
+      if sr.rampUpSamples.len > 0:
+        echo "    Stream #",
+          si + 1,
+          " [ramp-up] (",
+          sr.rampUpSamples.len,
+          " windows, ",
+          RampUpWindowMs,
+          "ms each):"
+        echo "      Time to 90% peak: ", formatDuration(sr.timeToP90Ns)
+        let peakMbps = sr.rampUpSamples.mapIt(it.throughputMbps).foldl(max(a, b), 0.0)
+        echo "      Peak throughput:  ", peakMbps.formatFloat(ffDecimal, 2), " Mbit/s"
+        echo "      Timeline:"
+        for s in sr.rampUpSamples:
+          let bar = "#".repeat(min(int(s.throughputMbps / peakMbps * 40.0), 40))
+          echo "        ",
+            align($s.elapsedMs & "ms", 8),
+            " | ",
+            align(s.throughputMbps.formatFloat(ffDecimal, 1) & " Mbit/s", 15),
+            " | ",
+            bar
 
   echo ""
 
@@ -390,6 +510,8 @@ when isMainModule:
         mode = MultiConn
       of "stress":
         mode = Stress
+      of "rampup":
+        mode = RampUp
       else:
         echo "Unknown mode: ", paramStr(i)
         quit(1)
@@ -428,6 +550,7 @@ when isMainModule:
       echo "  multistream  - 1 conn, K streams: stream contention"
       echo "  multiconn    - N conns, 1 stream each: connection contention"
       echo "  stress       - N conns, K streams each: worst case"
+      echo "  rampup       - 1 conn, 1 stream: congestion ramp-up timeline"
       echo ""
       echo "Options:"
       echo "  --mode, -m         Benchmark mode (default: throughput)"
@@ -438,7 +561,8 @@ when isMainModule:
       echo "  --chunk-size       Chunk size (default: ", DefaultChunkSize, ")"
       echo "  --runs, -r         Number of runs (default: ", DefaultRuns, ")"
       echo "  --streams, -k      Streams per connection (default: ", DefaultStreams, ")"
-      echo "  --connections, -n  Number of connections (default: ", DefaultConnections, ")"
+      echo "  --connections, -n  Number of connections (default: ",
+        DefaultConnections, ")"
       echo "  --json             Output results as JSON"
       quit(0)
     else:
@@ -470,6 +594,8 @@ when isMainModule:
       waitFor modeStress(
         serverAddr, numConns, numStreams, uploadSize, downloadSize, chunkSize, runs
       )
+    of RampUp:
+      waitFor modeRampUp(serverAddr, downloadSize, chunkSize)
 
   if jsonOutput:
     echo benchResult.toJson().pretty()

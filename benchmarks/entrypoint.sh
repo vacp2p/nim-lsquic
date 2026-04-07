@@ -4,10 +4,11 @@ set -e
 # Apply network shaping via tc netem if environment variables are set.
 # Requires NET_ADMIN capability.
 #
-# LATENCY_MS     - one-way delay in milliseconds (default: 0)
-# BANDWIDTH_MBIT - bandwidth limit in Mbit/s (default: unlimited)
+# LATENCY_MS      - one-way delay in milliseconds (default: 0)
+# BANDWIDTH_MBIT  - bandwidth limit in Mbit/s (default: unlimited)
 # PACKET_LOSS_PCT - packet loss percentage (default: 0)
-# JITTER_MS      - delay jitter in milliseconds (default: 0)
+# JITTER_MS       - delay jitter in milliseconds (default: 0)
+# REORDER_PCT     - packet reorder percentage (default: 0, requires LATENCY_MS)
 
 apply_netem() {
   local iface
@@ -35,6 +36,12 @@ apply_netem() {
     has_netem=true
   fi
 
+  if [ -n "$REORDER_PCT" ] && [ "$REORDER_PCT" != "0" ]; then
+    # reorder requires delay to be set (reordered packets skip the delay)
+    netem_args="${netem_args} reorder ${REORDER_PCT}% 50%"
+    has_netem=true
+  fi
+
   # Bandwidth shaping: combine with netem if both are set
   if [ -n "$BANDWIDTH_MBIT" ] && [ "$BANDWIDTH_MBIT" != "0" ]; then
     local rate="${BANDWIDTH_MBIT}mbit"
@@ -59,7 +66,7 @@ apply_netem() {
 }
 
 # Only apply netem if any shaping var is set
-if [ -n "$LATENCY_MS" ] || [ -n "$BANDWIDTH_MBIT" ] || [ -n "$PACKET_LOSS_PCT" ]; then
+if [ -n "$LATENCY_MS" ] || [ -n "$BANDWIDTH_MBIT" ] || [ -n "$PACKET_LOSS_PCT" ] || [ -n "$REORDER_PCT" ]; then
   apply_netem
 fi
 
