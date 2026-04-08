@@ -1,27 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
-import pkg/chronos
-import pkg/unittest2
-import pkg/quic/transport/stream
+import chronos
+import unittest2
+import lsquic
 
-proc newData*(size: int, val: uint8 = uint8(0xEE)): seq[uint8] =
-  var data = newSeq[uint8](size)
+proc newData*(size: int, val: byte = byte(0xEE)): seq[byte] =
+  var data = newSeq[byte](size)
   for i in 0 ..< size:
     data[i] = val
   return data
 
 proc readStreamTillEOF*(
     stream: Stream, maxBytes: int = int.high
-): Future[seq[uint8]] {.async.} =
+): Future[seq[byte]] {.async.} =
   ## Reads from stream until EOF is reached or the received data size meets/exceeds maxBytes
 
-  var receivedData: seq[uint8]
+  var buf = newSeq[byte](4096)
+  var receivedData: seq[byte]
   while true:
-    let chunk = await stream.read()
-    if chunk.len == 0:
+    let n = await stream.readOnce(buf)
+    if n == 0:
       break
-    receivedData.add(chunk)
+    receivedData.add(buf[0 ..< n])
     if receivedData.len >= maxBytes:
       break
   return receivedData

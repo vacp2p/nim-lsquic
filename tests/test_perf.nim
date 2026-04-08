@@ -43,6 +43,7 @@ proc runPerf(): Future[Duration] {.async.} =
       sizeRead += n
     check sizeRead == 8
     let clientDownloadSize = sizeBuf
+    check uint64.fromBytesBE(clientDownloadSize) == downloadSize.uint64
 
     # Step 2: Read upload data until EOF
     var totalBytesRead = 0
@@ -52,6 +53,7 @@ proc runPerf(): Future[Duration] {.async.} =
       if n == 0:
         break
       totalBytesRead += n
+    check totalBytesRead == uploadSize
 
     # Step 3: Send download data back
     var remainingToSend = uint64.fromBytesBE(clientDownloadSize)
@@ -104,6 +106,7 @@ proc runPerf(): Future[Duration] {.async.} =
     if n == 0:
       break
     totalDownloaded += n
+  check totalDownloaded == downloadSize
 
   let duration = Moment.now() - startTime
 
