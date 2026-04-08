@@ -111,6 +111,7 @@ method dial*(
   ok(quicClientConn)
 
 const Cubic = 1
+const Adaptive = 3
 
 proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
   var ctx = ClientContext()
@@ -125,13 +126,12 @@ proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
   ctx.settings.es_max_plpmtu = 0
   ctx.settings.es_pace_packets = 1
 
-  ctx.settings.es_cfcw = 1 * 1024 * 1024
-  ctx.settings.es_max_cfcw = 2 * 1024 * 1024
-  ctx.settings.es_sfcw = 256 * 1024
-  ctx.settings.es_max_sfcw = 512 * 1024
+  ctx.settings.es_cfcw = 4 * 1024 * 1024
+  ctx.settings.es_max_cfcw = 8 * 1024 * 1024
+  ctx.settings.es_sfcw = 1 * 1024 * 1024
+  ctx.settings.es_max_sfcw = 2 * 1024 * 1024
   ctx.settings.es_init_max_stream_data_bidi_local = ctx.settings.es_sfcw
   ctx.settings.es_init_max_stream_data_bidi_remote = ctx.settings.es_sfcw
-  ctx.settings.es_max_batch_size = 32
 
   ctx.stream_if = struct_lsquic_stream_if(
     on_new_conn: onNewConn,
