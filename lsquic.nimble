@@ -11,44 +11,47 @@ const rootInstallFiles = @[
   "boringssl.nim",
 ]
 
-const installRoots = @[
+installDirs = @[
   "lsquic",
-  "libs/lsquic",
-  "libs/vac_boringssl",
+  "libs/lsquic/include",
+  "libs/lsquic/src/lshpack",
+  "libs/lsquic/wincompat",
+]
+
+const filteredInstallRoots = @[
+  "libs/lsquic/src/liblsquic",
+  "libs/vac_boringssl/include",
+  "libs/vac_boringssl/crypto",
+  "libs/vac_boringssl/decrepit",
+  "libs/vac_boringssl/gen",
+  "libs/vac_boringssl/ssl",
+  "libs/vac_boringssl/third_party/fiat",
 ]
 
 const skippedInstallDirs = @[
-  "libs/lsquic/bin",
   "libs/lsquic/docs",
-  "libs/lsquic/qir",
   "libs/lsquic/tests",
   "libs/lsquic/tools",
   "libs/lsquic/src/liblsquic/ls-qpack/bin",
   "libs/lsquic/src/liblsquic/ls-qpack/fuzz",
   "libs/lsquic/src/liblsquic/ls-qpack/test",
   "libs/lsquic/src/liblsquic/ls-qpack/tools",
-  "libs/lsquic/src/lshpack/bin",
   "libs/lsquic/src/lshpack/test",
-  "libs/vac_boringssl/.bcr",
-  "libs/vac_boringssl/.github",
-  "libs/vac_boringssl/bench",
   "libs/vac_boringssl/cmake",
   "libs/vac_boringssl/crypto/cipher/test",
   "libs/vac_boringssl/crypto/fipsmodule/policydocs",
+  "libs/vac_boringssl/crypto/evp/test",
+  "libs/vac_boringssl/crypto/fipsmodule/bn/test",
+  "libs/vac_boringssl/crypto/pkcs7/test",
+  "libs/vac_boringssl/crypto/pkcs8/test",
+  "libs/vac_boringssl/crypto/rsa/test",
   "libs/vac_boringssl/crypto/test",
   "libs/vac_boringssl/crypto/x509/test",
   "libs/vac_boringssl/docs",
   "libs/vac_boringssl/fuzz",
   "libs/vac_boringssl/gen/test_support",
-  "libs/vac_boringssl/infra",
-  "libs/vac_boringssl/pki",
-  "libs/vac_boringssl/rust",
   "libs/vac_boringssl/ssl/test",
-  "libs/vac_boringssl/third_party/benchmark",
-  "libs/vac_boringssl/third_party/googletest",
   "libs/vac_boringssl/third_party/wycheproof_testvectors",
-  "libs/vac_boringssl/tool",
-  "libs/vac_boringssl/util",
 ]
 
 proc normalizeInstallPath(path: string): string =
@@ -84,7 +87,7 @@ proc collectInstallFiles(root: string) =
       discard
 
 installFiles = rootInstallFiles
-for root in installRoots:
+for root in filteredInstallRoots:
   collectInstallFiles(root)
 
 requires "nim >= 2.0.0"
