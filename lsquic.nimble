@@ -55,6 +55,11 @@ skipFiles = @[
   "libs/vac_boringssl/ssl/span_test.cc",
 ]
 
+installFiles = @[
+  "lsquic.nim",
+  "boringssl.nim",
+]
+
 requires "nim >= 2.0.0"
 requires "zlib"
 requires "stew >= 0.4.0"
