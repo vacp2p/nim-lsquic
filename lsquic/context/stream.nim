@@ -7,6 +7,31 @@ import chronos
 import ../[lsquic_ffi, errors, stream]
 import ../helpers/sequninit
 
+proc onReset*(
+    stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t, how: cint
+) {.cdecl.} =
+  debug "Stream reset", how
+  if ctx.isNil:
+    debug "stream_ctx is nil onReset"
+    return
+
+  let streamCtx = cast[Stream](ctx)
+
+  let sHow =
+    case how
+    of 0: ResetRead
+    of 1: ResetWrite
+    of 2: ResetReadWrite
+    else: ResetReadWrite
+
+  streamCtx.markResetByPeer(sHow)
+
+  if streamCtx.readResetByPeer():
+    streamCtx.failPendingRead(streamCtx.newStreamResetError("stream read"))
+
+  if streamCtx.writeResetByPeer():
+    streamCtx.abortPendingWrites(streamCtx.newStreamResetError("stream write"))
+
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   debug "Stream closed"
   if ctx.isNil:
@@ -20,17 +45,21 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   if not streamCtx.closeWrite:
     streamCtx.abortPendingWrites("stream closed")
 
-  streamCtx.isEof = true
+  if not streamCtx.readResetByPeer():
+    streamCtx.isEof = true
 
   # Always signal closure so waiters are released, even if we already shut down
   # the write side locally.
   if not streamCtx.closed.isSet():
     streamCtx.closed.fire()
 
-  if streamCtx.toRead.isSome:
+  if streamCtx.readResetByPeer():
+    streamCtx.failPendingRead(streamCtx.newStreamResetError("stream read"))
+  elif streamCtx.toRead.isSome:
     let doneFut = streamCtx.toRead.unsafeGet().doneFut
     if not doneFut.finished:
       doneFut.fail(newException(StreamError, "stream closed"))
+    streamCtx.toRead = Opt.none(ReadTask)
 
   GC_unref(streamCtx)
 
@@ -53,6 +82,11 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
   if n < 0:
     if errno == EWOULDBLOCK:
       # Try later
+      return
+    elif errno == ECONNRESET:
+      if not streamCtx.readResetByPeer():
+        streamCtx.markResetByPeer(ResetRead)
+      streamCtx.failPendingRead(streamCtx.newStreamResetError("stream read"))
       return
     else:
       error "could not read", streamId = lsquic_stream_id(stream), errno = errno
@@ -95,6 +129,11 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       # Nothing to write, try later
       break
     else:
+      if errno == ECONNRESET:
+        if not streamCtx.writeResetByPeer():
+          streamCtx.markResetByPeer(ResetWrite)
+        streamCtx.abortPendingWrites(streamCtx.newStreamResetError("stream write"))
+        return
       streamCtx.abortPendingWrites("write failed")
       break
 

@@ -78,6 +78,7 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
     on_read: onRead,
     on_write: onWrite,
     on_close: onClose,
+    on_reset: onReset,
   )
 
   ctx.api = struct_lsquic_engine_api(

@@ -26,6 +26,8 @@ type Stream* = ref object
   # Reuse a single closed-event waiter to minimize allocations on hot paths.
   # (no per call allocation)
   closedWaiter*: Future[void].Raising([CancelledError])
+  resetByPeer*: bool
+  resetHow*: StreamResetHow
   writeLock*: AsyncLock
   toWrite*: Opt[WriteTask]
   readLock*: AsyncLock
@@ -46,11 +48,55 @@ proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   GC_ref(s) # Keep it pinned until stream_if.on_close is executed
   s
 
-proc abortPendingWrites*(stream: Stream, reason: string = "") =
+proc readResetByPeer*(stream: Stream): bool {.raises: [].} =
+  stream.resetByPeer and stream.resetHow in {ResetRead, ResetReadWrite}
+
+proc writeResetByPeer*(stream: Stream): bool {.raises: [].} =
+  stream.resetByPeer and stream.resetHow in {ResetWrite, ResetReadWrite}
+
+proc markResetByPeer*(stream: Stream, how: StreamResetHow) {.raises: [].} =
+  let mergedHow =
+    if stream.resetByPeer and stream.resetHow != how: ResetReadWrite else: how
+
+  stream.resetByPeer = true
+  stream.resetHow = mergedHow
+
+  if mergedHow in {ResetWrite, ResetReadWrite}:
+    stream.closeWrite = true
+
+proc newStreamResetError*(
+    stream: Stream, operation: string
+): ref StreamResetError {.raises: [].} =
+  let exc = newException(
+    StreamResetError, operation & " reset by peer (" & $stream.resetHow & ")"
+  )
+  exc.how = stream.resetHow
+  exc
+
+proc failPendingRead*(stream: Stream, error: ref StreamError) {.raises: [].} =
+  let task = stream.toRead.valueOr:
+    return
+  if not task.doneFut.finished:
+    task.doneFut.fail(error)
+  stream.toRead = Opt.none(ReadTask)
+
+proc abortPendingWrites*(stream: Stream, error: ref StreamError) {.raises: [].} =
   let task = stream.toWrite.valueOr:
     return
-  task.doneFut.fail(newException(StreamError, reason))
+  if not task.doneFut.finished:
+    task.doneFut.fail(error)
   stream.toWrite = Opt.none(WriteTask)
+
+proc abortPendingWrites*(stream: Stream, reason: string = "") {.raises: [].} =
+  stream.abortPendingWrites(newException(StreamError, reason))
+
+template raiseIfReadReset(stream: Stream) =
+  if stream.readResetByPeer():
+    raise stream.newStreamResetError("stream read")
+
+template raiseIfWriteReset(stream: Stream) =
+  if stream.writeResetByPeer():
+    raise stream.newStreamResetError("stream write")
 
 proc abort*(stream: Stream) =
   if stream.closeWrite and stream.isEof:
@@ -95,6 +141,8 @@ proc readOnce*(
   if dst.isNil:
     raiseAssert "dst cannot be nil"
 
+  raiseIfReadReset(stream)
+
   if stream.isEof or stream.closedByEngine:
     return 0
 
@@ -105,6 +153,8 @@ proc readOnce*(
       stream.readLock.release()
     except AsyncLockError:
       discard # should not happen - lock acquired directly above
+
+  raiseIfReadReset(stream)
 
   # In case stream was closed while waiting for lock being acquired
   if stream.closedByEngine:
@@ -117,6 +167,11 @@ proc readOnce*(
     return 0
   elif n > 0:
     return n
+
+  if n < 0 and errno == ECONNRESET:
+    if not stream.readResetByPeer():
+      stream.markResetByPeer(ResetRead)
+    raise stream.newStreamResetError("stream read")
 
   if n < 0 and errno != EWOULDBLOCK:
     stream.abort()
@@ -134,7 +189,9 @@ proc readOnce*(
 
   let raceFut = await race(stream.closedWaiter, doneFut)
   if raceFut == stream.closedWaiter:
-    await doneFut.cancelAndWait()
+    if not doneFut.finished:
+      await doneFut.cancelAndWait()
+    raiseIfReadReset(stream)
     stream.isEof = true
     stream.closeWrite = true
     return 0
@@ -152,6 +209,8 @@ proc write*(
   if data.len == 0:
     return
 
+  raiseIfWriteReset(stream)
+
   if stream.closeWrite or stream.closedByEngine:
     raise newException(StreamError, "stream closed")
 
@@ -162,6 +221,8 @@ proc write*(
       stream.writeLock.release()
     except AsyncLockError:
       discard # should not happen - lock acquired directly above
+
+  raiseIfWriteReset(stream)
 
   if stream.closedByEngine:
     raise newException(StreamError, "stream closed")
@@ -176,6 +237,10 @@ proc write*(
       stream.doProcess()
     return
   elif n < 0:
+    if errno == ECONNRESET:
+      if not stream.writeResetByPeer():
+        stream.markResetByPeer(ResetWrite)
+      raise stream.newStreamResetError("stream write")
     error "could not write to stream", streamId = lsquic_stream_id(stream.quicStream), n
     raise newException(StreamError, "could not write")
 
@@ -191,6 +256,7 @@ proc write*(
 
   let raceFut = await race(stream.closedWaiter, doneFut)
   if raceFut == stream.closedWaiter:
+    raiseIfWriteReset(stream)
     if not doneFut.finished:
       doneFut.fail(newException(StreamError, "stream closed"))
     stream.closeWrite = true
