@@ -23,8 +23,12 @@ type QuicContext* = ref object of RootObj
   processing: bool
 
 proc engine_process*(ctx: QuicContext) =
+  if ctx.isNil or ctx.engine.isNil:
+    return
+
   if ctx.processing:
-    ctx.tickTimeout.set(Moment.now())
+    if not ctx.tickTimeout.isNil:
+      ctx.tickTimeout.set(Moment.now())
     return
 
   ctx.processing = true
@@ -67,6 +71,8 @@ type ServerContext* = ref object of QuicContext
   incoming*: AsyncQueue[QuicConnection]
 
 proc processWhenReady*(quicContext: QuicContext) =
+  if quicContext.isNil or quicContext.engine.isNil:
+    return
   quicContext.engine_process()
 
 proc incomingStream*(
@@ -218,11 +224,15 @@ proc stop*(ctx: QuicContext) {.raises: [].} =
     ctx.sslCtx = nil
 
 proc close*(ctx: QuicContext, conn: QuicConnection) =
+  if ctx.isNil or ctx.engine.isNil:
+    return
   if conn != nil and conn.lsquicConn != nil:
     lsquic_conn_close(conn.lsquicConn)
     ctx.processWhenReady()
 
 proc abort*(ctx: QuicContext, conn: QuicConnection) =
+  if ctx.isNil or ctx.engine.isNil:
+    return
   if conn != nil and conn.lsquicConn != nil:
     lsquic_conn_abort(conn.lsquicConn)
     ctx.processWhenReady()
@@ -240,7 +250,7 @@ proc makeStream*(
     ctx: QuicContext, quicConn: QuicConnection
 ) {.raises: [ConnectionClosedError].} =
   debug "Creating stream"
-  if quicConn.isNil or quicConn.lsquicConn.isNil:
+  if ctx.isNil or ctx.engine.isNil or quicConn.isNil or quicConn.lsquicConn.isNil:
     debug "Cannot create stream: connection is nil"
     raise newException(ConnectionClosedError, "connection closed")
   lsquic_conn_make_stream(quicConn.lsquicConn)
