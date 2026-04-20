@@ -129,8 +129,17 @@ proc popPendingStream*(
   Opt.some(pending.stream)
 
 proc cancelPending*(quicConn: QuicConnection) =
-  for pending in quicConn.pendingStreams:
-    pending.created.fail(newException(ConnectionError, "can't open new streams"))
+  while quicConn.pendingStreams.len > 0:
+    let pending = quicConn.pendingStreams.popFirst()
+    if not pending.created.finished:
+      pending.created.fail(newException(ConnectionError, "can't open new streams"))
+
+    pending.stream.closedByEngine = true
+    pending.stream.closeWrite = true
+    pending.stream.isEof = true
+    if not pending.stream.closed.isSet():
+      pending.stream.closed.fire()
+    GC_unref(pending.stream)
 
 proc alpnSelectProtoCB(
     ssl: ptr SSL,

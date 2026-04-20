@@ -115,6 +115,21 @@ suite "lifecycle":
     expect ConnectionClosedError:
       discard await incomingWaiting
 
+  asyncTest "cancel pending outgoing streams clears queue":
+    let quicConn = QuicConnection(incoming: newAsyncQueue[Stream]())
+    let stream1 = Stream.new()
+    let stream2 = Stream.new()
+    let pending1 = quicConn.addPendingStream(stream1)
+    let pending2 = quicConn.addPendingStream(stream2)
+
+    quicConn.cancelPending()
+
+    expect ConnectionError:
+      await pending1
+    expect ConnectionError:
+      await pending2
+    check quicConn.popPendingStream(nil).isNone()
+
   asyncTest "abort after open stream still closes connection":
     let peers = await connectPeers()
     defer:
