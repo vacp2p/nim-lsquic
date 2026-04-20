@@ -23,7 +23,7 @@ proc sockAddrLen*(family: int): SockLen {.inline.} =
   of fixed_AF_INET6.int: # use fixed const
     sizeof(Sockaddr_in6).uint32
   else:
-    raiseAssert "invalid socket address faimily"
+    raiseAssert "invalid socket address family"
 
 proc toTransportAddress*(sock: ptr SockAddr): TransportAddress =
   var destAddress: Sockaddr_storage

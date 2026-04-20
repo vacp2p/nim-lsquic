@@ -21,9 +21,10 @@ type QuicContext* = ref object of RootObj
   sslCtx*: ptr SSL_CTX
   fd*: cint
   processing: bool
+  running*: bool
 
 proc engine_process*(ctx: QuicContext) =
-  if ctx.isNil or ctx.engine.isNil:
+  if ctx.isNil or not ctx.running or ctx.engine.isNil:
     return
 
   if ctx.processing:
@@ -47,6 +48,32 @@ proc engine_process*(ctx: QuicContext) =
   let delta =
     if diff < 0: LSQUIC_DF_CLOCK_GRANULARITY.microseconds else: diff.microseconds
   ctx.tickTimeout.set(delta)
+
+proc stop*(ctx: QuicContext) {.raises: [].} =
+  ## Quiesce the context before closing the UDP transport so late datagrams and
+  ## timer callbacks cannot enter the native engine.
+  if ctx.isNil or not ctx.running:
+    return
+
+  ctx.running = false
+  if not ctx.tickTimeout.isNil:
+    ctx.tickTimeout.stop()
+
+proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
+  not ctx.isNil and ctx.running and not ctx.engine.isNil
+
+proc destroy*(ctx: QuicContext) {.raises: [].} =
+  ## Release native resources after the UDP transport has been closed.
+  if ctx.isNil:
+    return
+
+  if not ctx.engine.isNil:
+    lsquic_engine_destroy(ctx.engine)
+    ctx.engine = nil
+    
+  if not ctx.sslCtx.isNil:
+    SSL_CTX_free(ctx.sslCtx)
+    ctx.sslCtx = nil
 
 type PendingStream = object
   stream: Stream
@@ -213,27 +240,13 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
   let quicCtx = cast[QuicContext](peer_ctx)
   quicCtx.sslCtx
 
-proc stop*(ctx: QuicContext) {.raises: [].} =
-  if not ctx.tickTimeout.isNil:
-    ctx.tickTimeout.stop()
-  if not ctx.engine.isNil:
-    lsquic_engine_destroy(ctx.engine)
-    ctx.engine = nil
-  if not ctx.sslCtx.isNil:
-    SSL_CTX_free(ctx.sslCtx)
-    ctx.sslCtx = nil
-
 proc close*(ctx: QuicContext, conn: QuicConnection) =
-  if ctx.isNil or ctx.engine.isNil:
-    return
-  if conn != nil and conn.lsquicConn != nil:
+  if ctx.isRunning() and conn != nil and conn.lsquicConn != nil:
     lsquic_conn_close(conn.lsquicConn)
     ctx.processWhenReady()
 
 proc abort*(ctx: QuicContext, conn: QuicConnection) =
-  if ctx.isNil or ctx.engine.isNil:
-    return
-  if conn != nil and conn.lsquicConn != nil:
+  if ctx.isRunning() and conn != nil and conn.lsquicConn != nil:
     lsquic_conn_abort(conn.lsquicConn)
     ctx.processWhenReady()
 
@@ -250,7 +263,7 @@ proc makeStream*(
     ctx: QuicContext, quicConn: QuicConnection
 ) {.raises: [ConnectionClosedError].} =
   debug "Creating stream"
-  if ctx.isNil or ctx.engine.isNil or quicConn.isNil or quicConn.lsquicConn.isNil:
+  if not ctx.isRunning() or quicConn.isNil or quicConn.lsquicConn.isNil:
     debug "Cannot create stream: connection is nil"
     raise newException(ConnectionClosedError, "connection closed")
   lsquic_conn_make_stream(quicConn.lsquicConn)

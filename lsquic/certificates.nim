@@ -6,13 +6,16 @@ import ./lsquic_ffi
 import ./helpers/sequninit
 
 proc x509toDERBytes*(cert: ptr X509): Opt[seq[byte]] =
+  if cert.isNil:
+    return Opt.none(seq[byte])
+
   let derBuf: ptr uint8 = nil
   let derLen = i2d_X509(cert, addr derBuf)
   defer:
     if derBuf != nil:
       OPENSSL_free(derBuf)
 
-  if derLen != 0:
+  if derLen > 0:
     let outp = newSeqUninit[byte](derLen)
     copyMem(addr outp[0], derBuf, derLen)
     return Opt.some(outp)
