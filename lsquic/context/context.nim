@@ -23,8 +23,11 @@ type QuicContext* = ref object of RootObj
   processing: bool
   running*: bool
 
+proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
+  not ctx.isNil and ctx.running and not ctx.engine.isNil
+
 proc engine_process*(ctx: QuicContext) =
-  if ctx.isNil or not ctx.running or ctx.engine.isNil:
+  if not ctx.isRunning():
     return
 
   if ctx.processing:
@@ -52,15 +55,12 @@ proc engine_process*(ctx: QuicContext) =
 proc stop*(ctx: QuicContext) {.raises: [].} =
   ## Quiesce the context before closing the UDP transport so late datagrams and
   ## timer callbacks cannot enter the native engine.
-  if ctx.isNil or not ctx.running:
+  if not ctx.isRunning():
     return
 
   ctx.running = false
   if not ctx.tickTimeout.isNil:
     ctx.tickTimeout.stop()
-
-proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
-  not ctx.isNil and ctx.running and not ctx.engine.isNil
 
 proc destroy*(ctx: QuicContext) {.raises: [].} =
   ## Release native resources after the UDP transport has been closed.

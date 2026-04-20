@@ -88,7 +88,6 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
   else:
     raise newException(StreamError, "could not close the stream")
 
-
 proc readOnce*(
     stream: Stream, dst: ptr byte, dstLen: int
 ): Future[int] {.async: (raises: [CancelledError, StreamError]).} =
