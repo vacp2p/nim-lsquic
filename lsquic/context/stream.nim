@@ -62,6 +62,10 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
   if n == 0:
     streamCtx.isEof = true
 
+  if lsquic_stream_wantread(stream, 0) == -1:
+    error "could not set stream wantread", streamId = lsquic_stream_id(stream)
+    streamCtx.abort()
+
   task.doneFut.complete(int(n))
 
   streamCtx.toRead = Opt.none(ReadTask)
@@ -70,7 +74,7 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   trace "onWrite"
 
   if ctx.isNil:
-    debug "stream_ctx is nil onClose"
+    debug "stream_ctx is nil onWrite"
     return
 
   let streamCtx = cast[Stream](ctx)

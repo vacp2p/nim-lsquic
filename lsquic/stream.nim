@@ -83,8 +83,10 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
         raise newException(StreamError, "could not close the stream")
       stream.doProcess()
 
-    stream.abortPendingWrites("steam closed")
+    stream.abortPendingWrites("stream closed")
     stream.closeWrite = true
+  else:
+    raise newException(StreamError, "could not close the stream")
 
 proc readOnce*(
     stream: Stream, dst: ptr byte, dstLen: int
@@ -172,20 +174,22 @@ proc write*(
   if n >= data.len:
     if lsquic_stream_flush(stream.quicStream) != 0:
       stream.abort()
-    else:
-      stream.doProcess()
+      raise newException(StreamError, "could not flush stream")
+    stream.doProcess()
     return
   elif n < 0:
     error "could not write to stream", streamId = lsquic_stream_id(stream.quicStream), n
     raise newException(StreamError, "could not write")
 
   # Enqueue otherwise
+  if lsquic_stream_wantwrite(stream.quicStream, 1) == -1:
+    stream.abort()
+    raise newException(StreamError, "could not set wantwrite")
+
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init("Stream.write")
   stream.toWrite = Opt.some(
     WriteTask(data: data[0].addr, dataLen: data.len, doneFut: doneFut, offset: n)
   )
-
-  discard lsquic_stream_wantwrite(stream.quicStream, 1)
 
   stream.doProcess()
 
