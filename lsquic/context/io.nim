@@ -59,7 +59,7 @@ proc receive*(
     local: TransportAddress,
     remote: TransportAddress,
 ) =
-  if datagram.len == 0:
+  if ctx.isNil or ctx.engine.isNil or datagram.len == 0:
     return
 
   var
