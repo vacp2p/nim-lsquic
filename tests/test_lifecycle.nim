@@ -198,12 +198,11 @@ suite "lifecycle":
     check (await stream.readOnce(empty)) == 0
 
   asyncTest "late datagrams are ignored after context stops":
-    let verifier: CertificateVerifier =
-      CustomCertificateVerifier.init(
-        proc(serverName: string, derCertificates: seq[seq[byte]]): bool {.gcsafe.} =
-          discard serverName
-          derCertificates.len > 0
-      )
+    let verifier: CertificateVerifier = CustomCertificateVerifier.init(
+      proc(serverName: string, derCertificates: seq[seq[byte]]): bool {.gcsafe.} =
+        discard serverName
+        derCertificates.len > 0
+    )
     let tlsConfig = TLSConfig.new(
       testCertificate(), testPrivateKey(), @["test"].toHashSet(), Opt.some(verifier)
     )

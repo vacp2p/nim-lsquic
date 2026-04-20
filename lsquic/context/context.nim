@@ -70,7 +70,7 @@ proc destroy*(ctx: QuicContext) {.raises: [].} =
   if not ctx.engine.isNil:
     lsquic_engine_destroy(ctx.engine)
     ctx.engine = nil
-    
+
   if not ctx.sslCtx.isNil:
     SSL_CTX_free(ctx.sslCtx)
     ctx.sslCtx = nil
