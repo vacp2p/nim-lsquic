@@ -206,6 +206,38 @@ suite "lifecycle":
     check (await reading) == 0
     await incomingStream.close()
 
+  asyncTest "peer reset":
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[1'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+
+    var firstByte = newSeq[byte](1)
+    check (await incomingStream.readOnce(firstByte)) == 1
+    check firstByte[0] == 1
+
+    var buf = newSeq[byte](8)
+    let reading = incomingStream.readOnce(buf)
+
+    await sleepAsync(100.milliseconds)
+    outgoingStream.abort()
+
+    check (await reading.withTimeout(2.seconds))
+    check (await reading) == 0
+    check incomingStream.isEof
+
+    var isReset = false
+    try:
+      await incomingStream.write(@[2'u8])
+    except StreamResetError as exc:
+      isReset = true
+      check exc.how == ResetWrite
+
+    check isReset
+
   asyncTest "zero length reads return zero":
     let stream = Stream.new()
     var empty: seq[byte] = @[]
