@@ -3,9 +3,12 @@
 
 {.used.}
 
+import std/sets
 import chronos, chronos/unittest2/asynctests, results, chronicles
 import lsquic
-import ./helpers/[clientserver, stream]
+import lsquic/[datagram]
+import lsquic/context/[client, context, io]
+import ./helpers/[certificate, clientserver, stream]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -111,6 +114,21 @@ suite "lifecycle":
 
     expect ConnectionClosedError:
       discard await incomingWaiting
+
+  asyncTest "cancel pending outgoing streams clears queue":
+    let quicConn = QuicConnection(incoming: newAsyncQueue[Stream]())
+    let stream1 = Stream.new()
+    let stream2 = Stream.new()
+    let pending1 = quicConn.addPendingStream(stream1)
+    let pending2 = quicConn.addPendingStream(stream2)
+
+    quicConn.cancelPending()
+
+    expect ConnectionError:
+      await pending1
+    expect ConnectionError:
+      await pending2
+    check quicConn.popPendingStream(nil).isNone()
 
   asyncTest "abort after open stream still closes connection":
     let peers = await connectPeers()
@@ -225,3 +243,25 @@ suite "lifecycle":
     var empty: seq[byte] = @[]
 
     check (await stream.readOnce(empty)) == 0
+
+  asyncTest "late datagrams are ignored after context stops":
+    let verifier: CertificateVerifier = CustomCertificateVerifier.init(
+      proc(serverName: string, derCertificates: seq[seq[byte]]): bool {.gcsafe.} =
+        discard serverName
+        derCertificates.len > 0
+    )
+    let tlsConfig = TLSConfig.new(
+      testCertificate(), testPrivateKey(), @["test"].toHashSet(), Opt.some(verifier)
+    )
+    let ctx = ClientContext.new(tlsConfig).valueOr:
+      raiseAssert error
+    let local = initTAddress("127.0.0.1:12345")
+    let remote = initTAddress("127.0.0.1:54321")
+
+    ctx.stop()
+    ctx.receive(Datagram(data: @[1'u8, 2, 3]), local, remote)
+    ctx.processWhenReady()
+
+    ctx.destroy()
+    ctx.receive(Datagram(data: @[4'u8, 5, 6]), local, remote)
+    ctx.processWhenReady()

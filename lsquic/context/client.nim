@@ -104,6 +104,7 @@ method dial*(
     0,
   )
   if conn.isNil:
+    GC_unref(quicClientConn)
     return err("could not dial: " & $remote)
 
   quicClientConn.lsquicConn = conn
@@ -116,6 +117,7 @@ const Adaptive = 3
 proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig
+  ctx.running = true
   ctx.setupSSLContext()
 
   lsquic_engine_init_settings(addr ctx.settings, 0)

@@ -33,7 +33,7 @@ proc newListener*(
       let datagram = Datagram(data: udp.getMessage())
       quicContext.receive(datagram, udp.localAddress(), remote)
     except TransportError as e:
-      error "Unexpect transport error", errorMsg = e.msg
+      error "Unexpected transport error", errorMsg = e.msg
 
   var udp: DatagramTransport
   case address.family
@@ -85,8 +85,9 @@ proc stop*(listener: Listener) {.async: (raises: [CancelledError]).} =
   # lsquic engine. Maybe there's a callback that one can hook to and safely
   # stop the udp transport.
   await noCancel sleepAsync(300.milliseconds)
-  await noCancel listener.udp.closeWait()
   listener.quicContext.stop()
+  await noCancel listener.udp.closeWait()
+  listener.quicContext.destroy()
 
 proc listen*(
     self: QuicServer, address: TransportAddress

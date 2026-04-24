@@ -7,6 +7,7 @@ import std/sets
 import results
 import unittest2
 import lsquic
+import lsquic/certificates
 import lsquic/lsquic_ffi
 import ./helpers/certificate
 
@@ -40,7 +41,14 @@ suite "tls config":
       nil
     check not cert.isNil
     if not cert.isNil:
+      check cert.x509toDERBytes().isSome()
+    if not cert.isNil:
       X509_free(cert)
+
+  test "nil x509 DER conversion is rejected":
+    let cert: ptr X509 = nil
+
+    check cert.x509toDERBytes().isNone()
 
   test "valid pem key parses":
     let parsed = testPrivateKey().toPKey()

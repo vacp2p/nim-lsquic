@@ -59,7 +59,7 @@ proc receive*(
     local: TransportAddress,
     remote: TransportAddress,
 ) =
-  if datagram.len == 0:
+  if datagram.len == 0 or not ctx.isRunning():
     return
 
   var

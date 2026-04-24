@@ -164,26 +164,24 @@ proc toJson*(r: RunResult): JsonNode =
             "cumulative_bytes": s.cumulativeBytes,
           }
         )
-      var streamNode =
-        %*{
-          "upload_bytes": sr.uploadBytes,
-          "download_bytes": sr.downloadBytes,
-          "duration_ns": sr.durationNs,
-          "latency_samples_ns": latArr,
-        }
+      var streamNode = %*{
+        "upload_bytes": sr.uploadBytes,
+        "download_bytes": sr.downloadBytes,
+        "duration_ns": sr.durationNs,
+        "latency_samples_ns": latArr,
+      }
       if sr.rampUpSamples.len > 0:
         streamNode["ramp_up_samples"] = rampArr
         streamNode["time_to_p90_ns"] = %sr.timeToP90Ns
       streamArr.add(streamNode)
     connArr.add(%*{"streams": streamArr, "duration_ns": cr.durationNs})
-  result =
-    %*{
-      "mode": $r.mode,
-      "connections": r.connections,
-      "streams_per_conn": r.streamsPerConn,
-      "upload_size": r.uploadSize,
-      "download_size": r.downloadSize,
-      "chunk_size": r.chunkSize,
-      "duration_ns": r.durationNs,
-      "connections_results": connArr,
-    }
+  result = %*{
+    "mode": $r.mode,
+    "connections": r.connections,
+    "streams_per_conn": r.streamsPerConn,
+    "upload_size": r.uploadSize,
+    "download_size": r.downloadSize,
+    "chunk_size": r.chunkSize,
+    "duration_ns": r.durationNs,
+    "connections_results": connArr,
+  }

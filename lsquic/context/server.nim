@@ -42,6 +42,7 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
     let quicConn = cast[QuicConnection](conn_ctx)
+    quicConn.cancelPending()
     quicConn.onClose()
     quicConn.lsquicConn = nil
     GC_unref(quicConn)
@@ -53,6 +54,7 @@ const Adaptive = 3
 proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
   var ctx = ServerContext()
   ctx.tlsConfig = tlsConfig
+  ctx.running = true
   ctx.incoming = newAsyncQueue[QuicConnection]()
   ctx.setupSSLContext()
 

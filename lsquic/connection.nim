@@ -124,6 +124,7 @@ proc openStream*(
     connection.quicContext.processWhenReady()
   let created = connection.quicConn.addPendingStream(s)
   connection.quicContext.makeStream(connection.quicConn)
+  connection.quicContext.processWhenReady()
   await created
   s
 
