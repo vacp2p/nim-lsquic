@@ -4,7 +4,7 @@ author = "Status Research & Development GmbH"
 description = "Nim wrapper around the lsquic library"
 license = "MIT"
 installDirs = @["libs", "scripts"]
-installFiles = @["lsquic.nim", "boringssl.nim"]
+installFiles = @["lsquic.nim"]
 
 requires "nim >= 2.0.0"
 requires "zlib"
@@ -13,6 +13,7 @@ requires "chronos >= 4.0.4"
 requires "nimcrypto >= 0.6.0"
 requires "unittest2"
 requires "chronicles >= 0.11.0"
+requires "https://github.com/vacp2p/nim-boringssl#v0.0.2"
 
 import os, strutils, sequtils
 

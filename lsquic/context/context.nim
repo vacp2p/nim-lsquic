@@ -2,6 +2,7 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import std/deques
+import boringssl
 import chronos
 import chronos/osdefs
 import chronicles
