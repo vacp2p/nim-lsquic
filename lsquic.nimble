@@ -13,7 +13,7 @@ requires "chronos >= 4.0.4"
 requires "nimcrypto >= 0.6.0"
 requires "unittest2"
 requires "chronicles >= 0.11.0"
-requires "https://github.com/vacp2p/nim-boringssl#v0.0.2"
+requires "https://github.com/vacp2p/nim-boringssl#v0.0.3"
 
 import os, strutils, sequtils
 
