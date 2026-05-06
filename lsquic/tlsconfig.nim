@@ -2,6 +2,7 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import std/sets
+import boringssl
 import results
 import ./[errors, certificateverifier, lsquic_ffi]
 

@@ -6,7 +6,7 @@
 
 `nim-lsquic` is a Nim wrapper around [`lsquic`](https://github.com/litespeedtech/lsquic) with a Chronos-based async API for QUIC clients, servers, connections, and streams.
 
-The repository vendors `lsquic` and `boringssl` as submodules and exposes a higher-level Nim interface on top of the generated FFI bindings. The current public API is focused on transport primitives: runtime setup, TLS configuration, dialing, listening, connection lifecycle, and bidirectional QUIC streams.
+The repository vendors `lsquic` as a submodule and exposes a higher-level Nim interface on top of the generated FFI bindings. The current public API is focused on transport primitives: runtime setup, TLS configuration, dialing, listening, connection lifecycle, and bidirectional QUIC streams.
 
 ## Background
 
@@ -166,7 +166,7 @@ nimble format
 
 ### Regenerate the FFI bindings
 
-If the vendored `lsquic` or BoringSSL headers change, regenerate [`lsquic/lsquic_ffi.nim`](lsquic/lsquic_ffi.nim):
+If the vendored `lsquic` headers change, regenerate [`lsquic/lsquic_ffi.nim`](lsquic/lsquic_ffi.nim):
 
 ```bash
 ./build.sh

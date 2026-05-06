@@ -9,14 +9,13 @@ when defined(windows):
 import std/[os, strutils]
 import chronos/osdefs
 import zlib
-import ../boringssl
+import boringssl
 
 type ptrdiff_t* {.importc: "ptrdiff_t", header: "<stddef.h>".} = int
 
 # use rsplit as a workaround for cross compilation path separator issue
 const root = currentSourcePath.rsplit({DirSep, AltSep}, 2)[0]
 const lsquicInclude = root & "/libs/lsquic/include"
-const boringsslInclude = root & "/libs/vac_boringssl/include"
 const liblsquicInclude = root & "/libs/lsquic/src/liblsquic"
 const lsqpack = root & "/libs/lsquic/src/liblsquic/ls-qpack"
 const lshpack = root & "/libs/lsquic/src/lshpack"
@@ -27,7 +26,6 @@ when defined(windows):
   {.passc: "-I" & wincompat.}
 
 {.passc: "-I" & lsquicInclude.}
-{.passc: "-I" & boringsslInclude.}
 {.passc: "-I" & liblsquicInclude.}
 {.passc: "-I" & lsqpack.}
 {.passc: "-I" & lshpack.}

@@ -6,6 +6,7 @@
 import std/sets
 import results
 import unittest2
+import boringssl
 import lsquic
 import lsquic/certificates
 import lsquic/lsquic_ffi
