@@ -1,5 +1,5 @@
 packageName = "lsquic"
-version = "0.3.0"
+version = "0.4.0"
 author = "Status Research & Development GmbH"
 description = "Nim wrapper around the lsquic library"
 license = "MIT"
@@ -13,7 +13,7 @@ requires "chronos >= 4.0.4"
 requires "nimcrypto >= 0.6.0"
 requires "unittest2"
 requires "chronicles >= 0.11.0"
-requires "https://github.com/vacp2p/nim-boringssl#v0.0.3"
+requires "https://github.com/vacp2p/nim-boringssl#v0.0.4"
 
 import os, strutils, sequtils
 
