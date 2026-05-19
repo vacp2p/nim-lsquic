@@ -15,7 +15,9 @@ toCompile=(
 # futhark is required by generate_lsquic_ffi.nim
 nimble install futhark@0.15.0
 
-nim c --maxLoopIterationsVM:100000000 generate_lsquic_ffi.nim
+# Futhark's Opir cache key does not include the contents of the imported
+# headers, so force it to rebuild when regenerating after an lsquic update.
+nim c -d:opirRebuild --maxLoopIterationsVM:100000000 generate_lsquic_ffi.nim
 
 cat "${root}/prelude.nim" > lsquic/lsquic_ffi.nim
 
