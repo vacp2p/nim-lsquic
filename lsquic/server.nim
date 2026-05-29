@@ -58,19 +58,24 @@ proc waitForIncoming(
 proc accept*(
     listener: Listener
 ): Future[Connection] {.async: (raises: [CancelledError, TransportError]).} =
-  let
-    incomingFut = listener.waitForIncoming()
-    closedFut = listener.connman.closed
-    raceFut = await race(closedFut, incomingFut)
+  while true:
+    let
+      incomingFut = listener.waitForIncoming()
+      closedFut = listener.connman.closed
+      raceFut = await race(closedFut, incomingFut)
 
-  if raceFut == closedFut:
-    await incomingFut.cancelAndWait()
-    raise newException(TransportError, "listener is stopped")
+    if raceFut == closedFut:
+      await incomingFut.cancelAndWait()
+      raise newException(TransportError, "listener is stopped")
 
-  let quicConn = await incomingFut
-  let conn = newIncomingConnection(listener.quicContext, quicConn)
-  listener.connman.addConnection(conn)
-  conn
+    let quicConn = await incomingFut
+    if quicConn.lsquicConn.isNil:
+      debug "Dropping already closed incoming connection"
+      continue
+
+    let conn = newIncomingConnection(listener.quicContext, quicConn)
+    listener.connman.addConnection(conn)
+    return conn
 
 proc localAddress*(
     listener: Listener
