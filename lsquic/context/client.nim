@@ -109,6 +109,7 @@ method dial*(
     return err("could not dial: " & $remote)
 
   quicClientConn.lsquicConn = conn
+  ctx.processWhenReady()
 
   ok(quicClientConn)
 
