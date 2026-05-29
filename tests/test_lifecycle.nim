@@ -77,11 +77,12 @@ suite "lifecycle":
     check (await peers.incoming.closedFuture().withTimeout(2.seconds))
     check peers.incoming.isClosed
 
-  asyncTest "accept skips closed connection and client redials":
+  asyncTest "accept skips connections closed before wrapping":
     let server = makeServer()
     let listener = server.listen(initTAddress("127.0.0.1:0"))
     let address = listener.localAddress()
-    let client = makeClient()
+    let staleClient = makeClient()
+    let goodClient = makeClient()
     var accepted: Future[Connection]
     var incomingStream: Future[Stream]
     defer:
@@ -89,14 +90,14 @@ suite "lifecycle":
         await accepted.cancelAndWait()
       if not incomingStream.isNil and not incomingStream.finished:
         await incomingStream.cancelAndWait()
-      await allFutures(client.stop(), listener.stop())
+      await allFutures(staleClient.stop(), goodClient.stop(), listener.stop())
 
-    let stale = await client.dial(address)
+    let stale = await staleClient.dial(address)
     stale.abort()
     check (await stale.closedFuture().withTimeout(2.seconds))
 
     accepted = listener.accept()
-    let outgoing = await client.dial(address)
+    let outgoing = await goodClient.dial(address)
     check (await accepted.withTimeout(2.seconds))
     let incoming = await accepted
 
