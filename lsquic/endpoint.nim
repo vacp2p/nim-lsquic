@@ -21,13 +21,23 @@ type
     udp: DatagramTransport
     stopped: bool
 
-proc createServerContext(tlsConfig: TLSConfig): ServerContext {.raises: [QuicError].} =
-  ServerContext.new(tlsConfig).valueOr:
-    raise newException(QuicError, error)
+const CloseWait: Duration = 300.milliseconds
 
-proc createClientContext(tlsConfig: TLSConfig): ClientContext {.raises: [QuicError].} =
-  ClientContext.new(tlsConfig).valueOr:
+proc createServerContext(
+    tlsConfig: TLSConfig, fd: cint
+): ServerContext {.raises: [QuicError].} =
+  var context = ServerContext.new(tlsConfig).valueOr:
     raise newException(QuicError, error)
+  context.fd = fd
+  context
+
+proc createClientContext(
+    tlsConfig: TLSConfig, fd: cint
+): ClientContext {.raises: [QuicError].} =
+  var context = ClientContext.new(tlsConfig).valueOr:
+    raise newException(QuicError, error)
+  context.fd = fd
+  context
 
 proc receiveDatagram(
     endpoint: QuicEndpoint, data: seq[byte], local, remote: TransportAddress
@@ -35,10 +45,19 @@ proc receiveDatagram(
   if endpoint.isNil or endpoint.stopped:
     return
 
+  # Endpoints can have both contexts; each engine needs to see the packet.
   if not endpoint.clientContext.isNil:
     endpoint.clientContext.receive(Datagram(data: data), local, remote)
   if not endpoint.serverContext.isNil:
     endpoint.serverContext.receive(Datagram(data: data), local, remote)
+
+proc receiveFromUdp(
+    endpoint: QuicEndpoint, udp: DatagramTransport, remote: TransportAddress
+) {.raises: [].} =
+  try:
+    endpoint.receiveDatagram(udp.getMessage(), udp.localAddress(), remote)
+  except TransportError as e:
+    warn "Could not read received datagram", errorMsg = e.msg
 
 proc createUdp(
     endpoint: QuicEndpoint, address: TransportAddress
@@ -46,10 +65,7 @@ proc createUdp(
   proc onReceive(
       udp: DatagramTransport, remote: TransportAddress
   ) {.async: (raises: []).} =
-    try:
-      endpoint.receiveDatagram(udp.getMessage(), udp.localAddress(), remote)
-    except TransportError as e:
-      error "Unexpected transport error", errorMsg = e.msg
+    endpoint.receiveFromUdp(udp, remote)
 
   case address.family
   of AddressFamily.IPv4:
@@ -65,10 +81,7 @@ proc createUdp(
   proc onReceive(
       udp: DatagramTransport, remote: TransportAddress
   ) {.async: (raises: []).} =
-    try:
-      endpoint.receiveDatagram(udp.getMessage(), udp.localAddress(), remote)
-    except TransportError as e:
-      error "Unexpected transport error", errorMsg = e.msg
+    endpoint.receiveFromUdp(udp, remote)
 
   case family
   of AddressFamily.IPv4:
@@ -76,13 +89,7 @@ proc createUdp(
   of AddressFamily.IPv6:
     newDatagramTransport6(onReceive)
   else:
-    raise newException(QuicError, "client supports only IPv4/IPv6 address")
-
-proc setContextFd(endpoint: QuicEndpoint) {.raises: [].} =
-  if not endpoint.serverContext.isNil:
-    endpoint.serverContext.fd = cint(endpoint.udp.fd)
-  if not endpoint.clientContext.isNil:
-    endpoint.clientContext.fd = cint(endpoint.udp.fd)
+    raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
 
 proc new*(
     _: type QuicEndpoint,
@@ -93,28 +100,24 @@ proc new*(
   if CanListen in capabilities and tlsConfig.certificate.len == 0:
     raise newException(QuicConfigError, "tlsConfig does not contain a certificate")
 
-  let serverContext =
-    if CanListen in capabilities:
-      createServerContext(tlsConfig)
-    else:
-      nil
-
-  result = QuicEndpoint(
-    tlsConfig: tlsConfig,
-    capabilities: capabilities,
-    serverContext: serverContext,
-    connman: ConnectionManager.new(),
+  var endpoint = QuicEndpoint(
+    tlsConfig: tlsConfig, capabilities: capabilities, connman: ConnectionManager.new()
   )
-  result.udp = result.createUdp(address)
-  result.setContextFd()
+  endpoint.udp = endpoint.createUdp(address)
+
+  if CanListen in capabilities:
+    endpoint.serverContext = createServerContext(tlsConfig, cint(endpoint.udp.fd))
+
+  endpoint
 
 proc new*(
     _: type QuicEndpoint, tlsConfig: TLSConfig, family: AddressFamily
 ): QuicEndpoint {.raises: [QuicError, TransportOsError].} =
-  result = QuicEndpoint(
+  var endpoint = QuicEndpoint(
     tlsConfig: tlsConfig, capabilities: {CanDial}, connman: ConnectionManager.new()
   )
-  result.udp = result.createUdp(family)
+  endpoint.udp = endpoint.createUdp(family)
+  endpoint
 
 proc ensureClientContext(
     endpoint: QuicEndpoint
@@ -123,8 +126,8 @@ proc ensureClientContext(
     raise newException(QuicError, "endpoint is not dial-capable")
 
   if endpoint.clientContext.isNil:
-    endpoint.clientContext = createClientContext(endpoint.tlsConfig)
-    endpoint.clientContext.fd = cint(endpoint.udp.fd)
+    endpoint.clientContext =
+      createClientContext(endpoint.tlsConfig, cint(endpoint.udp.fd))
 
   endpoint.clientContext
 
@@ -136,8 +139,11 @@ proc waitForIncoming(
 proc accept*(
     endpoint: QuicEndpoint
 ): Future[Connection] {.async: (raises: [CancelledError, TransportError]).} =
-  if endpoint.serverContext.isNil:
+  if CanListen notin endpoint.capabilities:
     raise newException(TransportError, "endpoint is not listen-capable")
+
+  if endpoint.stopped or endpoint.serverContext.isNil:
+    raise newException(TransportError, "endpoint is stopped")
 
   while true:
     let
@@ -166,7 +172,14 @@ proc dial*(
   let ctx = endpoint.ensureClientContext()
   let connection = newOutgoingConnection(ctx, endpoint.udp.localAddress(), address)
   endpoint.connman.addConnection(connection)
-  await connection.dial()
+  var connected = false
+  try:
+    await connection.dial()
+    connected = true
+  finally:
+    if not connected:
+      endpoint.connman.removeConnection(connection)
+
   connection
 
 proc localAddress*(
@@ -184,7 +197,7 @@ proc stop*(endpoint: QuicEndpoint) {.async: (raises: [CancelledError]).} =
   endpoint.stopped = true
   await noCancel endpoint.connman.stop()
   # Politely wait before closing udp so connection close packets can be sent.
-  await noCancel sleepAsync(300.milliseconds)
+  await noCancel sleepAsync(CloseWait)
 
   if not endpoint.clientContext.isNil:
     endpoint.clientContext.stop()

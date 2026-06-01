@@ -28,10 +28,11 @@ const
       64 * 1024
 
 proc payload(id: int, size: int): seq[byte] =
-  result = newSeq[byte](size)
-  result[0] = byte(id)
+  var data = newSeq[byte](size)
+  data[0] = byte(id)
   for i in 1 ..< size:
-    result[i] = byte((id + i) mod 251)
+    data[i] = byte((id + i) mod 251)
+  data
 
 proc connectPeers(): Future[(QuicClient, Listener, Connection, Connection)] {.async.} =
   let client = makeClient()

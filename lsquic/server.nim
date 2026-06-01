@@ -2,12 +2,14 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import chronos, results
-import ./[errors, tlsconfig, endpoint]
+import ./[errors, connection, tlsconfig, endpoint]
 
-type QuicServer* = ref object of RootObj
-  tlsConfig: TLSConfig
+type
+  QuicServer* = ref object of RootObj
+    tlsConfig: TLSConfig
 
-type Listener* = QuicEndpoint
+  Listener* = ref object of RootObj
+    endpoint: QuicEndpoint
 
 proc new*(
     t: typedesc[QuicServer], tlsConfig: TLSConfig
@@ -21,7 +23,7 @@ proc newListener*(
     tlsConfig: TLSConfig, address: TransportAddress
 ): Result[Listener, string] =
   try:
-    ok(QuicEndpoint.new(tlsConfig, address, {CanListen, CanDial}))
+    ok(Listener(endpoint: QuicEndpoint.new(tlsConfig, address, {CanListen, CanDial})))
   except QuicConfigError, QuicError, TransportOsError:
     err(getCurrentExceptionMsg())
 
@@ -30,3 +32,23 @@ proc listen*(
 ): Listener {.raises: [QuicError, TransportOsError].} =
   newListener(self.tlsConfig, address).valueOr:
     raise newException(QuicError, error)
+
+proc accept*(
+    listener: Listener
+): Future[Connection] {.async: (raises: [CancelledError, TransportError]).} =
+  await listener.endpoint.accept()
+
+proc dial*(
+    listener: Listener, address: TransportAddress
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  await listener.endpoint.dial(address)
+
+proc localAddress*(
+    listener: Listener
+): TransportAddress {.raises: [TransportOsError].} =
+  listener.endpoint.localAddress()
+
+proc stop*(listener: Listener) {.async: (raises: [CancelledError]).} =
+  await listener.endpoint.stop()

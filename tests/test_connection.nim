@@ -81,18 +81,15 @@ proc runConnectionTest(
     except CancelledError:
       raiseAssert "Canceled incoming behavior"
 
-  discard allFutures(outgoingBehaviour(), incomingBehaviour())
-
-  await sleepAsync(1.seconds)
+  await allFutures(outgoingBehaviour(), incomingBehaviour())
 
   outgoingConn.close()
   incomingConn.close()
+  await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture())
 
   # Cannot create a stream once closed
   expect ConnectionClosedError:
     discard await outgoingConn.openStream()
-
-  await sleepAsync(1.seconds)
 
 proc runConnectionTest(address: TransportAddress) {.async.} =
   await runConnectionTest(address, address)
@@ -115,7 +112,7 @@ proc runEndpointAcceptTest(address: TransportAddress) {.async.} =
 
   outgoingConn.close()
   incomingConn.close()
-  await sleepAsync(1.seconds)
+  await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture())
 
 proc runEndpointSharedSocketDialTest(address: TransportAddress) {.async.} =
   let endpoint = makeEndpoint(address)
@@ -134,7 +131,7 @@ proc runEndpointSharedSocketDialTest(address: TransportAddress) {.async.} =
 
   outgoingConn.close()
   incomingConn.close()
-  await sleepAsync(1.seconds)
+  await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture())
 
 proc runEndpointDialOnlyTest(address: TransportAddress) {.async.} =
   let server = makeServer()
@@ -154,7 +151,7 @@ proc runEndpointDialOnlyTest(address: TransportAddress) {.async.} =
 
   outgoingConn.close()
   incomingConn.close()
-  await sleepAsync(1.seconds)
+  await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture())
 
 proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
   const streamCount = 16

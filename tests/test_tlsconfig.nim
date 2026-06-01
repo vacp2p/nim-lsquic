@@ -13,8 +13,9 @@ import lsquic/lsquic_ffi
 import ./helpers/certificate
 
 proc singleAlpn(): HashSet[string] =
-  result = initHashSet[string]()
-  result.incl("test")
+  var alpn = initHashSet[string]()
+  alpn.incl("test")
+  alpn
 
 suite "tls config":
   test "certificate requires key":
