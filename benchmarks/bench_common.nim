@@ -175,7 +175,7 @@ proc toJson*(r: RunResult): JsonNode =
         streamNode["time_to_p90_ns"] = %sr.timeToP90Ns
       streamArr.add(streamNode)
     connArr.add(%*{"streams": streamArr, "duration_ns": cr.durationNs})
-  result = %*{
+  var json = %*{
     "mode": $r.mode,
     "connections": r.connections,
     "streams_per_conn": r.streamsPerConn,
@@ -185,3 +185,4 @@ proc toJson*(r: RunResult): JsonNode =
     "duration_ns": r.durationNs,
     "connections_results": connArr,
   }
+  json

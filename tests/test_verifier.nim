@@ -16,8 +16,9 @@ type RejectVerifierRecorder = ref object
   rejectCount: int
 
 proc singleAlpn(name: string = "test"): HashSet[string] =
-  result = initHashSet[string]()
-  result.incl(name)
+  var alpn = initHashSet[string]()
+  alpn.incl(name)
+  alpn
 
 proc acceptingCertificateCb(
     serverName: string, derCertificates: seq[seq[byte]]

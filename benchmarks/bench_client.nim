@@ -109,7 +109,7 @@ proc runLatencyStream(conn: Connection, runs: int): Future[StreamResult] {.async
 proc modeThroughput(
     serverAddr: TransportAddress, uploadSize, downloadSize, chunkSize, runs: int
 ): Future[RunResult] {.async.} =
-  var result = RunResult(
+  var runResult = RunResult(
     mode: Throughput,
     connections: 1,
     streamsPerConn: 1,
@@ -128,17 +128,17 @@ proc modeThroughput(
     connRes.streamResults.add(sr)
 
   connRes.durationNs = (Moment.now() - start).nanoseconds
-  result.connResults.add(connRes)
-  result.durationNs = connRes.durationNs
+  runResult.connResults.add(connRes)
+  runResult.durationNs = connRes.durationNs
 
   conn.close()
   await client.stop()
-  return result
+  return runResult
 
 # -- Mode: latency (1 conn, 1 stream) --
 
 proc modeLatency(serverAddr: TransportAddress, runs: int): Future[RunResult] {.async.} =
-  var result = RunResult(mode: Latency, connections: 1, streamsPerConn: 1)
+  var runResult = RunResult(mode: Latency, connections: 1, streamsPerConn: 1)
 
   let client = makeClient()
   let conn = await client.dial(serverAddr)
@@ -148,12 +148,12 @@ proc modeLatency(serverAddr: TransportAddress, runs: int): Future[RunResult] {.a
   let sr = await runLatencyStream(conn, runs)
   connRes.streamResults.add(sr)
   connRes.durationNs = (Moment.now() - start).nanoseconds
-  result.connResults.add(connRes)
-  result.durationNs = connRes.durationNs
+  runResult.connResults.add(connRes)
+  runResult.durationNs = connRes.durationNs
 
   conn.close()
   await client.stop()
-  return result
+  return runResult
 
 # -- Mode: multistream (1 conn, K streams) --
 
@@ -161,7 +161,7 @@ proc modeMultiStream(
     serverAddr: TransportAddress,
     numStreams, uploadSize, downloadSize, chunkSize, runs: int,
 ): Future[RunResult] {.async.} =
-  var result = RunResult(
+  var runResult = RunResult(
     mode: MultiStream,
     connections: 1,
     streamsPerConn: numStreams,
@@ -191,12 +191,12 @@ proc modeMultiStream(
       connRes.streamResults.add(sr)
 
   connRes.durationNs = (Moment.now() - start).nanoseconds
-  result.connResults.add(connRes)
-  result.durationNs = connRes.durationNs
+  runResult.connResults.add(connRes)
+  runResult.durationNs = connRes.durationNs
 
   conn.close()
   await client.stop()
-  return result
+  return runResult
 
 # -- Mode: multiconn (N conns, 1 stream each) --
 
@@ -204,7 +204,7 @@ proc modeMultiConn(
     serverAddr: TransportAddress,
     numConns, uploadSize, downloadSize, chunkSize, runs: int,
 ): Future[RunResult] {.async.} =
-  var result = RunResult(
+  var runResult = RunResult(
     mode: MultiConn,
     connections: numConns,
     streamsPerConn: 1,
@@ -235,22 +235,22 @@ proc modeMultiConn(
 
     for i, f in futs:
       let sr = await f
-      # Associate with the right connection result
-      while result.connResults.len <= i:
-        result.connResults.add(ConnectionResult())
-      result.connResults[i].streamResults.add(sr)
+      # Associate with the right connection metrics
+      while runResult.connResults.len <= i:
+        runResult.connResults.add(ConnectionResult())
+      runResult.connResults[i].streamResults.add(sr)
 
   let totalDur = (Moment.now() - start).nanoseconds
-  for cr in result.connResults.mitems:
+  for cr in runResult.connResults.mitems:
     cr.durationNs = totalDur
-  result.durationNs = totalDur
+  runResult.durationNs = totalDur
 
   for conn in conns:
     conn.close()
   for client in clients:
     await client.stop()
 
-  return result
+  return runResult
 
 # -- Mode: stress (N conns, K streams each) --
 
@@ -258,7 +258,7 @@ proc modeStress(
     serverAddr: TransportAddress,
     numConns, numStreams, uploadSize, downloadSize, chunkSize, runs: int,
 ): Future[RunResult] {.async.} =
-  var result = RunResult(
+  var runResult = RunResult(
     mode: Stress,
     connections: numConns,
     streamsPerConn: numStreams,
@@ -293,24 +293,24 @@ proc modeStress(
       futConnIdx.add(ci)
 
     # Ensure we have connResults slots
-    while result.connResults.len < numConns:
-      result.connResults.add(ConnectionResult())
+    while runResult.connResults.len < numConns:
+      runResult.connResults.add(ConnectionResult())
 
     for i, f in allFuts:
       let sr = await f
-      result.connResults[futConnIdx[i]].streamResults.add(sr)
+      runResult.connResults[futConnIdx[i]].streamResults.add(sr)
 
   let totalDur = (Moment.now() - start).nanoseconds
-  for cr in result.connResults.mitems:
+  for cr in runResult.connResults.mitems:
     cr.durationNs = totalDur
-  result.durationNs = totalDur
+  runResult.durationNs = totalDur
 
   for conn in conns:
     conn.close()
   for client in clients:
     await client.stop()
 
-  return result
+  return runResult
 
 # -- Mode: rampup (1 conn, 1 stream, measure throughput over time) --
 
@@ -321,7 +321,7 @@ const
 proc modeRampUp(
     serverAddr: TransportAddress, downloadSize: int, chunkSize: int
 ): Future[RunResult] {.async.} =
-  var result = RunResult(
+  var runResult = RunResult(
     mode: RampUp,
     connections: 1,
     streamsPerConn: 1,
@@ -417,24 +417,25 @@ proc modeRampUp(
 
   var connRes =
     ConnectionResult(streamResults: @[sr], durationNs: totalDuration.nanoseconds)
-  result.connResults.add(connRes)
-  result.durationNs = totalDuration.nanoseconds
+  runResult.connResults.add(connRes)
+  runResult.durationNs = totalDuration.nanoseconds
 
   conn.close()
   await client.stop()
-  return result
+  return runResult
 
 # -- Print results --
 
-proc printResults(result: RunResult) =
+proc printResults(runResult: RunResult) =
   echo ""
   echo "=== Benchmark Results ==="
-  echo "Mode: ", result.mode
-  echo "Connections: ", result.connections, ", Streams/conn: ", result.streamsPerConn
-  echo "Total duration: ", formatDuration(result.durationNs)
+  echo "Mode: ", runResult.mode
+  echo "Connections: ",
+    runResult.connections, ", Streams/conn: ", runResult.streamsPerConn
+  echo "Total duration: ", formatDuration(runResult.durationNs)
   echo ""
 
-  for ci, cr in result.connResults:
+  for ci, cr in runResult.connResults:
     echo "  Connection #", ci + 1, ":"
 
     for si, sr in cr.streamResults:

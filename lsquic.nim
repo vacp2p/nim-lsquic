@@ -2,8 +2,11 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import
-  ./lsquic/
-    [errors, client, server, connection, stream, lsquic, tlsconfig, certificateverifier]
+  ./lsquic/[
+    errors, endpoint, client, server, connection, stream, lsquic, tlsconfig,
+    certificateverifier,
+  ]
 
 export
-  errors, client, server, connection, stream, lsquic, tlsconfig, certificateverifier
+  errors, endpoint, client, server, connection, stream, lsquic, tlsconfig,
+  certificateverifier

@@ -23,7 +23,7 @@ proc stop*(connman: ConnectionManager) {.async: (raises: [CancelledError]).} =
   for conn in active:
     conn.abort()
 
-proc removeConnection(connman: ConnectionManager, conn: Connection) {.raises: [].} =
+proc removeConnection*(connman: ConnectionManager, conn: Connection) {.raises: [].} =
   for i in 0 ..< connman.connections.len:
     if connman.connections[i] == conn:
       let last = connman.connections.high
