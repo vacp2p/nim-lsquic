@@ -107,6 +107,7 @@ method dial*(
   if conn.isNil:
     GC_unref(quicClientConn)
     return err("could not dial: " & $remote)
+  ctx.trackConnectionCid(conn)
 
   quicClientConn.lsquicConn = conn
   ctx.processWhenReady()
@@ -119,6 +120,7 @@ const Adaptive = 3
 proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig
+  ctx.initCidTracking()
   ctx.running = true
   ctx.setupSSLContext()
 
@@ -155,6 +157,10 @@ proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
     ea_get_ssl_ctx: getSSLCtx,
     ea_packets_out: sendPacketsOut,
   )
+  ctx.api.ea_new_scids = addCids
+  ctx.api.ea_live_scids = addCids
+  ctx.api.ea_old_scids = removeCids
+  ctx.api.ea_cids_update_ctx = cast[pointer](ctx)
 
   ctx.engine = lsquic_engine_new(0, addr ctx.api)
   if ctx.engine.isNil:

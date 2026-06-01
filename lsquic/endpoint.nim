@@ -2,7 +2,7 @@
 # Copyright (c) Status Research & Development GmbH
 
 import chronos, chronicles, results
-import ./[errors, connection, tlsconfig, datagram, connectionmanager]
+import ./[errors, connection, tlsconfig, datagram, connectionmanager, lsquic_ffi]
 import ./context/[server, client, context, io]
 
 type
@@ -39,12 +39,55 @@ proc createClientContext(
   context.fd = fd
   context
 
+proc serverCidLen(endpoint: QuicEndpoint): cuint {.raises: [].} =
+  if not endpoint.serverContext.isNil and endpoint.serverContext.settings.es_scid_len != 0:
+    return endpoint.serverContext.settings.es_scid_len
+  if not endpoint.clientContext.isNil and endpoint.clientContext.settings.es_scid_len != 0:
+    return endpoint.clientContext.settings.es_scid_len
+  LSQUIC_DF_SCID_LEN.cuint
+
+proc packetDcid(
+    endpoint: QuicEndpoint, packet: seq[byte], cid: var CidKey
+): bool {.raises: [].} =
+  if packet.len == 0:
+    return false
+
+  var cidLen: uint8
+  let offset = lsquic_dcid_from_packet(
+    unsafeAddr packet[0],
+    packet.len.csize_t,
+    endpoint.serverCidLen(),
+    addr cidLen,
+  )
+  if offset < 0:
+    return false
+
+  let start = offset.int
+  if cidLen == 0 or cidLen.int > MAX_CID_LEN or start + cidLen.int > packet.len:
+    return false
+
+  cid = CidKey(len: cidLen)
+  for i in 0 ..< cidLen.int:
+    cid.bytes[i] = packet[start + i]
+  true
+
 proc receiveDatagram(
     endpoint: QuicEndpoint, data: seq[byte], local, remote: TransportAddress
 ) {.raises: [].} =
   if endpoint.isNil or endpoint.stopped:
     return
 
+  var cid: CidKey
+  if endpoint.packetDcid(data, cid):
+    if not endpoint.clientContext.isNil and endpoint.clientContext.ownsCid(cid):
+      endpoint.clientContext.receive(Datagram(data: data), local, remote)
+      return
+
+    if not endpoint.serverContext.isNil and endpoint.serverContext.ownsCid(cid):
+      endpoint.serverContext.receive(Datagram(data: data), local, remote)
+      return
+
+  # Unknown CIDs can be new handshakes; each engine gets a chance to claim them.
   # Endpoints can have both contexts; each engine needs to see the packet.
   if not endpoint.clientContext.isNil:
     endpoint.clientContext.receive(Datagram(data: data), local, remote)

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
-import std/deques
+import std/[deques, hashes, sets]
 import boringssl
 import chronos
 import chronos/osdefs
@@ -12,17 +12,97 @@ import
 let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is global
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
 
-type QuicContext* = ref object of RootObj
-  settings*: struct_lsquic_engine_settings
-  api*: struct_lsquic_engine_api
-  engine*: ptr struct_lsquic_engine
-  stream_if*: struct_lsquic_stream_if
-  tlsConfig*: TLSConfig
-  tickTimeout*: Timeout
-  sslCtx*: ptr SSL_CTX
-  fd*: cint
-  processing: bool
-  running*: bool
+type
+  CidKey* = object
+    len*: uint8
+    bytes*: array[MAX_CID_LEN, uint8]
+
+  # The generated FFI type currently aligns fields, not just the C struct.
+  # Read CIDs through the native wire layout until the binding is regenerated.
+  RawLsquicCid = object
+    buf: array[MAX_CID_LEN, uint8]
+    len: uint8
+    padding: array[3, uint8]
+
+  RawLsquicCidArray = UncheckedArray[RawLsquicCid]
+
+  QuicContext* = ref object of RootObj
+    settings*: struct_lsquic_engine_settings
+    api*: struct_lsquic_engine_api
+    engine*: ptr struct_lsquic_engine
+    stream_if*: struct_lsquic_stream_if
+    tlsConfig*: TLSConfig
+    tickTimeout*: Timeout
+    sslCtx*: ptr SSL_CTX
+    fd*: cint
+    processing: bool
+    running*: bool
+    ownedCids*: HashSet[CidKey]
+
+static:
+  doAssert sizeof(RawLsquicCid) == 24
+  doAssert offsetOf(RawLsquicCid, len) == 20
+
+func hash*(cid: CidKey): Hash =
+  var h = hash(cid.len)
+  for i in 0 ..< cid.len.int:
+    h = h !& hash(cid.bytes[i])
+  !$h
+
+func toCidKey(cid: RawLsquicCid, key: var CidKey): bool =
+  if cid.len == 0 or cid.len.int > MAX_CID_LEN:
+    return false
+
+  key = CidKey(len: cid.len)
+  for i in 0 ..< cid.len.int:
+    key.bytes[i] = cid.buf[i]
+  true
+
+proc initCidTracking*(ctx: QuicContext) {.raises: [].} =
+  ctx.ownedCids = initHashSet[CidKey]()
+
+proc addCids*(
+    ctx: pointer, peerCtxs: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
+) {.cdecl, raises: [].} =
+  let quicCtx = cast[QuicContext](ctx)
+  if quicCtx.isNil or cids.isNil:
+    return
+
+  let cidsArr = cast[ptr RawLsquicCidArray](cids)
+  for i in 0 ..< nCids.int:
+    var key: CidKey
+    if toCidKey(cidsArr[i], key):
+      quicCtx.ownedCids.incl(key)
+
+proc removeCids*(
+    ctx: pointer, peerCtxs: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
+) {.cdecl, raises: [].} =
+  let quicCtx = cast[QuicContext](ctx)
+  if quicCtx.isNil or cids.isNil:
+    return
+
+  let cidsArr = cast[ptr RawLsquicCidArray](cids)
+  for i in 0 ..< nCids.int:
+    var key: CidKey
+    if toCidKey(cidsArr[i], key):
+      quicCtx.ownedCids.excl(key)
+
+proc trackConnectionCid*(
+    ctx: QuicContext, conn: ptr lsquic_conn_t
+) {.raises: [].} =
+  if ctx.isNil or conn.isNil:
+    return
+
+  let cid = lsquic_conn_id(conn)
+  if cid.isNil:
+    return
+
+  var key: CidKey
+  if toCidKey(cast[ptr RawLsquicCid](cid)[], key):
+    ctx.ownedCids.incl(key)
+
+proc ownsCid*(ctx: QuicContext, cid: CidKey): bool {.raises: [].} =
+  not ctx.isNil and cid in ctx.ownedCids
 
 proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
   not ctx.isNil and ctx.running and not ctx.engine.isNil
