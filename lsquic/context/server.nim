@@ -57,9 +57,9 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
   var ctx = ServerContext()
   ctx.tlsConfig = tlsConfig
   ctx.running = true
-  ctx.initCidTracking()
   ctx.incoming = newAsyncQueue[QuicConnection]()
   ctx.setupSSLContext()
+  ctx.initCidTracking()
 
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1

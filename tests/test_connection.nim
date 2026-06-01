@@ -3,7 +3,7 @@
 
 {.used.}
 
-import chronos, chronos/unittest2/asynctests, results, chronicles
+import chronos, chronos/unittest2/asynctests, results, chronicles, sequtils
 import lsquic
 import ./helpers/clientserver
 
@@ -193,13 +193,13 @@ proc runEndpointSharedSocketCrossDialTest(address: TransportAddress) {.async.} =
     incomingB.localAddress().port == addressB.port
     incomingB.remoteAddress().port == addressA.port
 
-  let conns = [initialOutgoing, initialIncoming, outgoingAtoB, outgoingBtoA, incomingA, incomingB]
+  let conns = @[
+    initialOutgoing, initialIncoming, outgoingAtoB, outgoingBtoA, incomingA, incomingB
+  ]
   for conn in conns:
     conn.close()
 
-  await allFutures(initialOutgoing.closedFuture(), initialIncoming.closedFuture())
-  await allFutures(outgoingAtoB.closedFuture(), outgoingBtoA.closedFuture())
-  await allFutures(incomingA.closedFuture(), incomingB.closedFuture())
+  await allFutures(conns.mapIt(it.closedFuture()))
 
 proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
   const streamCount = 16

@@ -11,7 +11,9 @@ import chronos/osdefs
 import zlib
 import boringssl
 
-type ptrdiff_t* {.importc: "ptrdiff_t", header: "<stddef.h>".} = int
+type
+  ptrdiff_t* {.importc: "ptrdiff_t", header: "<stddef.h>".} = int
+  uint_fast8_t* {.importc: "uint_fast8_t", header: "<stdint.h>".} = uint8
 
 # enums are generated manually to avoid issue described in
 # https://github.com/PMunch/futhark/issues/152
@@ -43,6 +45,9 @@ borrowCEnumOps(enum_lsquic_conn_param)
 borrowCEnumOps(enum_LSQUIC_CONN_STATUS)
 
 const
+  MAX_CID_LEN* = 20
+  GQUIC_CID_LEN* = 8
+
   LSQVER_043* = enum_lsquic_version(0)
   LSQVER_046* = enum_lsquic_version(1)
   LSQVER_050* = enum_lsquic_version(2)
@@ -106,6 +111,16 @@ when defined(windows):
 {.passc: "-I" & lsqpack.}
 {.passc: "-I" & lshpack.}
 {.passc: "-I" & xxhash.}
+
+type
+  struct_lsquic_cid* {.
+    importc: "struct lsquic_cid", header: "lsquic_types.h", bycopy, completeStruct
+  .} = object
+    buf* {.importc: "buf".}: array[MAX_CID_LEN, uint8]
+    len* {.importc: "len".}: uint_fast8_t
+    padding: array[3, uint8]
+
+  lsquic_cid_t* = struct_lsquic_cid
 
 const HAVE_BORINGSSL = "-DHAVE_BORINGSSL"
 const XXH_HEADER_NAME = "-DXXH_HEADER_NAME=\"<lsquic_xxhash.h>\""
@@ -357,14 +372,7 @@ else:
       "Declaration of " & "LSQUIC_DF_CFCW_CLIENT" & " already exists, not redeclaring"
     )
 type
-  struct_lsquic_cid_570425834 {.pure, inheritable, bycopy.} = object
-    buf* {.align(8'i64).}: array[20'i64, uint8]
-      ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:27:28
-    len* {.align(8'i64).}: uint_fast8_t_570425837
-
   uint_fast8_t_570425836 = uint8 ## Generated based on /usr/include/stdint.h:60:24
-  lsquic_cid_t_570425838 = struct_lsquic_cid_570425835
-    ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:32:3
   lsquic_stream_id_t_570425840 = uint64
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:40:18
   lsquic_engine_t_570425842 = struct_lsquic_engine
@@ -553,9 +561,8 @@ type
       proc(a0: pointer, a1: pointer, a2: pointer, a3: cschar): void {.cdecl.}
     pmi_return*: proc(a0: pointer, a1: pointer, a2: pointer, a3: cschar): void {.cdecl.}
 
-  lsquic_cids_update_f_570425876 = proc(
-    a0: pointer, a1: ptr pointer, a2: ptr lsquic_cid_t_570425839, a3: cuint
-  ): void {.cdecl.}
+  lsquic_cids_update_f_570425876 =
+    proc(a0: pointer, a1: ptr pointer, a2: ptr lsquic_cid_t, a3: cuint): void {.cdecl.}
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1307:16
   struct_lsquic_hset_if_570425878 {.pure, inheritable, bycopy.} = object
     hsi_create_header_set*:
@@ -733,17 +740,6 @@ type
     else:
       struct_lsquic_conn_info_570425895
   )
-  struct_lsquic_cid_570425835 = (
-    when declared(struct_lsquic_cid):
-      when ownSizeof(struct_lsquic_cid) != ownSizeof(struct_lsquic_cid_570425834):
-        static:
-          warning(
-            "Declaration of " & "struct_lsquic_cid" & " exists but with different size"
-          )
-      struct_lsquic_cid
-    else:
-      struct_lsquic_cid_570425834
-  )
   lsquic_stream_id_t_570425841 = (
     when declared(lsquic_stream_id_t):
       when ownSizeof(lsquic_stream_id_t) != ownSizeof(lsquic_stream_id_t_570425840):
@@ -910,17 +906,6 @@ type
     else:
       lsquic_stream_ctx_t_570425850
   )
-  lsquic_cid_t_570425839 = (
-    when declared(lsquic_cid_t):
-      when ownSizeof(lsquic_cid_t) != ownSizeof(lsquic_cid_t_570425838):
-        static:
-          warning(
-            "Declaration of " & "lsquic_cid_t" & " exists but with different size"
-          )
-      lsquic_cid_t
-    else:
-      lsquic_cid_t_570425838
-  )
   uint_fast8_t_570425837 = (
     when declared(uint_fast8_t):
       when ownSizeof(uint_fast8_t) != ownSizeof(uint_fast8_t_570425836):
@@ -1046,11 +1031,6 @@ else:
     hint(
       "Declaration of " & "struct_lsquic_conn_info" & " already exists, not redeclaring"
     )
-when not declared(struct_lsquic_cid):
-  type struct_lsquic_cid* = struct_lsquic_cid_570425834
-else:
-  static:
-    hint("Declaration of " & "struct_lsquic_cid" & " already exists, not redeclaring")
 when not declared(lsquic_stream_id_t):
   type lsquic_stream_id_t* = lsquic_stream_id_t_570425840
 else:
@@ -1138,11 +1118,6 @@ when not declared(lsquic_stream_ctx_t):
 else:
   static:
     hint("Declaration of " & "lsquic_stream_ctx_t" & " already exists, not redeclaring")
-when not declared(lsquic_cid_t):
-  type lsquic_cid_t* = lsquic_cid_t_570425838
-else:
-  static:
-    hint("Declaration of " & "lsquic_cid_t" & " already exists, not redeclaring")
 when not declared(uint_fast8_t):
   type uint_fast8_t* = uint_fast8_t_570425836
 else:
@@ -2670,7 +2645,7 @@ else:
 when not declared(lsquic_conn_id):
   proc lsquic_conn_id*(
     c: ptr lsquic_conn_t_570425845
-  ): ptr lsquic_cid_t_570425839 {.cdecl, importc: "lsquic_conn_id".}
+  ): ptr lsquic_cid_t {.cdecl, importc: "lsquic_conn_id".}
 
 else:
   static:
@@ -2968,7 +2943,7 @@ else:
     )
 when not declared(lsquic_cid_from_packet):
   proc lsquic_cid_from_packet*(
-    a0: ptr uint8, bufsz: csize_t, cid: ptr lsquic_cid_t_570425839
+    a0: ptr uint8, bufsz: csize_t, cid: ptr lsquic_cid_t
   ): cint {.cdecl, importc: "lsquic_cid_from_packet".}
 
 else:

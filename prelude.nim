@@ -11,7 +11,9 @@ import chronos/osdefs
 import zlib
 import boringssl
 
-type ptrdiff_t* {.importc: "ptrdiff_t", header: "<stddef.h>".} = int
+type
+  ptrdiff_t* {.importc: "ptrdiff_t", header: "<stddef.h>".} = int
+  uint_fast8_t* {.importc: "uint_fast8_t", header: "<stdint.h>".} = uint8
 
 # enums are generated manually to avoid issue described in
 # https://github.com/PMunch/futhark/issues/152
@@ -43,6 +45,9 @@ borrowCEnumOps(enum_lsquic_conn_param)
 borrowCEnumOps(enum_LSQUIC_CONN_STATUS)
 
 const
+  MAX_CID_LEN* = 20
+  GQUIC_CID_LEN* = 8
+
   LSQVER_043* = enum_lsquic_version(0)
   LSQVER_046* = enum_lsquic_version(1)
   LSQVER_050* = enum_lsquic_version(2)
@@ -106,6 +111,16 @@ when defined(windows):
 {.passc: "-I" & lsqpack.}
 {.passc: "-I" & lshpack.}
 {.passc: "-I" & xxhash.}
+
+type
+  struct_lsquic_cid* {.
+    importc: "struct lsquic_cid", header: "lsquic_types.h", bycopy, completeStruct
+  .} = object
+    buf* {.importc: "buf".}: array[MAX_CID_LEN, uint8]
+    len* {.importc: "len".}: uint_fast8_t
+    padding: array[3, uint8]
+
+  lsquic_cid_t* = struct_lsquic_cid
 
 const HAVE_BORINGSSL = "-DHAVE_BORINGSSL"
 const XXH_HEADER_NAME = "-DXXH_HEADER_NAME=\"<lsquic_xxhash.h>\""

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
-import std/[deques, hashes, sets]
+import std/[deques, hashes, sets, strutils]
 import boringssl
 import chronos
 import chronos/osdefs
@@ -17,14 +17,7 @@ type
     len*: uint8
     bytes*: array[MAX_CID_LEN, uint8]
 
-  # The generated FFI type currently aligns fields, not just the C struct.
-  # Read CIDs through the native wire layout until the binding is regenerated.
-  RawLsquicCid = object
-    buf: array[MAX_CID_LEN, uint8]
-    len: uint8
-    padding: array[3, uint8]
-
-  RawLsquicCidArray = UncheckedArray[RawLsquicCid]
+  LsquicCidArray = UncheckedArray[lsquic_cid_t]
 
   QuicContext* = ref object of RootObj
     settings*: struct_lsquic_engine_settings
@@ -39,17 +32,22 @@ type
     running*: bool
     ownedCids*: HashSet[CidKey]
 
-static:
-  doAssert sizeof(RawLsquicCid) == 24
-  doAssert offsetOf(RawLsquicCid, len) == 20
-
 func hash*(cid: CidKey): Hash =
   var h = hash(cid.len)
   for i in 0 ..< cid.len.int:
     h = h !& hash(cid.bytes[i])
   !$h
 
-func toCidKey(cid: RawLsquicCid, key: var CidKey): bool =
+func shortLog*(cid: CidKey): string =
+  var ret = $cid.len & ":"
+  for i in 0 ..< min(cid.len.int, 8):
+    ret.add(toHex(cid.bytes[i], 2))
+  ret
+
+chronicles.formatIt(CidKey):
+  shortLog(it)
+
+func toCidKey(cid: lsquic_cid_t, key: var CidKey): bool =
   if cid.len == 0 or cid.len.int > MAX_CID_LEN:
     return false
 
@@ -68,11 +66,12 @@ proc addCids*(
   if quicCtx.isNil or cids.isNil:
     return
 
-  let cidsArr = cast[ptr RawLsquicCidArray](cids)
+  let cidsArr = cast[ptr LsquicCidArray](cids)
   for i in 0 ..< nCids.int:
     var key: CidKey
     if toCidKey(cidsArr[i], key):
       quicCtx.ownedCids.incl(key)
+      trace "Registered CID", cid = key, cidCount = quicCtx.ownedCids.len
 
 proc removeCids*(
     ctx: pointer, peerCtxs: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
@@ -81,15 +80,14 @@ proc removeCids*(
   if quicCtx.isNil or cids.isNil:
     return
 
-  let cidsArr = cast[ptr RawLsquicCidArray](cids)
+  let cidsArr = cast[ptr LsquicCidArray](cids)
   for i in 0 ..< nCids.int:
     var key: CidKey
     if toCidKey(cidsArr[i], key):
       quicCtx.ownedCids.excl(key)
+      trace "Removed CID", cid = key, cidCount = quicCtx.ownedCids.len
 
-proc trackConnectionCid*(
-    ctx: QuicContext, conn: ptr lsquic_conn_t
-) {.raises: [].} =
+proc trackConnectionCid*(ctx: QuicContext, conn: ptr lsquic_conn_t) {.raises: [].} =
   if ctx.isNil or conn.isNil:
     return
 
@@ -98,8 +96,9 @@ proc trackConnectionCid*(
     return
 
   var key: CidKey
-  if toCidKey(cast[ptr RawLsquicCid](cid)[], key):
+  if toCidKey(cid[], key):
     ctx.ownedCids.incl(key)
+    trace "Tracked connection CID", cid = key, cidCount = ctx.ownedCids.len
 
 proc ownsCid*(ctx: QuicContext, cid: CidKey): bool {.raises: [].} =
   not ctx.isNil and cid in ctx.ownedCids

@@ -3,6 +3,7 @@
 
 import chronos
 import chronos/osdefs
+import chronicles
 import ./context
 import ../[lsquic_ffi, datagram]
 import ../helpers/[openarray, sequninit, transportaddr]
@@ -144,6 +145,7 @@ proc sendPacketsOut*(
 
       let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
       if res < 0:
+        trace "sendmsg failed", sent, nspecs
         break
 
     sent.inc

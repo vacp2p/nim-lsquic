@@ -39,10 +39,12 @@ proc createClientContext(
   context.fd = fd
   context
 
-proc serverCidLen(endpoint: QuicEndpoint): cuint {.raises: [].} =
-  if not endpoint.serverContext.isNil and endpoint.serverContext.settings.es_scid_len != 0:
+proc scidLen(endpoint: QuicEndpoint): cuint {.raises: [].} =
+  if not endpoint.serverContext.isNil and
+      endpoint.serverContext.settings.es_scid_len != 0:
     return endpoint.serverContext.settings.es_scid_len
-  if not endpoint.clientContext.isNil and endpoint.clientContext.settings.es_scid_len != 0:
+  if not endpoint.clientContext.isNil and
+      endpoint.clientContext.settings.es_scid_len != 0:
     return endpoint.clientContext.settings.es_scid_len
   LSQUIC_DF_SCID_LEN.cuint
 
@@ -54,10 +56,7 @@ proc packetDcid(
 
   var cidLen: uint8
   let offset = lsquic_dcid_from_packet(
-    unsafeAddr packet[0],
-    packet.len.csize_t,
-    endpoint.serverCidLen(),
-    addr cidLen,
+    unsafeAddr packet[0], packet.len.csize_t, endpoint.scidLen(), addr cidLen
   )
   if offset < 0:
     return false
@@ -71,28 +70,48 @@ proc packetDcid(
     cid.bytes[i] = packet[start + i]
   true
 
+func isIetfInitial(packet: seq[byte]): bool {.raises: [].} =
+  if packet.len == 0:
+    return false
+  (packet[0] and 0xC0'u8) == 0xC0'u8 and (packet[0] and 0x30'u8) == 0
+
 proc receiveDatagram(
     endpoint: QuicEndpoint, data: seq[byte], local, remote: TransportAddress
 ) {.raises: [].} =
   if endpoint.isNil or endpoint.stopped:
     return
 
+  let
+    hasClientContext = not endpoint.clientContext.isNil
+    hasServerContext = not endpoint.serverContext.isNil
+
   var cid: CidKey
   if endpoint.packetDcid(data, cid):
-    if not endpoint.clientContext.isNil and endpoint.clientContext.ownsCid(cid):
+    if hasClientContext and endpoint.clientContext.ownsCid(cid):
+      trace "Routing datagram to client context", cid
       endpoint.clientContext.receive(Datagram(data: data), local, remote)
       return
 
-    if not endpoint.serverContext.isNil and endpoint.serverContext.ownsCid(cid):
+    if hasServerContext and endpoint.serverContext.ownsCid(cid):
+      trace "Routing datagram to server context", cid
       endpoint.serverContext.receive(Datagram(data: data), local, remote)
       return
 
-  # Unknown CIDs can be new handshakes; each engine gets a chance to claim them.
-  # Endpoints can have both contexts; each engine needs to see the packet.
-  if not endpoint.clientContext.isNil:
+  if hasClientContext and not hasServerContext:
     endpoint.clientContext.receive(Datagram(data: data), local, remote)
-  if not endpoint.serverContext.isNil:
+    return
+
+  if hasServerContext and not hasClientContext:
     endpoint.serverContext.receive(Datagram(data: data), local, remote)
+    return
+
+  if hasServerContext and data.isIetfInitial():
+    trace "Routing initial datagram with unknown CID to server context",
+      bytes = data.len, local, remote
+    endpoint.serverContext.receive(Datagram(data: data), local, remote)
+    return
+
+  trace "Dropping datagram with unknown CID", bytes = data.len, local, remote
 
 proc receiveFromUdp(
     endpoint: QuicEndpoint, udp: DatagramTransport, remote: TransportAddress
