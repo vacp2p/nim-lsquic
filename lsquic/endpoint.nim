@@ -147,7 +147,7 @@ proc accept*(
 
     if raceFut == closedFut:
       await incomingFut.cancelAndWait()
-      raise newException(TransportError, "listener is stopped")
+      raise newException(TransportError, "endpoint is stopped")
 
     let quicConn = await incomingFut
     if quicConn.lsquicConn.isNil:

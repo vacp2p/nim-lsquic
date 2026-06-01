@@ -12,7 +12,7 @@ proc certificateCb(
 ): bool {.gcsafe.} =
   return derCertificates.len > 0
 
-proc makeTLSConfig*(): TLSConfig =
+proc makeTLSConfig*(): TLSConfig {.raises: [QuicConfigError].} =
   let customCertVerif: CertificateVerifier =
     CustomCertificateVerifier.init(certificateCb)
   TLSConfig.new(
