@@ -12,7 +12,7 @@ proc dropGeneratedCEnumsImpl(opirOutput: JsonNode): JsonNode =
   for node in opirOutput:
     # enums are generated manually to avoid issue described in
     # https://github.com/PMunch/futhark/issues/152
-    if node["kind"].str == "enum":
+    if node{"kind"}.getStr("") == "enum":
       continue
     resp.add node
   resp
