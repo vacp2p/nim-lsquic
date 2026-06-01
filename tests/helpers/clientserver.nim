@@ -12,26 +12,31 @@ proc certificateCb(
 ): bool {.gcsafe.} =
   return derCertificates.len > 0
 
+proc makeTLSConfig*(): TLSConfig {.raises: [QuicConfigError].} =
+  let customCertVerif: CertificateVerifier =
+    CustomCertificateVerifier.init(certificateCb)
+  TLSConfig.new(
+    testCertificate(),
+    testPrivateKey(),
+    @["test"].toHashSet(),
+    Opt.some(customCertVerif),
+  )
+
 proc makeClient*(): QuicClient {.
     raises: [QuicConfigError, QuicError, TransportOsError]
 .} =
-  let customCertVerif: CertificateVerifier =
-    CustomCertificateVerifier.init(certificateCb)
-  let clientTLSConfig = TLSConfig.new(
-    testCertificate(),
-    testPrivateKey(),
-    @["test"].toHashSet(),
-    Opt.some(customCertVerif),
-  )
-  return QuicClient.new(clientTLSConfig)
+  return QuicClient.new(makeTLSConfig())
 
 proc makeServer*(): QuicServer {.raises: [QuicConfigError].} =
-  let customCertVerif: CertificateVerifier =
-    CustomCertificateVerifier.init(certificateCb)
-  let serverTLSConfig = TLSConfig.new(
-    testCertificate(),
-    testPrivateKey(),
-    @["test"].toHashSet(),
-    Opt.some(customCertVerif),
-  )
-  return QuicServer.new(serverTLSConfig)
+  return QuicServer.new(makeTLSConfig())
+
+proc makeEndpoint*(
+    address: TransportAddress,
+    capabilities: QuicEndpointCapabilities = {CanListen, CanDial},
+): QuicEndpoint {.raises: [QuicConfigError, QuicError, TransportOsError].} =
+  QuicEndpoint.new(makeTLSConfig(), address, capabilities)
+
+proc makeDialEndpoint*(
+    family: AddressFamily
+): QuicEndpoint {.raises: [QuicError, TransportOsError].} =
+  QuicEndpoint.new(makeTLSConfig(), family)

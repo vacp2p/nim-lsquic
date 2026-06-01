@@ -97,6 +97,65 @@ proc runConnectionTest(
 proc runConnectionTest(address: TransportAddress) {.async.} =
   await runConnectionTest(address, address)
 
+proc runEndpointAcceptTest(address: TransportAddress) {.async.} =
+  let client = makeClient()
+  let endpoint = makeEndpoint(address, {CanListen})
+  let boundAddress = endpoint.localAddress()
+  defer:
+    await allFutures(client.stop(), endpoint.stop())
+
+  let accepting = endpoint.accept()
+  let outgoingConn = await client.dial(boundAddress)
+  let incomingConn = await accepting
+
+  check:
+    outgoingConn.certificates().len == 1
+    incomingConn.certificates().len == 1
+    incomingConn.localAddress().port == boundAddress.port
+
+  outgoingConn.close()
+  incomingConn.close()
+  await sleepAsync(1.seconds)
+
+proc runEndpointSharedSocketDialTest(address: TransportAddress) {.async.} =
+  let endpoint = makeEndpoint(address)
+  let boundAddress = endpoint.localAddress()
+  defer:
+    await endpoint.stop()
+
+  let accepting = endpoint.accept()
+  let outgoingConn = await endpoint.dial(boundAddress)
+  let incomingConn = await accepting
+
+  check:
+    outgoingConn.localAddress().port == boundAddress.port
+    incomingConn.localAddress().port == boundAddress.port
+    incomingConn.remoteAddress().port == boundAddress.port
+
+  outgoingConn.close()
+  incomingConn.close()
+  await sleepAsync(1.seconds)
+
+proc runEndpointDialOnlyTest(address: TransportAddress) {.async.} =
+  let server = makeServer()
+  let listener = server.listen(address)
+  let boundAddress = listener.localAddress()
+  let endpoint = makeDialEndpoint(boundAddress.family)
+  defer:
+    await allFutures(listener.stop(), endpoint.stop())
+
+  let accepting = listener.accept()
+  let outgoingConn = await endpoint.dial(boundAddress)
+  let incomingConn = await accepting
+
+  check:
+    outgoingConn.remoteAddress().port == boundAddress.port
+    incomingConn.localAddress().port == boundAddress.port
+
+  outgoingConn.close()
+  incomingConn.close()
+  await sleepAsync(1.seconds)
+
 proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
   const streamCount = 16
 
@@ -155,3 +214,12 @@ suite "connection":
 
   asyncTest "multiple concurrent stream opens":
     await runConcurrentStreamOpenTest(initTAddress("127.0.0.1:12346"))
+
+  asyncTest "endpoint accepts inbound quic":
+    await runEndpointAcceptTest(initTAddress("127.0.0.1:0"))
+
+  asyncTest "endpoint dials from listener socket":
+    await runEndpointSharedSocketDialTest(initTAddress("127.0.0.1:0"))
+
+  asyncTest "dial-only endpoint works without listener":
+    await runEndpointDialOnlyTest(initTAddress("127.0.0.1:0"))
