@@ -13,6 +13,82 @@ import boringssl
 
 type ptrdiff_t* {.importc: "ptrdiff_t", header: "<stddef.h>".} = int
 
+# enums are generated manually to avoid issue described in
+# https://github.com/PMunch/futhark/issues/152
+template borrowCEnumOps(T: typedesc) =
+  proc `==`*(a, b: T): bool {.borrow.}
+  proc `<`*(a, b: T): bool {.borrow.}
+  proc `<=`*(a, b: T): bool {.borrow.}
+  proc `or`*(a, b: T): T {.borrow.}
+  proc `and`*(a, b: T): T {.borrow.}
+  proc `xor`*(a, b: T): T {.borrow.}
+  proc `not`*(a: T): T {.borrow.}
+  proc `$`*(a: T): string {.borrow.}
+
+type
+  enum_lsquic_version* = distinct cuint
+  enum_lsquic_hsk_status* = distinct cuint
+  enum_lsquic_hsi_flag* = distinct cuint
+  enum_lsquic_logger_timestamp_style* = distinct cuint
+  enum_lsquic_crypto_ver* = distinct cuint
+  enum_lsquic_conn_param* = distinct cuint
+  enum_LSQUIC_CONN_STATUS* = distinct cuint
+
+borrowCEnumOps(enum_lsquic_version)
+borrowCEnumOps(enum_lsquic_hsk_status)
+borrowCEnumOps(enum_lsquic_hsi_flag)
+borrowCEnumOps(enum_lsquic_logger_timestamp_style)
+borrowCEnumOps(enum_lsquic_crypto_ver)
+borrowCEnumOps(enum_lsquic_conn_param)
+borrowCEnumOps(enum_LSQUIC_CONN_STATUS)
+
+const
+  LSQVER_043* = enum_lsquic_version(0)
+  LSQVER_046* = enum_lsquic_version(1)
+  LSQVER_050* = enum_lsquic_version(2)
+  LSQVER_ID27* = enum_lsquic_version(3)
+  LSQVER_ID29* = enum_lsquic_version(4)
+  LSQVER_I001* = enum_lsquic_version(5)
+  LSQVER_I002* = enum_lsquic_version(6)
+  LSQVER_RESVED* = enum_lsquic_version(7)
+  N_LSQVER* = enum_lsquic_version(8)
+  LSQVER_VERNEG* = enum_lsquic_version(9)
+
+  LSQ_HSK_FAIL* = enum_lsquic_hsk_status(0)
+  LSQ_HSK_OK* = enum_lsquic_hsk_status(1)
+  LSQ_HSK_RESUMED_OK* = enum_lsquic_hsk_status(2)
+  LSQ_HSK_RESUMED_FAIL* = enum_lsquic_hsk_status(3)
+
+  LSQUIC_HSI_HTTP1X* = enum_lsquic_hsi_flag(2)
+  LSQUIC_HSI_HASH_NAME* = enum_lsquic_hsi_flag(4)
+  LSQUIC_HSI_HASH_NAMEVAL* = enum_lsquic_hsi_flag(8)
+
+  LLTS_NONE* = enum_lsquic_logger_timestamp_style(0)
+  LLTS_HHMMSSMS* = enum_lsquic_logger_timestamp_style(1)
+  LLTS_YYYYMMDD_HHMMSSMS* = enum_lsquic_logger_timestamp_style(2)
+  LLTS_CHROMELIKE* = enum_lsquic_logger_timestamp_style(3)
+  LLTS_HHMMSSUS* = enum_lsquic_logger_timestamp_style(4)
+  LLTS_YYYYMMDD_HHMMSSUS* = enum_lsquic_logger_timestamp_style(5)
+  N_LLTS* = enum_lsquic_logger_timestamp_style(6)
+
+  LSQ_CRY_QUIC* = enum_lsquic_crypto_ver(0)
+  LSQ_CRY_TLSv13* = enum_lsquic_crypto_ver(1)
+
+  LSQCP_MAX_PACING_RATE* = enum_lsquic_conn_param(1)
+  LSQCP_ENABLE_BW_SAMPLER* = enum_lsquic_conn_param(2)
+
+  LSCONN_ST_HSK_IN_PROGRESS* = enum_LSQUIC_CONN_STATUS(0)
+  LSCONN_ST_CONNECTED* = enum_LSQUIC_CONN_STATUS(1)
+  LSCONN_ST_HSK_FAILURE* = enum_LSQUIC_CONN_STATUS(2)
+  LSCONN_ST_GOING_AWAY* = enum_LSQUIC_CONN_STATUS(3)
+  LSCONN_ST_TIMED_OUT* = enum_LSQUIC_CONN_STATUS(4)
+  LSCONN_ST_RESET* = enum_LSQUIC_CONN_STATUS(5)
+  LSCONN_ST_USER_ABORTED* = enum_LSQUIC_CONN_STATUS(6)
+  LSCONN_ST_ERROR* = enum_LSQUIC_CONN_STATUS(7)
+  LSCONN_ST_CLOSED* = enum_LSQUIC_CONN_STATUS(8)
+  LSCONN_ST_PEER_GOING_AWAY* = enum_LSQUIC_CONN_STATUS(9)
+  LSCONN_ST_VERNEG_FAILURE* = enum_LSQUIC_CONN_STATUS(10)
+
 # use rsplit as a workaround for cross compilation path separator issue
 const root = currentSourcePath.rsplit({DirSep, AltSep}, 2)[0]
 const lsquicInclude = root & "/libs/lsquic/include"
@@ -130,59 +206,6 @@ when not declared(ownSizeOf):
   macro ownSizeof(x: typed): untyped =
     newLit(x.getSize)
 
-type enum_lsquic_version_570425828* {.size: sizeof(cuint).} = enum
-  LSQVER_043 = 0
-  LSQVER_046 = 1
-  LSQVER_050 = 2
-  LSQVER_ID27 = 3
-  LSQVER_ID29 = 4
-  LSQVER_I001 = 5
-  LSQVER_I002 = 6
-  LSQVER_RESVED = 7
-  N_LSQVER = 8
-  LSQVER_VERNEG = 9
-
-type enum_lsquic_hsk_status_570425830* {.size: sizeof(cuint).} = enum
-  LSQ_HSK_FAIL = 0
-  LSQ_HSK_OK = 1
-  LSQ_HSK_RESUMED_OK = 2
-  LSQ_HSK_RESUMED_FAIL = 3
-
-type enum_lsquic_hsi_flag_570425854* {.size: sizeof(cuint).} = enum
-  LSQUIC_HSI_HTTP1X = 2
-  LSQUIC_HSI_HASH_NAME = 4
-  LSQUIC_HSI_HASH_NAMEVAL = 8
-
-type enum_lsquic_logger_timestamp_style_570425866* {.size: sizeof(cuint).} = enum
-  LLTS_NONE = 0
-  LLTS_HHMMSSMS = 1
-  LLTS_YYYYMMDD_HHMMSSMS = 2
-  LLTS_CHROMELIKE = 3
-  LLTS_HHMMSSUS = 4
-  LLTS_YYYYMMDD_HHMMSSUS = 5
-  N_LLTS = 6
-
-type enum_lsquic_crypto_ver_570425875* {.size: sizeof(cuint).} = enum
-  LSQ_CRY_QUIC = 0
-  LSQ_CRY_TLSv13 = 1
-
-type enum_lsquic_conn_param_570425877* {.size: sizeof(cuint).} = enum
-  LSQCP_MAX_PACING_RATE = 1
-  LSQCP_ENABLE_BW_SAMPLER = 2
-
-type enum_LSQUIC_CONN_STATUS_570425881* {.size: sizeof(cuint).} = enum
-  LSCONN_ST_HSK_IN_PROGRESS = 0
-  LSCONN_ST_CONNECTED = 1
-  LSCONN_ST_HSK_FAILURE = 2
-  LSCONN_ST_GOING_AWAY = 3
-  LSCONN_ST_TIMED_OUT = 4
-  LSCONN_ST_RESET = 5
-  LSCONN_ST_USER_ABORTED = 6
-  LSCONN_ST_ERROR = 7
-  LSCONN_ST_CLOSED = 8
-  LSCONN_ST_PEER_GOING_AWAY = 9
-  LSCONN_ST_VERNEG_FAILURE = 10
-
 when not declared(struct_ssl_st):
   type struct_ssl_st* = object
 else:
@@ -195,16 +218,42 @@ else:
     hint(
       "Declaration of " & "struct_lsquic_stream" & " already exists, not redeclaring"
     )
+when not declared(enum_lsquic_version):
+  type enum_lsquic_version* = object
+else:
+  static:
+    hint("Declaration of " & "enum_lsquic_version" & " already exists, not redeclaring")
 when not declared(struct_lsquic_conn):
   type struct_lsquic_conn* = object
 else:
   static:
     hint("Declaration of " & "struct_lsquic_conn" & " already exists, not redeclaring")
+when not declared(enum_lsquic_hsi_flag):
+  type enum_lsquic_hsi_flag* = object
+else:
+  static:
+    hint(
+      "Declaration of " & "enum_lsquic_hsi_flag" & " already exists, not redeclaring"
+    )
+when not declared(enum_LSQUIC_CONN_STATUS):
+  type enum_LSQUIC_CONN_STATUS* = object
+else:
+  static:
+    hint(
+      "Declaration of " & "enum_LSQUIC_CONN_STATUS" & " already exists, not redeclaring"
+    )
 when not declared(buf):
   type buf* = object
 else:
   static:
     hint("Declaration of " & "buf" & " already exists, not redeclaring")
+when not declared(enum_lsquic_conn_param):
+  type enum_lsquic_conn_param* = object
+else:
+  static:
+    hint(
+      "Declaration of " & "enum_lsquic_conn_param" & " already exists, not redeclaring"
+    )
 when not declared(struct_lsxpack_header):
   type struct_lsxpack_header* = object
 else:
@@ -219,12 +268,26 @@ else:
     hint(
       "Declaration of " & "struct_stack_st_X509" & " already exists, not redeclaring"
     )
+when not declared(enum_lsquic_crypto_ver):
+  type enum_lsquic_crypto_ver* = object
+else:
+  static:
+    hint(
+      "Declaration of " & "enum_lsquic_crypto_ver" & " already exists, not redeclaring"
+    )
 when not declared(LSQUIC_DF_CFCW_SERVER):
   type LSQUIC_DF_CFCW_SERVER* = object
 else:
   static:
     hint(
       "Declaration of " & "LSQUIC_DF_CFCW_SERVER" & " already exists, not redeclaring"
+    )
+when not declared(enum_lsquic_hsk_status):
+  type enum_lsquic_hsk_status* = object
+else:
+  static:
+    hint(
+      "Declaration of " & "enum_lsquic_hsk_status" & " already exists, not redeclaring"
     )
 when not declared(SockAddr):
   type SockAddr* = object
@@ -237,6 +300,14 @@ else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_stream_ctx" & " already exists, not redeclaring"
+    )
+when not declared(enum_lsquic_logger_timestamp_style):
+  type enum_lsquic_logger_timestamp_style* = object
+else:
+  static:
+    hint(
+      "Declaration of " & "enum_lsquic_logger_timestamp_style" &
+        " already exists, not redeclaring"
     )
 when not declared(struct_ssl_session_st):
   type struct_ssl_session_st* = object
@@ -286,80 +357,79 @@ else:
       "Declaration of " & "LSQUIC_DF_CFCW_CLIENT" & " already exists, not redeclaring"
     )
 type
-  struct_lsquic_cid_570425806 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_cid_570425834 {.pure, inheritable, bycopy.} = object
     buf* {.align(8'i64).}: array[20'i64, uint8]
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:27:28
-    len* {.align(8'i64).}: uint_fast8_t_570425809
+    len* {.align(8'i64).}: uint_fast8_t_570425837
 
-  uint_fast8_t_570425808 = uint8 ## Generated based on /usr/include/stdint.h:60:24
-  lsquic_cid_t_570425810 = struct_lsquic_cid_570425807
+  uint_fast8_t_570425836 = uint8 ## Generated based on /usr/include/stdint.h:60:24
+  lsquic_cid_t_570425838 = struct_lsquic_cid_570425835
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:32:3
-  lsquic_stream_id_t_570425812 = uint64
+  lsquic_stream_id_t_570425840 = uint64
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:40:18
-  lsquic_engine_t_570425814 = struct_lsquic_engine
+  lsquic_engine_t_570425842 = struct_lsquic_engine
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:43:30
-  lsquic_conn_t_570425816 = struct_lsquic_conn
+  lsquic_conn_t_570425844 = struct_lsquic_conn
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:46:28
-  lsquic_conn_ctx_t_570425818 = struct_lsquic_conn_ctx
+  lsquic_conn_ctx_t_570425846 = struct_lsquic_conn_ctx
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:49:32
-  lsquic_stream_t_570425820 = struct_lsquic_stream
+  lsquic_stream_t_570425848 = struct_lsquic_stream
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:52:30
-  lsquic_stream_ctx_t_570425822 = struct_lsquic_stream_ctx
+  lsquic_stream_ctx_t_570425850 = struct_lsquic_stream_ctx
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:55:34
-  lsquic_http_headers_t_570425824 = struct_lsquic_http_headers_570425827
+  lsquic_http_headers_t_570425852 = struct_lsquic_http_headers_570425855
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic_types.h:58:36
-  struct_lsquic_http_headers_570425826 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_http_headers_570425854 {.pure, inheritable, bycopy.} = object
     count*: cint
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1743:8
     headers*: ptr struct_lsxpack_header
 
-  struct_lsquic_stream_if_570425832 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_stream_if_570425856 {.pure, inheritable, bycopy.} = object
     on_new_conn*: proc(
-      a0: pointer, a1: ptr lsquic_conn_t_570425817
-    ): ptr lsquic_conn_ctx_t_570425819 {.cdecl.}
+      a0: pointer, a1: ptr lsquic_conn_t_570425845
+    ): ptr lsquic_conn_ctx_t_570425847 {.cdecl.}
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:163:8
-    on_goaway_received*: proc(a0: ptr lsquic_conn_t_570425817): void {.cdecl.}
-    on_conn_closed*: proc(a0: ptr lsquic_conn_t_570425817): void {.cdecl.}
+    on_goaway_received*: proc(a0: ptr lsquic_conn_t_570425845): void {.cdecl.}
+    on_conn_closed*: proc(a0: ptr lsquic_conn_t_570425845): void {.cdecl.}
     on_new_stream*: proc(
-      a0: pointer, a1: ptr lsquic_stream_t_570425821
-    ): ptr lsquic_stream_ctx_t_570425823 {.cdecl.}
+      a0: pointer, a1: ptr lsquic_stream_t_570425849
+    ): ptr lsquic_stream_ctx_t_570425851 {.cdecl.}
     on_read*: proc(
-      a0: ptr lsquic_stream_t_570425821, a1: ptr lsquic_stream_ctx_t_570425823
+      a0: ptr lsquic_stream_t_570425849, a1: ptr lsquic_stream_ctx_t_570425851
     ): void {.cdecl.}
     on_write*: proc(
-      a0: ptr lsquic_stream_t_570425821, a1: ptr lsquic_stream_ctx_t_570425823
+      a0: ptr lsquic_stream_t_570425849, a1: ptr lsquic_stream_ctx_t_570425851
     ): void {.cdecl.}
     on_close*: proc(
-      a0: ptr lsquic_stream_t_570425821, a1: ptr lsquic_stream_ctx_t_570425823
+      a0: ptr lsquic_stream_t_570425849, a1: ptr lsquic_stream_ctx_t_570425851
     ): void {.cdecl.}
     on_dg_write*: proc(
-      a0: ptr lsquic_conn_t_570425817, a1: pointer, a2: csize_t
-    ): ssize_t_570425835 {.cdecl.}
+      a0: ptr lsquic_conn_t_570425845, a1: pointer, a2: csize_t
+    ): ssize_t_570425859 {.cdecl.}
     on_datagram*:
-      proc(a0: ptr lsquic_conn_t_570425817, a1: pointer, a2: csize_t): void {.cdecl.}
-    on_hsk_done*: proc(
-      a0: ptr lsquic_conn_t_570425817, a1: enum_lsquic_hsk_status_570425831
-    ): void {.cdecl.}
+      proc(a0: ptr lsquic_conn_t_570425845, a1: pointer, a2: csize_t): void {.cdecl.}
+    on_hsk_done*:
+      proc(a0: ptr lsquic_conn_t_570425845, a1: enum_lsquic_hsk_status): void {.cdecl.}
     on_new_token*:
-      proc(a0: ptr lsquic_conn_t_570425817, a1: ptr uint8, a2: csize_t): void {.cdecl.}
+      proc(a0: ptr lsquic_conn_t_570425845, a1: ptr uint8, a2: csize_t): void {.cdecl.}
     on_sess_resume_info*:
-      proc(a0: ptr lsquic_conn_t_570425817, a1: ptr uint8, a2: csize_t): void {.cdecl.}
+      proc(a0: ptr lsquic_conn_t_570425845, a1: ptr uint8, a2: csize_t): void {.cdecl.}
     on_reset*: proc(
-      a0: ptr lsquic_stream_t_570425821, a1: ptr lsquic_stream_ctx_t_570425823, a2: cint
+      a0: ptr lsquic_stream_t_570425849, a1: ptr lsquic_stream_ctx_t_570425851, a2: cint
     ): void {.cdecl.}
     on_conncloseframe_received*: proc(
-      a0: ptr lsquic_conn_t_570425817, a1: cint, a2: uint64, a3: cstring, a4: cint
+      a0: ptr lsquic_conn_t_570425845, a1: cint, a2: uint64, a3: cstring, a4: cint
     ): void {.cdecl.}
     on_hset_in*: proc(
-      a0: ptr lsquic_stream_t_570425821, a1: ptr lsquic_stream_ctx_t_570425823
+      a0: ptr lsquic_stream_t_570425849, a1: ptr lsquic_stream_ctx_t_570425851
     ): void {.cdecl.}
 
-  ssize_t_570425834 = compiler_ssize_t_570425887
+  ssize_t_570425858 = compiler_ssize_t_570425901
     ## Generated based on /usr/include/x86_64-linux-gnu/sys/types.h:108:19
-  lsquic_lookup_cert_f_570425836 =
+  lsquic_lookup_cert_f_570425860 =
     proc(a0: pointer, a1: ptr SockAddr, a2: cstring): ptr struct_ssl_ctx_st {.cdecl.}
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:260:31
-  struct_lsquic_engine_settings_570425838 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_engine_settings_570425862 {.pure, inheritable, bycopy.} = object
     es_versions*: cuint
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:487:8
     es_cfcw*: cuint
@@ -439,28 +509,28 @@ type
     es_send_verneg*: cint
     es_preferred_address*: array[24'i64, uint8]
 
-  struct_lsquic_out_spec_570425840 {.pure, inheritable, bycopy.} = object
-    iov*: ptr struct_iovec_570425843
+  struct_lsquic_out_spec_570425864 {.pure, inheritable, bycopy.} = object
+    iov*: ptr struct_iovec_570425867
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1214:8
     iovlen*: csize_t
     local_sa*: ptr SockAddr
     dest_sa*: ptr SockAddr
     peer_ctx*: pointer
-    conn_ctx*: ptr lsquic_conn_ctx_t_570425819
+    conn_ctx*: ptr lsquic_conn_ctx_t_570425847
     ecn*: cint
 
-  struct_iovec_570425842 {.pure, inheritable, bycopy.} = object
+  struct_iovec_570425866 {.pure, inheritable, bycopy.} = object
     iov_base*: pointer
       ## Generated based on /usr/include/x86_64-linux-gnu/bits/types/struct_iovec.h:26:8
     iov_len*: csize_t
 
-  lsquic_packets_out_f_570425844 = proc(
-    a0: pointer, a1: ptr struct_lsquic_out_spec_570425841, a2: cuint
+  lsquic_packets_out_f_570425868 = proc(
+    a0: pointer, a1: ptr struct_lsquic_out_spec_570425865, a2: cuint
   ): cint {.cdecl.}
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1238:15
-  struct_lsquic_shared_hash_if_570425846 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_shared_hash_if_570425870 {.pure, inheritable, bycopy.} = object
     shi_insert*: proc(
-      a0: pointer, a1: pointer, a2: cuint, a3: pointer, a4: cuint, a5: time_t_570425849
+      a0: pointer, a1: pointer, a2: cuint, a3: pointer, a4: cuint, a5: time_t_570425873
     ): cint {.cdecl.}
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1248:8
     shi_delete*: proc(a0: pointer, a1: pointer, a2: cuint): cint {.cdecl.}
@@ -468,13 +538,13 @@ type
       a0: pointer, a1: pointer, a2: cuint, a3: ptr pointer, a4: ptr cuint
     ): cint {.cdecl.}
 
-  time_t_570425848 = compiler_time_t_570425889
+  time_t_570425872 = compiler_time_t_570425903
     ## Generated based on /usr/include/x86_64-linux-gnu/bits/types/time_t.h:10:18
-  struct_lsquic_packout_mem_if_570425850 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_packout_mem_if_570425874 {.pure, inheritable, bycopy.} = object
     pmi_allocate*: proc(
       a0: pointer,
       a1: pointer,
-      a2: ptr lsquic_conn_ctx_t_570425819,
+      a2: ptr lsquic_conn_ctx_t_570425847,
       a3: cushort,
       a4: cschar,
     ): pointer {.cdecl.}
@@ -483,13 +553,13 @@ type
       proc(a0: pointer, a1: pointer, a2: pointer, a3: cschar): void {.cdecl.}
     pmi_return*: proc(a0: pointer, a1: pointer, a2: pointer, a3: cschar): void {.cdecl.}
 
-  lsquic_cids_update_f_570425852 = proc(
-    a0: pointer, a1: ptr pointer, a2: ptr lsquic_cid_t_570425811, a3: cuint
+  lsquic_cids_update_f_570425876 = proc(
+    a0: pointer, a1: ptr pointer, a2: ptr lsquic_cid_t_570425839, a3: cuint
   ): void {.cdecl.}
     ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1307:16
-  struct_lsquic_hset_if_570425856 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_hset_if_570425878 {.pure, inheritable, bycopy.} = object
     hsi_create_header_set*:
-      proc(a0: pointer, a1: ptr lsquic_stream_t_570425821, a2: cint): pointer {.cdecl.}
+      proc(a0: pointer, a1: ptr lsquic_stream_t_570425849, a2: cint): pointer {.cdecl.}
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1325:8
     hsi_prepare_decode*: proc(
       a0: pointer, a1: ptr struct_lsxpack_header, a2: csize_t
@@ -497,54 +567,54 @@ type
     hsi_process_header*:
       proc(a0: pointer, a1: ptr struct_lsxpack_header): cint {.cdecl.}
     hsi_discard_header_set*: proc(a0: pointer): void {.cdecl.}
-    hsi_flags*: enum_lsquic_hsi_flag_570425855
+    hsi_flags*: enum_lsquic_hsi_flag
 
-  struct_lsquic_engine_api_570425858 {.pure, inheritable, bycopy.} = object
-    ea_settings*: ptr struct_lsquic_engine_settings_570425839
+  struct_lsquic_engine_api_570425880 {.pure, inheritable, bycopy.} = object
+    ea_settings*: ptr struct_lsquic_engine_settings_570425863
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1398:8
-    ea_stream_if*: ptr struct_lsquic_stream_if_570425833
+    ea_stream_if*: ptr struct_lsquic_stream_if_570425857
     ea_stream_if_ctx*: pointer
-    ea_packets_out*: lsquic_packets_out_f_570425845
+    ea_packets_out*: lsquic_packets_out_f_570425869
     ea_packets_out_ctx*: pointer
-    ea_lookup_cert*: lsquic_lookup_cert_f_570425837
+    ea_lookup_cert*: lsquic_lookup_cert_f_570425861
     ea_cert_lu_ctx*: pointer
     ea_get_ssl_ctx*:
       proc(a0: pointer, a1: ptr SockAddr): ptr struct_ssl_ctx_st {.cdecl.}
-    ea_shi*: ptr struct_lsquic_shared_hash_if_570425847
+    ea_shi*: ptr struct_lsquic_shared_hash_if_570425871
     ea_shi_ctx*: pointer
-    ea_pmi*: ptr struct_lsquic_packout_mem_if_570425851
+    ea_pmi*: ptr struct_lsquic_packout_mem_if_570425875
     ea_pmi_ctx*: pointer
-    ea_new_scids*: lsquic_cids_update_f_570425853
-    ea_live_scids*: lsquic_cids_update_f_570425853
-    ea_old_scids*: lsquic_cids_update_f_570425853
+    ea_new_scids*: lsquic_cids_update_f_570425877
+    ea_live_scids*: lsquic_cids_update_f_570425877
+    ea_old_scids*: lsquic_cids_update_f_570425877
     ea_cids_update_ctx*: pointer
     ea_verify_cert*: proc(a0: pointer, a1: ptr struct_stack_st_X509): cint {.cdecl.}
     ea_verify_ctx*: pointer
-    ea_hsi_if*: ptr struct_lsquic_hset_if_570425857
+    ea_hsi_if*: ptr struct_lsquic_hset_if_570425879
     ea_hsi_ctx*: pointer
     ea_stats_fh*: pointer
     ea_alpn*: cstring
     ea_generate_scid*: proc(
-      a0: pointer, a1: ptr lsquic_conn_t_570425817, a2: ptr uint8, a3: cuint
+      a0: pointer, a1: ptr lsquic_conn_t_570425845, a2: ptr uint8, a3: cuint
     ): void {.cdecl.}
     ea_gen_scid_ctx*: pointer
 
-  struct_lsquic_reader_570425860 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_reader_570425882 {.pure, inheritable, bycopy.} = object
     lsqr_read*: proc(a0: pointer, a1: pointer, a2: csize_t): csize_t {.cdecl.}
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1702:8
     lsqr_size*: proc(a0: pointer): csize_t {.cdecl.}
     lsqr_ctx*: pointer
 
-  struct_lsquic_ext_http_prio_570425862 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_ext_http_prio_570425884 {.pure, inheritable, bycopy.} = object
     urgency*: uint8
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1900:8
     incremental*: cschar
 
-  struct_lsquic_logger_if_570425864 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_logger_if_570425886 {.pure, inheritable, bycopy.} = object
     log_buf*: proc(a0: pointer, a1: cstring, a2: csize_t): cint {.cdecl.}
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:1973:8
 
-  struct_lsquic_conn_info_570425879 {.pure, inheritable, bycopy.} = object
+  struct_lsquic_conn_info_570425895 {.pure, inheritable, bycopy.} = object
     lci_cwnd*: uint32
       ## Generated based on /home/r/vacp2p/nim-lsquic/libs/lsquic/include/lsquic.h:2197:8
     lci_pmtu*: uint32
@@ -561,13 +631,13 @@ type
     lci_max_pacing_rate*: uint64
     lci_pacing_rate*: uint64
 
-  compiler_ssize_t_570425886 = clong
+  compiler_ssize_t_570425900 = clong
     ## Generated based on /usr/include/x86_64-linux-gnu/bits/types.h:194:27
-  compiler_time_t_570425888 = clong
+  compiler_time_t_570425902 = clong
     ## Generated based on /usr/include/x86_64-linux-gnu/bits/types.h:160:26
-  struct_lsquic_reader_570425861 = (
+  struct_lsquic_reader_570425883 = (
     when declared(struct_lsquic_reader):
-      when ownSizeof(struct_lsquic_reader) != ownSizeof(struct_lsquic_reader_570425860):
+      when ownSizeof(struct_lsquic_reader) != ownSizeof(struct_lsquic_reader_570425882):
         static:
           warning(
             "Declaration of " & "struct_lsquic_reader" &
@@ -575,11 +645,11 @@ type
           )
       struct_lsquic_reader
     else:
-      struct_lsquic_reader_570425860
+      struct_lsquic_reader_570425882
   )
-  lsquic_lookup_cert_f_570425837 = (
+  lsquic_lookup_cert_f_570425861 = (
     when declared(lsquic_lookup_cert_f):
-      when ownSizeof(lsquic_lookup_cert_f) != ownSizeof(lsquic_lookup_cert_f_570425836):
+      when ownSizeof(lsquic_lookup_cert_f) != ownSizeof(lsquic_lookup_cert_f_570425860):
         static:
           warning(
             "Declaration of " & "lsquic_lookup_cert_f" &
@@ -587,12 +657,12 @@ type
           )
       lsquic_lookup_cert_f
     else:
-      lsquic_lookup_cert_f_570425836
+      lsquic_lookup_cert_f_570425860
   )
-  struct_lsquic_engine_api_570425859 = (
+  struct_lsquic_engine_api_570425881 = (
     when declared(struct_lsquic_engine_api):
       when ownSizeof(struct_lsquic_engine_api) !=
-          ownSizeof(struct_lsquic_engine_api_570425858):
+          ownSizeof(struct_lsquic_engine_api_570425880):
         static:
           warning(
             "Declaration of " & "struct_lsquic_engine_api" &
@@ -600,23 +670,23 @@ type
           )
       struct_lsquic_engine_api
     else:
-      struct_lsquic_engine_api_570425858
+      struct_lsquic_engine_api_570425880
   )
-  compiler_ssize_t_570425887 = (
+  compiler_ssize_t_570425901 = (
     when declared(compiler_ssize_t):
-      when ownSizeof(compiler_ssize_t) != ownSizeof(compiler_ssize_t_570425886):
+      when ownSizeof(compiler_ssize_t) != ownSizeof(compiler_ssize_t_570425900):
         static:
           warning(
             "Declaration of " & "compiler_ssize_t" & " exists but with different size"
           )
       compiler_ssize_t
     else:
-      compiler_ssize_t_570425886
+      compiler_ssize_t_570425900
   )
-  struct_lsquic_shared_hash_if_570425847 = (
+  struct_lsquic_shared_hash_if_570425871 = (
     when declared(struct_lsquic_shared_hash_if):
       when ownSizeof(struct_lsquic_shared_hash_if) !=
-          ownSizeof(struct_lsquic_shared_hash_if_570425846):
+          ownSizeof(struct_lsquic_shared_hash_if_570425870):
         static:
           warning(
             "Declaration of " & "struct_lsquic_shared_hash_if" &
@@ -624,23 +694,23 @@ type
           )
       struct_lsquic_shared_hash_if
     else:
-      struct_lsquic_shared_hash_if_570425846
+      struct_lsquic_shared_hash_if_570425870
   )
-  lsquic_stream_t_570425821 = (
+  lsquic_stream_t_570425849 = (
     when declared(lsquic_stream_t):
-      when ownSizeof(lsquic_stream_t) != ownSizeof(lsquic_stream_t_570425820):
+      when ownSizeof(lsquic_stream_t) != ownSizeof(lsquic_stream_t_570425848):
         static:
           warning(
             "Declaration of " & "lsquic_stream_t" & " exists but with different size"
           )
       lsquic_stream_t
     else:
-      lsquic_stream_t_570425820
+      lsquic_stream_t_570425848
   )
-  struct_lsquic_ext_http_prio_570425863 = (
+  struct_lsquic_ext_http_prio_570425885 = (
     when declared(struct_lsquic_ext_http_prio):
       when ownSizeof(struct_lsquic_ext_http_prio) !=
-          ownSizeof(struct_lsquic_ext_http_prio_570425862):
+          ownSizeof(struct_lsquic_ext_http_prio_570425884):
         static:
           warning(
             "Declaration of " & "struct_lsquic_ext_http_prio" &
@@ -648,25 +718,12 @@ type
           )
       struct_lsquic_ext_http_prio
     else:
-      struct_lsquic_ext_http_prio_570425862
+      struct_lsquic_ext_http_prio_570425884
   )
-  enum_lsquic_crypto_ver_570425876 = (
-    when declared(enum_lsquic_crypto_ver):
-      when ownSizeof(enum_lsquic_crypto_ver) !=
-          ownSizeof(enum_lsquic_crypto_ver_570425875):
-        static:
-          warning(
-            "Declaration of " & "enum_lsquic_crypto_ver" &
-              " exists but with different size"
-          )
-      enum_lsquic_crypto_ver
-    else:
-      enum_lsquic_crypto_ver_570425875
-  )
-  struct_lsquic_conn_info_570425880 = (
+  struct_lsquic_conn_info_570425896 = (
     when declared(struct_lsquic_conn_info):
       when ownSizeof(struct_lsquic_conn_info) !=
-          ownSizeof(struct_lsquic_conn_info_570425879):
+          ownSizeof(struct_lsquic_conn_info_570425895):
         static:
           warning(
             "Declaration of " & "struct_lsquic_conn_info" &
@@ -674,47 +731,34 @@ type
           )
       struct_lsquic_conn_info
     else:
-      struct_lsquic_conn_info_570425879
+      struct_lsquic_conn_info_570425895
   )
-  enum_lsquic_hsk_status_570425831 = (
-    when declared(enum_lsquic_hsk_status):
-      when ownSizeof(enum_lsquic_hsk_status) !=
-          ownSizeof(enum_lsquic_hsk_status_570425830):
-        static:
-          warning(
-            "Declaration of " & "enum_lsquic_hsk_status" &
-              " exists but with different size"
-          )
-      enum_lsquic_hsk_status
-    else:
-      enum_lsquic_hsk_status_570425830
-  )
-  struct_lsquic_cid_570425807 = (
+  struct_lsquic_cid_570425835 = (
     when declared(struct_lsquic_cid):
-      when ownSizeof(struct_lsquic_cid) != ownSizeof(struct_lsquic_cid_570425806):
+      when ownSizeof(struct_lsquic_cid) != ownSizeof(struct_lsquic_cid_570425834):
         static:
           warning(
             "Declaration of " & "struct_lsquic_cid" & " exists but with different size"
           )
       struct_lsquic_cid
     else:
-      struct_lsquic_cid_570425806
+      struct_lsquic_cid_570425834
   )
-  lsquic_stream_id_t_570425813 = (
+  lsquic_stream_id_t_570425841 = (
     when declared(lsquic_stream_id_t):
-      when ownSizeof(lsquic_stream_id_t) != ownSizeof(lsquic_stream_id_t_570425812):
+      when ownSizeof(lsquic_stream_id_t) != ownSizeof(lsquic_stream_id_t_570425840):
         static:
           warning(
             "Declaration of " & "lsquic_stream_id_t" & " exists but with different size"
           )
       lsquic_stream_id_t
     else:
-      lsquic_stream_id_t_570425812
+      lsquic_stream_id_t_570425840
   )
-  struct_lsquic_logger_if_570425865 = (
+  struct_lsquic_logger_if_570425887 = (
     when declared(struct_lsquic_logger_if):
       when ownSizeof(struct_lsquic_logger_if) !=
-          ownSizeof(struct_lsquic_logger_if_570425864):
+          ownSizeof(struct_lsquic_logger_if_570425886):
         static:
           warning(
             "Declaration of " & "struct_lsquic_logger_if" &
@@ -722,12 +766,12 @@ type
           )
       struct_lsquic_logger_if
     else:
-      struct_lsquic_logger_if_570425864
+      struct_lsquic_logger_if_570425886
   )
-  struct_lsquic_packout_mem_if_570425851 = (
+  struct_lsquic_packout_mem_if_570425875 = (
     when declared(struct_lsquic_packout_mem_if):
       when ownSizeof(struct_lsquic_packout_mem_if) !=
-          ownSizeof(struct_lsquic_packout_mem_if_570425850):
+          ownSizeof(struct_lsquic_packout_mem_if_570425874):
         static:
           warning(
             "Declaration of " & "struct_lsquic_packout_mem_if" &
@@ -735,36 +779,23 @@ type
           )
       struct_lsquic_packout_mem_if
     else:
-      struct_lsquic_packout_mem_if_570425850
+      struct_lsquic_packout_mem_if_570425874
   )
-  enum_lsquic_logger_timestamp_style_570425867 = (
-    when declared(enum_lsquic_logger_timestamp_style):
-      when ownSizeof(enum_lsquic_logger_timestamp_style) !=
-          ownSizeof(enum_lsquic_logger_timestamp_style_570425866):
-        static:
-          warning(
-            "Declaration of " & "enum_lsquic_logger_timestamp_style" &
-              " exists but with different size"
-          )
-      enum_lsquic_logger_timestamp_style
-    else:
-      enum_lsquic_logger_timestamp_style_570425866
-  )
-  lsquic_conn_t_570425817 = (
+  lsquic_conn_t_570425845 = (
     when declared(lsquic_conn_t):
-      when ownSizeof(lsquic_conn_t) != ownSizeof(lsquic_conn_t_570425816):
+      when ownSizeof(lsquic_conn_t) != ownSizeof(lsquic_conn_t_570425844):
         static:
           warning(
             "Declaration of " & "lsquic_conn_t" & " exists but with different size"
           )
       lsquic_conn_t
     else:
-      lsquic_conn_t_570425816
+      lsquic_conn_t_570425844
   )
-  struct_lsquic_http_headers_570425827 = (
+  struct_lsquic_http_headers_570425855 = (
     when declared(struct_lsquic_http_headers):
       when ownSizeof(struct_lsquic_http_headers) !=
-          ownSizeof(struct_lsquic_http_headers_570425826):
+          ownSizeof(struct_lsquic_http_headers_570425854):
         static:
           warning(
             "Declaration of " & "struct_lsquic_http_headers" &
@@ -772,57 +803,21 @@ type
           )
       struct_lsquic_http_headers
     else:
-      struct_lsquic_http_headers_570425826
+      struct_lsquic_http_headers_570425854
   )
-  enum_lsquic_version_570425829 = (
-    when declared(enum_lsquic_version):
-      when ownSizeof(enum_lsquic_version) != ownSizeof(enum_lsquic_version_570425828):
-        static:
-          warning(
-            "Declaration of " & "enum_lsquic_version" & " exists but with different size"
-          )
-      enum_lsquic_version
-    else:
-      enum_lsquic_version_570425828
-  )
-  ssize_t_570425835 = (
+  ssize_t_570425859 = (
     when declared(ssize_t):
-      when ownSizeof(ssize_t) != ownSizeof(ssize_t_570425834):
+      when ownSizeof(ssize_t) != ownSizeof(ssize_t_570425858):
         static:
           warning("Declaration of " & "ssize_t" & " exists but with different size")
       ssize_t
     else:
-      ssize_t_570425834
+      ssize_t_570425858
   )
-  enum_lsquic_hsi_flag_570425855 = (
-    when declared(enum_lsquic_hsi_flag):
-      when ownSizeof(enum_lsquic_hsi_flag) != ownSizeof(enum_lsquic_hsi_flag_570425854):
-        static:
-          warning(
-            "Declaration of " & "enum_lsquic_hsi_flag" &
-              " exists but with different size"
-          )
-      enum_lsquic_hsi_flag
-    else:
-      enum_lsquic_hsi_flag_570425854
-  )
-  enum_LSQUIC_CONN_STATUS_570425882 = (
-    when declared(enum_LSQUIC_CONN_STATUS):
-      when ownSizeof(enum_LSQUIC_CONN_STATUS) !=
-          ownSizeof(enum_LSQUIC_CONN_STATUS_570425881):
-        static:
-          warning(
-            "Declaration of " & "enum_LSQUIC_CONN_STATUS" &
-              " exists but with different size"
-          )
-      enum_LSQUIC_CONN_STATUS
-    else:
-      enum_LSQUIC_CONN_STATUS_570425881
-  )
-  struct_lsquic_engine_settings_570425839 = (
+  struct_lsquic_engine_settings_570425863 = (
     when declared(struct_lsquic_engine_settings):
       when ownSizeof(struct_lsquic_engine_settings) !=
-          ownSizeof(struct_lsquic_engine_settings_570425838):
+          ownSizeof(struct_lsquic_engine_settings_570425862):
         static:
           warning(
             "Declaration of " & "struct_lsquic_engine_settings" &
@@ -830,11 +825,11 @@ type
           )
       struct_lsquic_engine_settings
     else:
-      struct_lsquic_engine_settings_570425838
+      struct_lsquic_engine_settings_570425862
   )
-  lsquic_cids_update_f_570425853 = (
+  lsquic_cids_update_f_570425877 = (
     when declared(lsquic_cids_update_f):
-      when ownSizeof(lsquic_cids_update_f) != ownSizeof(lsquic_cids_update_f_570425852):
+      when ownSizeof(lsquic_cids_update_f) != ownSizeof(lsquic_cids_update_f_570425876):
         static:
           warning(
             "Declaration of " & "lsquic_cids_update_f" &
@@ -842,34 +837,34 @@ type
           )
       lsquic_cids_update_f
     else:
-      lsquic_cids_update_f_570425852
+      lsquic_cids_update_f_570425876
   )
-  compiler_time_t_570425889 = (
+  compiler_time_t_570425903 = (
     when declared(compiler_time_t):
-      when ownSizeof(compiler_time_t) != ownSizeof(compiler_time_t_570425888):
+      when ownSizeof(compiler_time_t) != ownSizeof(compiler_time_t_570425902):
         static:
           warning(
             "Declaration of " & "compiler_time_t" & " exists but with different size"
           )
       compiler_time_t
     else:
-      compiler_time_t_570425888
+      compiler_time_t_570425902
   )
-  lsquic_conn_ctx_t_570425819 = (
+  lsquic_conn_ctx_t_570425847 = (
     when declared(lsquic_conn_ctx_t):
-      when ownSizeof(lsquic_conn_ctx_t) != ownSizeof(lsquic_conn_ctx_t_570425818):
+      when ownSizeof(lsquic_conn_ctx_t) != ownSizeof(lsquic_conn_ctx_t_570425846):
         static:
           warning(
             "Declaration of " & "lsquic_conn_ctx_t" & " exists but with different size"
           )
       lsquic_conn_ctx_t
     else:
-      lsquic_conn_ctx_t_570425818
+      lsquic_conn_ctx_t_570425846
   )
-  struct_lsquic_stream_if_570425833 = (
+  struct_lsquic_stream_if_570425857 = (
     when declared(struct_lsquic_stream_if):
       when ownSizeof(struct_lsquic_stream_if) !=
-          ownSizeof(struct_lsquic_stream_if_570425832):
+          ownSizeof(struct_lsquic_stream_if_570425856):
         static:
           warning(
             "Declaration of " & "struct_lsquic_stream_if" &
@@ -877,12 +872,12 @@ type
           )
       struct_lsquic_stream_if
     else:
-      struct_lsquic_stream_if_570425832
+      struct_lsquic_stream_if_570425856
   )
-  struct_lsquic_hset_if_570425857 = (
+  struct_lsquic_hset_if_570425879 = (
     when declared(struct_lsquic_hset_if):
       when ownSizeof(struct_lsquic_hset_if) != ownSizeof(
-        struct_lsquic_hset_if_570425856
+        struct_lsquic_hset_if_570425878
       ):
         static:
           warning(
@@ -891,56 +886,56 @@ type
           )
       struct_lsquic_hset_if
     else:
-      struct_lsquic_hset_if_570425856
+      struct_lsquic_hset_if_570425878
   )
-  struct_iovec_570425843 = (
+  struct_iovec_570425867 = (
     when declared(struct_iovec):
-      when ownSizeof(struct_iovec) != ownSizeof(struct_iovec_570425842):
+      when ownSizeof(struct_iovec) != ownSizeof(struct_iovec_570425866):
         static:
           warning(
             "Declaration of " & "struct_iovec" & " exists but with different size"
           )
       struct_iovec
     else:
-      struct_iovec_570425842
+      struct_iovec_570425866
   )
-  lsquic_stream_ctx_t_570425823 = (
+  lsquic_stream_ctx_t_570425851 = (
     when declared(lsquic_stream_ctx_t):
-      when ownSizeof(lsquic_stream_ctx_t) != ownSizeof(lsquic_stream_ctx_t_570425822):
+      when ownSizeof(lsquic_stream_ctx_t) != ownSizeof(lsquic_stream_ctx_t_570425850):
         static:
           warning(
             "Declaration of " & "lsquic_stream_ctx_t" & " exists but with different size"
           )
       lsquic_stream_ctx_t
     else:
-      lsquic_stream_ctx_t_570425822
+      lsquic_stream_ctx_t_570425850
   )
-  lsquic_cid_t_570425811 = (
+  lsquic_cid_t_570425839 = (
     when declared(lsquic_cid_t):
-      when ownSizeof(lsquic_cid_t) != ownSizeof(lsquic_cid_t_570425810):
+      when ownSizeof(lsquic_cid_t) != ownSizeof(lsquic_cid_t_570425838):
         static:
           warning(
             "Declaration of " & "lsquic_cid_t" & " exists but with different size"
           )
       lsquic_cid_t
     else:
-      lsquic_cid_t_570425810
+      lsquic_cid_t_570425838
   )
-  uint_fast8_t_570425809 = (
+  uint_fast8_t_570425837 = (
     when declared(uint_fast8_t):
-      when ownSizeof(uint_fast8_t) != ownSizeof(uint_fast8_t_570425808):
+      when ownSizeof(uint_fast8_t) != ownSizeof(uint_fast8_t_570425836):
         static:
           warning(
             "Declaration of " & "uint_fast8_t" & " exists but with different size"
           )
       uint_fast8_t
     else:
-      uint_fast8_t_570425808
+      uint_fast8_t_570425836
   )
-  struct_lsquic_out_spec_570425841 = (
+  struct_lsquic_out_spec_570425865 = (
     when declared(struct_lsquic_out_spec):
       when ownSizeof(struct_lsquic_out_spec) !=
-          ownSizeof(struct_lsquic_out_spec_570425840):
+          ownSizeof(struct_lsquic_out_spec_570425864):
         static:
           warning(
             "Declaration of " & "struct_lsquic_out_spec" &
@@ -948,45 +943,32 @@ type
           )
       struct_lsquic_out_spec
     else:
-      struct_lsquic_out_spec_570425840
+      struct_lsquic_out_spec_570425864
   )
-  lsquic_engine_t_570425815 = (
+  lsquic_engine_t_570425843 = (
     when declared(lsquic_engine_t):
-      when ownSizeof(lsquic_engine_t) != ownSizeof(lsquic_engine_t_570425814):
+      when ownSizeof(lsquic_engine_t) != ownSizeof(lsquic_engine_t_570425842):
         static:
           warning(
             "Declaration of " & "lsquic_engine_t" & " exists but with different size"
           )
       lsquic_engine_t
     else:
-      lsquic_engine_t_570425814
+      lsquic_engine_t_570425842
   )
-  time_t_570425849 = (
+  time_t_570425873 = (
     when declared(time_t):
-      when ownSizeof(time_t) != ownSizeof(time_t_570425848):
+      when ownSizeof(time_t) != ownSizeof(time_t_570425872):
         static:
           warning("Declaration of " & "time_t" & " exists but with different size")
       time_t
     else:
-      time_t_570425848
+      time_t_570425872
   )
-  enum_lsquic_conn_param_570425878 = (
-    when declared(enum_lsquic_conn_param):
-      when ownSizeof(enum_lsquic_conn_param) !=
-          ownSizeof(enum_lsquic_conn_param_570425877):
-        static:
-          warning(
-            "Declaration of " & "enum_lsquic_conn_param" &
-              " exists but with different size"
-          )
-      enum_lsquic_conn_param
-    else:
-      enum_lsquic_conn_param_570425877
-  )
-  lsquic_http_headers_t_570425825 = (
+  lsquic_http_headers_t_570425853 = (
     when declared(lsquic_http_headers_t):
       when ownSizeof(lsquic_http_headers_t) != ownSizeof(
-        lsquic_http_headers_t_570425824
+        lsquic_http_headers_t_570425852
       ):
         static:
           warning(
@@ -995,11 +977,11 @@ type
           )
       lsquic_http_headers_t
     else:
-      lsquic_http_headers_t_570425824
+      lsquic_http_headers_t_570425852
   )
-  lsquic_packets_out_f_570425845 = (
+  lsquic_packets_out_f_570425869 = (
     when declared(lsquic_packets_out_f):
-      when ownSizeof(lsquic_packets_out_f) != ownSizeof(lsquic_packets_out_f_570425844):
+      when ownSizeof(lsquic_packets_out_f) != ownSizeof(lsquic_packets_out_f_570425868):
         static:
           warning(
             "Declaration of " & "lsquic_packets_out_f" &
@@ -1007,37 +989,37 @@ type
           )
       lsquic_packets_out_f
     else:
-      lsquic_packets_out_f_570425844
+      lsquic_packets_out_f_570425868
   )
 
 when not declared(struct_lsquic_reader):
-  type struct_lsquic_reader* = struct_lsquic_reader_570425860
+  type struct_lsquic_reader* = struct_lsquic_reader_570425882
 else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_reader" & " already exists, not redeclaring"
     )
 when not declared(lsquic_lookup_cert_f):
-  type lsquic_lookup_cert_f* = lsquic_lookup_cert_f_570425836
+  type lsquic_lookup_cert_f* = lsquic_lookup_cert_f_570425860
 else:
   static:
     hint(
       "Declaration of " & "lsquic_lookup_cert_f" & " already exists, not redeclaring"
     )
 when not declared(struct_lsquic_engine_api):
-  type struct_lsquic_engine_api* = struct_lsquic_engine_api_570425858
+  type struct_lsquic_engine_api* = struct_lsquic_engine_api_570425880
 else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_engine_api" & " already exists, not redeclaring"
     )
 when not declared(compiler_ssize_t):
-  type compiler_ssize_t* = compiler_ssize_t_570425886
+  type compiler_ssize_t* = compiler_ssize_t_570425900
 else:
   static:
     hint("Declaration of " & "compiler_ssize_t" & " already exists, not redeclaring")
 when not declared(struct_lsquic_shared_hash_if):
-  type struct_lsquic_shared_hash_if* = struct_lsquic_shared_hash_if_570425846
+  type struct_lsquic_shared_hash_if* = struct_lsquic_shared_hash_if_570425870
 else:
   static:
     hint(
@@ -1045,113 +1027,70 @@ else:
         " already exists, not redeclaring"
     )
 when not declared(lsquic_stream_t):
-  type lsquic_stream_t* = lsquic_stream_t_570425820
+  type lsquic_stream_t* = lsquic_stream_t_570425848
 else:
   static:
     hint("Declaration of " & "lsquic_stream_t" & " already exists, not redeclaring")
 when not declared(struct_lsquic_ext_http_prio):
-  type struct_lsquic_ext_http_prio* = struct_lsquic_ext_http_prio_570425862
+  type struct_lsquic_ext_http_prio* = struct_lsquic_ext_http_prio_570425884
 else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_ext_http_prio" &
         " already exists, not redeclaring"
     )
-when not declared(enum_lsquic_crypto_ver):
-  type enum_lsquic_crypto_ver* = enum_lsquic_crypto_ver_570425875
-else:
-  static:
-    hint(
-      "Declaration of " & "enum_lsquic_crypto_ver" & " already exists, not redeclaring"
-    )
 when not declared(struct_lsquic_conn_info):
-  type struct_lsquic_conn_info* = struct_lsquic_conn_info_570425879
+  type struct_lsquic_conn_info* = struct_lsquic_conn_info_570425895
 else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_conn_info" & " already exists, not redeclaring"
     )
-when not declared(enum_lsquic_hsk_status):
-  type enum_lsquic_hsk_status* = enum_lsquic_hsk_status_570425830
-else:
-  static:
-    hint(
-      "Declaration of " & "enum_lsquic_hsk_status" & " already exists, not redeclaring"
-    )
 when not declared(struct_lsquic_cid):
-  type struct_lsquic_cid* = struct_lsquic_cid_570425806
+  type struct_lsquic_cid* = struct_lsquic_cid_570425834
 else:
   static:
     hint("Declaration of " & "struct_lsquic_cid" & " already exists, not redeclaring")
 when not declared(lsquic_stream_id_t):
-  type lsquic_stream_id_t* = lsquic_stream_id_t_570425812
+  type lsquic_stream_id_t* = lsquic_stream_id_t_570425840
 else:
   static:
     hint("Declaration of " & "lsquic_stream_id_t" & " already exists, not redeclaring")
 when not declared(struct_lsquic_logger_if):
-  type struct_lsquic_logger_if* = struct_lsquic_logger_if_570425864
+  type struct_lsquic_logger_if* = struct_lsquic_logger_if_570425886
 else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_logger_if" & " already exists, not redeclaring"
     )
 when not declared(struct_lsquic_packout_mem_if):
-  type struct_lsquic_packout_mem_if* = struct_lsquic_packout_mem_if_570425850
+  type struct_lsquic_packout_mem_if* = struct_lsquic_packout_mem_if_570425874
 else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_packout_mem_if" &
         " already exists, not redeclaring"
     )
-when not declared(enum_lsquic_logger_timestamp_style):
-  type enum_lsquic_logger_timestamp_style* =
-    enum_lsquic_logger_timestamp_style_570425866
-
-else:
-  static:
-    hint(
-      "Declaration of " & "enum_lsquic_logger_timestamp_style" &
-        " already exists, not redeclaring"
-    )
 when not declared(lsquic_conn_t):
-  type lsquic_conn_t* = lsquic_conn_t_570425816
+  type lsquic_conn_t* = lsquic_conn_t_570425844
 else:
   static:
     hint("Declaration of " & "lsquic_conn_t" & " already exists, not redeclaring")
 when not declared(struct_lsquic_http_headers):
-  type struct_lsquic_http_headers* = struct_lsquic_http_headers_570425826
+  type struct_lsquic_http_headers* = struct_lsquic_http_headers_570425854
 else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_http_headers" &
         " already exists, not redeclaring"
     )
-when not declared(enum_lsquic_version):
-  type enum_lsquic_version* = enum_lsquic_version_570425828
-else:
-  static:
-    hint("Declaration of " & "enum_lsquic_version" & " already exists, not redeclaring")
 when not declared(ssize_t):
-  type ssize_t* = ssize_t_570425834
+  type ssize_t* = ssize_t_570425858
 else:
   static:
     hint("Declaration of " & "ssize_t" & " already exists, not redeclaring")
-when not declared(enum_lsquic_hsi_flag):
-  type enum_lsquic_hsi_flag* = enum_lsquic_hsi_flag_570425854
-else:
-  static:
-    hint(
-      "Declaration of " & "enum_lsquic_hsi_flag" & " already exists, not redeclaring"
-    )
-when not declared(enum_LSQUIC_CONN_STATUS):
-  type enum_LSQUIC_CONN_STATUS* = enum_LSQUIC_CONN_STATUS_570425881
-else:
-  static:
-    hint(
-      "Declaration of " & "enum_LSQUIC_CONN_STATUS" & " already exists, not redeclaring"
-    )
 when not declared(struct_lsquic_engine_settings):
-  type struct_lsquic_engine_settings* = struct_lsquic_engine_settings_570425838
+  type struct_lsquic_engine_settings* = struct_lsquic_engine_settings_570425862
 else:
   static:
     hint(
@@ -1159,89 +1098,82 @@ else:
         " already exists, not redeclaring"
     )
 when not declared(lsquic_cids_update_f):
-  type lsquic_cids_update_f* = lsquic_cids_update_f_570425852
+  type lsquic_cids_update_f* = lsquic_cids_update_f_570425876
 else:
   static:
     hint(
       "Declaration of " & "lsquic_cids_update_f" & " already exists, not redeclaring"
     )
 when not declared(compiler_time_t):
-  type compiler_time_t* = compiler_time_t_570425888
+  type compiler_time_t* = compiler_time_t_570425902
 else:
   static:
     hint("Declaration of " & "compiler_time_t" & " already exists, not redeclaring")
 when not declared(lsquic_conn_ctx_t):
-  type lsquic_conn_ctx_t* = lsquic_conn_ctx_t_570425818
+  type lsquic_conn_ctx_t* = lsquic_conn_ctx_t_570425846
 else:
   static:
     hint("Declaration of " & "lsquic_conn_ctx_t" & " already exists, not redeclaring")
 when not declared(struct_lsquic_stream_if):
-  type struct_lsquic_stream_if* = struct_lsquic_stream_if_570425832
+  type struct_lsquic_stream_if* = struct_lsquic_stream_if_570425856
 else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_stream_if" & " already exists, not redeclaring"
     )
 when not declared(struct_lsquic_hset_if):
-  type struct_lsquic_hset_if* = struct_lsquic_hset_if_570425856
+  type struct_lsquic_hset_if* = struct_lsquic_hset_if_570425878
 else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_hset_if" & " already exists, not redeclaring"
     )
 when not declared(struct_iovec):
-  type struct_iovec* = struct_iovec_570425842
+  type struct_iovec* = struct_iovec_570425866
 else:
   static:
     hint("Declaration of " & "struct_iovec" & " already exists, not redeclaring")
 when not declared(lsquic_stream_ctx_t):
-  type lsquic_stream_ctx_t* = lsquic_stream_ctx_t_570425822
+  type lsquic_stream_ctx_t* = lsquic_stream_ctx_t_570425850
 else:
   static:
     hint("Declaration of " & "lsquic_stream_ctx_t" & " already exists, not redeclaring")
 when not declared(lsquic_cid_t):
-  type lsquic_cid_t* = lsquic_cid_t_570425810
+  type lsquic_cid_t* = lsquic_cid_t_570425838
 else:
   static:
     hint("Declaration of " & "lsquic_cid_t" & " already exists, not redeclaring")
 when not declared(uint_fast8_t):
-  type uint_fast8_t* = uint_fast8_t_570425808
+  type uint_fast8_t* = uint_fast8_t_570425836
 else:
   static:
     hint("Declaration of " & "uint_fast8_t" & " already exists, not redeclaring")
 when not declared(struct_lsquic_out_spec):
-  type struct_lsquic_out_spec* = struct_lsquic_out_spec_570425840
+  type struct_lsquic_out_spec* = struct_lsquic_out_spec_570425864
 else:
   static:
     hint(
       "Declaration of " & "struct_lsquic_out_spec" & " already exists, not redeclaring"
     )
 when not declared(lsquic_engine_t):
-  type lsquic_engine_t* = lsquic_engine_t_570425814
+  type lsquic_engine_t* = lsquic_engine_t_570425842
 else:
   static:
     hint("Declaration of " & "lsquic_engine_t" & " already exists, not redeclaring")
 when not declared(time_t):
-  type time_t* = time_t_570425848
+  type time_t* = time_t_570425872
 else:
   static:
     hint("Declaration of " & "time_t" & " already exists, not redeclaring")
-when not declared(enum_lsquic_conn_param):
-  type enum_lsquic_conn_param* = enum_lsquic_conn_param_570425877
-else:
-  static:
-    hint(
-      "Declaration of " & "enum_lsquic_conn_param" & " already exists, not redeclaring"
-    )
 when not declared(lsquic_http_headers_t):
-  type lsquic_http_headers_t* = lsquic_http_headers_t_570425824
+  type lsquic_http_headers_t* = lsquic_http_headers_t_570425852
 else:
   static:
     hint(
       "Declaration of " & "lsquic_http_headers_t" & " already exists, not redeclaring"
     )
 when not declared(lsquic_packets_out_f):
-  type lsquic_packets_out_f* = lsquic_packets_out_f_570425844
+  type lsquic_packets_out_f* = lsquic_packets_out_f_570425868
 else:
   static:
     hint(
@@ -2234,7 +2166,7 @@ else:
     )
 when not declared(lsquic_engine_init_settings):
   proc lsquic_engine_init_settings*(
-    a0: ptr struct_lsquic_engine_settings_570425839, lsquic_engine_flags: cuint
+    a0: ptr struct_lsquic_engine_settings_570425863, lsquic_engine_flags: cuint
   ): void {.cdecl, importc: "lsquic_engine_init_settings".}
 
 else:
@@ -2245,7 +2177,7 @@ else:
     )
 when not declared(lsquic_engine_check_settings):
   proc lsquic_engine_check_settings*(
-    settings: ptr struct_lsquic_engine_settings_570425839,
+    settings: ptr struct_lsquic_engine_settings_570425863,
     lsquic_engine_flags: cuint,
     err_buf: cstring,
     err_buf_sz: csize_t,
@@ -2259,7 +2191,7 @@ else:
     )
 when not declared(lsquic_engine_get_conns_count):
   proc lsquic_engine_get_conns_count*(
-    engine: ptr lsquic_engine_t_570425815
+    engine: ptr lsquic_engine_t_570425843
   ): cuint {.cdecl, importc: "lsquic_engine_get_conns_count".}
 
 else:
@@ -2270,27 +2202,27 @@ else:
     )
 when not declared(lsquic_engine_new):
   proc lsquic_engine_new*(
-    lsquic_engine_flags: cuint, api: ptr struct_lsquic_engine_api_570425859
-  ): ptr lsquic_engine_t_570425815 {.cdecl, importc: "lsquic_engine_new".}
+    lsquic_engine_flags: cuint, api: ptr struct_lsquic_engine_api_570425881
+  ): ptr lsquic_engine_t_570425843 {.cdecl, importc: "lsquic_engine_new".}
 
 else:
   static:
     hint("Declaration of " & "lsquic_engine_new" & " already exists, not redeclaring")
 when not declared(lsquic_engine_connect):
   proc lsquic_engine_connect*(
-    a0: ptr lsquic_engine_t_570425815,
-    a1: enum_lsquic_version_570425829,
+    a0: ptr lsquic_engine_t_570425843,
+    a1: enum_lsquic_version,
     local_sa: ptr SockAddr,
     peer_sa: ptr SockAddr,
     peer_ctx: pointer,
-    conn_ctx: ptr lsquic_conn_ctx_t_570425819,
+    conn_ctx: ptr lsquic_conn_ctx_t_570425847,
     hostname: cstring,
     base_plpmtu: cushort,
     sess_resume: ptr uint8,
     sess_resume_len: csize_t,
     token: ptr uint8,
     token_sz: csize_t,
-  ): ptr lsquic_conn_t_570425817 {.cdecl, importc: "lsquic_engine_connect".}
+  ): ptr lsquic_conn_t_570425845 {.cdecl, importc: "lsquic_engine_connect".}
 
 else:
   static:
@@ -2299,7 +2231,7 @@ else:
     )
 when not declared(lsquic_engine_packet_in):
   proc lsquic_engine_packet_in*(
-    a0: ptr lsquic_engine_t_570425815,
+    a0: ptr lsquic_engine_t_570425843,
     packet_in_data: ptr uint8,
     packet_in_size: csize_t,
     sa_local: ptr SockAddr,
@@ -2315,7 +2247,7 @@ else:
     )
 when not declared(lsquic_engine_process_conns):
   proc lsquic_engine_process_conns*(
-    engine: ptr lsquic_engine_t_570425815
+    engine: ptr lsquic_engine_t_570425843
   ): void {.cdecl, importc: "lsquic_engine_process_conns".}
 
 else:
@@ -2326,7 +2258,7 @@ else:
     )
 when not declared(lsquic_engine_has_unsent_packets):
   proc lsquic_engine_has_unsent_packets*(
-    engine: ptr lsquic_engine_t_570425815
+    engine: ptr lsquic_engine_t_570425843
   ): cint {.cdecl, importc: "lsquic_engine_has_unsent_packets".}
 
 else:
@@ -2337,7 +2269,7 @@ else:
     )
 when not declared(lsquic_engine_send_unsent_packets):
   proc lsquic_engine_send_unsent_packets*(
-    engine: ptr lsquic_engine_t_570425815
+    engine: ptr lsquic_engine_t_570425843
   ): void {.cdecl, importc: "lsquic_engine_send_unsent_packets".}
 
 else:
@@ -2348,7 +2280,7 @@ else:
     )
 when not declared(lsquic_engine_destroy):
   proc lsquic_engine_destroy*(
-    a0: ptr lsquic_engine_t_570425815
+    a0: ptr lsquic_engine_t_570425843
   ): void {.cdecl, importc: "lsquic_engine_destroy".}
 
 else:
@@ -2358,7 +2290,7 @@ else:
     )
 when not declared(lsquic_conn_n_avail_streams):
   proc lsquic_conn_n_avail_streams*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): cuint {.cdecl, importc: "lsquic_conn_n_avail_streams".}
 
 else:
@@ -2369,7 +2301,7 @@ else:
     )
 when not declared(lsquic_conn_make_stream):
   proc lsquic_conn_make_stream*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): void {.cdecl, importc: "lsquic_conn_make_stream".}
 
 else:
@@ -2379,7 +2311,7 @@ else:
     )
 when not declared(lsquic_conn_n_pending_streams):
   proc lsquic_conn_n_pending_streams*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): cuint {.cdecl, importc: "lsquic_conn_n_pending_streams".}
 
 else:
@@ -2390,7 +2322,7 @@ else:
     )
 when not declared(lsquic_conn_cancel_pending_streams):
   proc lsquic_conn_cancel_pending_streams*(
-    a0: ptr lsquic_conn_t_570425817, n: cuint
+    a0: ptr lsquic_conn_t_570425845, n: cuint
   ): cuint {.cdecl, importc: "lsquic_conn_cancel_pending_streams".}
 
 else:
@@ -2401,7 +2333,7 @@ else:
     )
 when not declared(lsquic_conn_going_away):
   proc lsquic_conn_going_away*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): void {.cdecl, importc: "lsquic_conn_going_away".}
 
 else:
@@ -2411,7 +2343,7 @@ else:
     )
 when not declared(lsquic_conn_close):
   proc lsquic_conn_close*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): void {.cdecl, importc: "lsquic_conn_close".}
 
 else:
@@ -2419,7 +2351,7 @@ else:
     hint("Declaration of " & "lsquic_conn_close" & " already exists, not redeclaring")
 when not declared(lsquic_stream_wantread):
   proc lsquic_stream_wantread*(
-    s: ptr lsquic_stream_t_570425821, is_want: cint
+    s: ptr lsquic_stream_t_570425849, is_want: cint
   ): cint {.cdecl, importc: "lsquic_stream_wantread".}
 
 else:
@@ -2429,33 +2361,33 @@ else:
     )
 when not declared(lsquic_stream_read):
   proc lsquic_stream_read*(
-    s: ptr lsquic_stream_t_570425821, buf: pointer, len: csize_t
-  ): ssize_t_570425835 {.cdecl, importc: "lsquic_stream_read".}
+    s: ptr lsquic_stream_t_570425849, buf: pointer, len: csize_t
+  ): ssize_t_570425859 {.cdecl, importc: "lsquic_stream_read".}
 
 else:
   static:
     hint("Declaration of " & "lsquic_stream_read" & " already exists, not redeclaring")
 when not declared(lsquic_stream_readv):
   proc lsquic_stream_readv*(
-    s: ptr lsquic_stream_t_570425821, vec: ptr struct_iovec_570425843, iovcnt: cint
-  ): ssize_t_570425835 {.cdecl, importc: "lsquic_stream_readv".}
+    s: ptr lsquic_stream_t_570425849, vec: ptr struct_iovec_570425867, iovcnt: cint
+  ): ssize_t_570425859 {.cdecl, importc: "lsquic_stream_readv".}
 
 else:
   static:
     hint("Declaration of " & "lsquic_stream_readv" & " already exists, not redeclaring")
 when not declared(lsquic_stream_readf):
   proc lsquic_stream_readf*(
-    s: ptr lsquic_stream_t_570425821,
+    s: ptr lsquic_stream_t_570425849,
     readf: proc(a0: pointer, a1: ptr uint8, a2: csize_t, a3: cint): csize_t {.cdecl.},
     ctx: pointer,
-  ): ssize_t_570425835 {.cdecl, importc: "lsquic_stream_readf".}
+  ): ssize_t_570425859 {.cdecl, importc: "lsquic_stream_readf".}
 
 else:
   static:
     hint("Declaration of " & "lsquic_stream_readf" & " already exists, not redeclaring")
 when not declared(lsquic_stream_wantwrite):
   proc lsquic_stream_wantwrite*(
-    s: ptr lsquic_stream_t_570425821, is_want: cint
+    s: ptr lsquic_stream_t_570425849, is_want: cint
   ): cint {.cdecl, importc: "lsquic_stream_wantwrite".}
 
 else:
@@ -2465,16 +2397,16 @@ else:
     )
 when not declared(lsquic_stream_write):
   proc lsquic_stream_write*(
-    s: ptr lsquic_stream_t_570425821, buf: pointer, len: csize_t
-  ): ssize_t_570425835 {.cdecl, importc: "lsquic_stream_write".}
+    s: ptr lsquic_stream_t_570425849, buf: pointer, len: csize_t
+  ): ssize_t_570425859 {.cdecl, importc: "lsquic_stream_write".}
 
 else:
   static:
     hint("Declaration of " & "lsquic_stream_write" & " already exists, not redeclaring")
 when not declared(lsquic_stream_writev):
   proc lsquic_stream_writev*(
-    s: ptr lsquic_stream_t_570425821, vec: ptr struct_iovec_570425843, count: cint
-  ): ssize_t_570425835 {.cdecl, importc: "lsquic_stream_writev".}
+    s: ptr lsquic_stream_t_570425849, vec: ptr struct_iovec_570425867, count: cint
+  ): ssize_t_570425859 {.cdecl, importc: "lsquic_stream_writev".}
 
 else:
   static:
@@ -2483,13 +2415,13 @@ else:
     )
 when not declared(lsquic_stream_pwritev):
   proc lsquic_stream_pwritev*(
-    s: ptr lsquic_stream_t_570425821,
+    s: ptr lsquic_stream_t_570425849,
     preadv: proc(
-      a0: pointer, a1: ptr struct_iovec_570425843, a2: cint
-    ): ssize_t_570425835 {.cdecl.},
+      a0: pointer, a1: ptr struct_iovec_570425867, a2: cint
+    ): ssize_t_570425859 {.cdecl.},
     user_data: pointer,
     n_to_write: csize_t,
-  ): ssize_t_570425835 {.cdecl, importc: "lsquic_stream_pwritev".}
+  ): ssize_t_570425859 {.cdecl, importc: "lsquic_stream_pwritev".}
 
 else:
   static:
@@ -2498,8 +2430,8 @@ else:
     )
 when not declared(lsquic_stream_writef):
   proc lsquic_stream_writef*(
-    a0: ptr lsquic_stream_t_570425821, a1: ptr struct_lsquic_reader_570425861
-  ): ssize_t_570425835 {.cdecl, importc: "lsquic_stream_writef".}
+    a0: ptr lsquic_stream_t_570425849, a1: ptr struct_lsquic_reader_570425883
+  ): ssize_t_570425859 {.cdecl, importc: "lsquic_stream_writef".}
 
 else:
   static:
@@ -2508,7 +2440,7 @@ else:
     )
 when not declared(lsquic_stream_flush):
   proc lsquic_stream_flush*(
-    s: ptr lsquic_stream_t_570425821
+    s: ptr lsquic_stream_t_570425849
   ): cint {.cdecl, importc: "lsquic_stream_flush".}
 
 else:
@@ -2516,8 +2448,8 @@ else:
     hint("Declaration of " & "lsquic_stream_flush" & " already exists, not redeclaring")
 when not declared(lsquic_stream_send_headers):
   proc lsquic_stream_send_headers*(
-    s: ptr lsquic_stream_t_570425821,
-    headers: ptr lsquic_http_headers_t_570425825,
+    s: ptr lsquic_stream_t_570425849,
+    headers: ptr lsquic_http_headers_t_570425853,
     eos: cint,
   ): cint {.cdecl, importc: "lsquic_stream_send_headers".}
 
@@ -2529,7 +2461,7 @@ else:
     )
 when not declared(lsquic_stream_get_hset):
   proc lsquic_stream_get_hset*(
-    a0: ptr lsquic_stream_t_570425821
+    a0: ptr lsquic_stream_t_570425849
   ): pointer {.cdecl, importc: "lsquic_stream_get_hset".}
 
 else:
@@ -2539,10 +2471,10 @@ else:
     )
 when not declared(lsquic_conn_push_stream):
   proc lsquic_conn_push_stream*(
-    c: ptr lsquic_conn_t_570425817,
+    c: ptr lsquic_conn_t_570425845,
     hdr_set: pointer,
-    s: ptr lsquic_stream_t_570425821,
-    headers: ptr lsquic_http_headers_t_570425825,
+    s: ptr lsquic_stream_t_570425849,
+    headers: ptr lsquic_http_headers_t_570425853,
   ): cint {.cdecl, importc: "lsquic_conn_push_stream".}
 
 else:
@@ -2552,7 +2484,7 @@ else:
     )
 when not declared(lsquic_conn_is_push_enabled):
   proc lsquic_conn_is_push_enabled*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): cint {.cdecl, importc: "lsquic_conn_is_push_enabled".}
 
 else:
@@ -2563,7 +2495,7 @@ else:
     )
 when not declared(lsquic_stream_shutdown):
   proc lsquic_stream_shutdown*(
-    s: ptr lsquic_stream_t_570425821, how: cint
+    s: ptr lsquic_stream_t_570425849, how: cint
   ): cint {.cdecl, importc: "lsquic_stream_shutdown".}
 
 else:
@@ -2573,7 +2505,7 @@ else:
     )
 when not declared(lsquic_stream_close):
   proc lsquic_stream_close*(
-    s: ptr lsquic_stream_t_570425821
+    s: ptr lsquic_stream_t_570425849
   ): cint {.cdecl, importc: "lsquic_stream_close".}
 
 else:
@@ -2581,7 +2513,7 @@ else:
     hint("Declaration of " & "lsquic_stream_close" & " already exists, not redeclaring")
 when not declared(lsquic_stream_has_unacked_data):
   proc lsquic_stream_has_unacked_data*(
-    s: ptr lsquic_stream_t_570425821
+    s: ptr lsquic_stream_t_570425849
   ): cint {.cdecl, importc: "lsquic_stream_has_unacked_data".}
 
 else:
@@ -2592,7 +2524,7 @@ else:
     )
 when not declared(lsquic_conn_get_server_cert_chain):
   proc lsquic_conn_get_server_cert_chain*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): ptr struct_stack_st_X509 {.cdecl, importc: "lsquic_conn_get_server_cert_chain".}
 
 else:
@@ -2603,7 +2535,7 @@ else:
     )
 when not declared(lsquic_conn_get_full_cert_chain):
   proc lsquic_conn_get_full_cert_chain*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): ptr struct_stack_st_X509 {.cdecl, importc: "lsquic_conn_get_full_cert_chain".}
 
 else:
@@ -2614,16 +2546,16 @@ else:
     )
 when not declared(lsquic_stream_id):
   proc lsquic_stream_id*(
-    s: ptr lsquic_stream_t_570425821
-  ): lsquic_stream_id_t_570425813 {.cdecl, importc: "lsquic_stream_id".}
+    s: ptr lsquic_stream_t_570425849
+  ): lsquic_stream_id_t_570425841 {.cdecl, importc: "lsquic_stream_id".}
 
 else:
   static:
     hint("Declaration of " & "lsquic_stream_id" & " already exists, not redeclaring")
 when not declared(lsquic_stream_get_ctx):
   proc lsquic_stream_get_ctx*(
-    s: ptr lsquic_stream_t_570425821
-  ): ptr lsquic_stream_ctx_t_570425823 {.cdecl, importc: "lsquic_stream_get_ctx".}
+    s: ptr lsquic_stream_t_570425849
+  ): ptr lsquic_stream_ctx_t_570425851 {.cdecl, importc: "lsquic_stream_get_ctx".}
 
 else:
   static:
@@ -2632,7 +2564,7 @@ else:
     )
 when not declared(lsquic_stream_set_ctx):
   proc lsquic_stream_set_ctx*(
-    stream: ptr lsquic_stream_t_570425821, ctx: ptr lsquic_stream_ctx_t_570425823
+    stream: ptr lsquic_stream_t_570425849, ctx: ptr lsquic_stream_ctx_t_570425851
   ): void {.cdecl, importc: "lsquic_stream_set_ctx".}
 
 else:
@@ -2642,7 +2574,7 @@ else:
     )
 when not declared(lsquic_stream_is_pushed):
   proc lsquic_stream_is_pushed*(
-    s: ptr lsquic_stream_t_570425821
+    s: ptr lsquic_stream_t_570425849
   ): cint {.cdecl, importc: "lsquic_stream_is_pushed".}
 
 else:
@@ -2652,7 +2584,7 @@ else:
     )
 when not declared(lsquic_stream_is_rejected):
   proc lsquic_stream_is_rejected*(
-    s: ptr lsquic_stream_t_570425821
+    s: ptr lsquic_stream_t_570425849
   ): cint {.cdecl, importc: "lsquic_stream_is_rejected".}
 
 else:
@@ -2663,7 +2595,7 @@ else:
     )
 when not declared(lsquic_stream_refuse_push):
   proc lsquic_stream_refuse_push*(
-    s: ptr lsquic_stream_t_570425821
+    s: ptr lsquic_stream_t_570425849
   ): cint {.cdecl, importc: "lsquic_stream_refuse_push".}
 
 else:
@@ -2674,8 +2606,8 @@ else:
     )
 when not declared(lsquic_stream_push_info):
   proc lsquic_stream_push_info*(
-    a0: ptr lsquic_stream_t_570425821,
-    ref_stream_id: ptr lsquic_stream_id_t_570425813,
+    a0: ptr lsquic_stream_t_570425849,
+    ref_stream_id: ptr lsquic_stream_id_t_570425841,
     hdr_set: ptr pointer,
   ): cint {.cdecl, importc: "lsquic_stream_push_info".}
 
@@ -2686,7 +2618,7 @@ else:
     )
 when not declared(lsquic_stream_priority):
   proc lsquic_stream_priority*(
-    s: ptr lsquic_stream_t_570425821
+    s: ptr lsquic_stream_t_570425849
   ): cuint {.cdecl, importc: "lsquic_stream_priority".}
 
 else:
@@ -2696,7 +2628,7 @@ else:
     )
 when not declared(lsquic_stream_set_priority):
   proc lsquic_stream_set_priority*(
-    s: ptr lsquic_stream_t_570425821, priority: cuint
+    s: ptr lsquic_stream_t_570425849, priority: cuint
   ): cint {.cdecl, importc: "lsquic_stream_set_priority".}
 
 else:
@@ -2707,7 +2639,7 @@ else:
     )
 when not declared(lsquic_stream_get_http_prio):
   proc lsquic_stream_get_http_prio*(
-    a0: ptr lsquic_stream_t_570425821, a1: ptr struct_lsquic_ext_http_prio_570425863
+    a0: ptr lsquic_stream_t_570425849, a1: ptr struct_lsquic_ext_http_prio_570425885
   ): cint {.cdecl, importc: "lsquic_stream_get_http_prio".}
 
 else:
@@ -2718,7 +2650,7 @@ else:
     )
 when not declared(lsquic_stream_set_http_prio):
   proc lsquic_stream_set_http_prio*(
-    a0: ptr lsquic_stream_t_570425821, a1: ptr struct_lsquic_ext_http_prio_570425863
+    a0: ptr lsquic_stream_t_570425849, a1: ptr struct_lsquic_ext_http_prio_570425885
   ): cint {.cdecl, importc: "lsquic_stream_set_http_prio".}
 
 else:
@@ -2729,24 +2661,24 @@ else:
     )
 when not declared(lsquic_stream_conn):
   proc lsquic_stream_conn*(
-    s: ptr lsquic_stream_t_570425821
-  ): ptr lsquic_conn_t_570425817 {.cdecl, importc: "lsquic_stream_conn".}
+    s: ptr lsquic_stream_t_570425849
+  ): ptr lsquic_conn_t_570425845 {.cdecl, importc: "lsquic_stream_conn".}
 
 else:
   static:
     hint("Declaration of " & "lsquic_stream_conn" & " already exists, not redeclaring")
 when not declared(lsquic_conn_id):
   proc lsquic_conn_id*(
-    c: ptr lsquic_conn_t_570425817
-  ): ptr lsquic_cid_t_570425811 {.cdecl, importc: "lsquic_conn_id".}
+    c: ptr lsquic_conn_t_570425845
+  ): ptr lsquic_cid_t_570425839 {.cdecl, importc: "lsquic_conn_id".}
 
 else:
   static:
     hint("Declaration of " & "lsquic_conn_id" & " already exists, not redeclaring")
 when not declared(lsquic_conn_get_engine):
   proc lsquic_conn_get_engine*(
-    c: ptr lsquic_conn_t_570425817
-  ): ptr lsquic_engine_t_570425815 {.cdecl, importc: "lsquic_conn_get_engine".}
+    c: ptr lsquic_conn_t_570425845
+  ): ptr lsquic_engine_t_570425843 {.cdecl, importc: "lsquic_conn_get_engine".}
 
 else:
   static:
@@ -2755,7 +2687,7 @@ else:
     )
 when not declared(lsquic_conn_get_sockaddr):
   proc lsquic_conn_get_sockaddr*(
-    c: ptr lsquic_conn_t_570425817, local: ptr ptr SockAddr, peer: ptr ptr SockAddr
+    c: ptr lsquic_conn_t_570425845, local: ptr ptr SockAddr, peer: ptr ptr SockAddr
   ): cint {.cdecl, importc: "lsquic_conn_get_sockaddr".}
 
 else:
@@ -2765,7 +2697,7 @@ else:
     )
 when not declared(lsquic_conn_want_datagram_write):
   proc lsquic_conn_want_datagram_write*(
-    a0: ptr lsquic_conn_t_570425817, is_want: cint
+    a0: ptr lsquic_conn_t_570425845, is_want: cint
   ): cint {.cdecl, importc: "lsquic_conn_want_datagram_write".}
 
 else:
@@ -2776,7 +2708,7 @@ else:
     )
 when not declared(lsquic_conn_get_min_datagram_size):
   proc lsquic_conn_get_min_datagram_size*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): csize_t {.cdecl, importc: "lsquic_conn_get_min_datagram_size".}
 
 else:
@@ -2787,7 +2719,7 @@ else:
     )
 when not declared(lsquic_conn_set_min_datagram_size):
   proc lsquic_conn_set_min_datagram_size*(
-    a0: ptr lsquic_conn_t_570425817, sz: csize_t
+    a0: ptr lsquic_conn_t_570425845, sz: csize_t
   ): cint {.cdecl, importc: "lsquic_conn_set_min_datagram_size".}
 
 else:
@@ -2798,9 +2730,9 @@ else:
     )
 when not declared(lsquic_logger_init):
   proc lsquic_logger_init*(
-    a0: ptr struct_lsquic_logger_if_570425865,
+    a0: ptr struct_lsquic_logger_if_570425887,
     logger_ctx: pointer,
-    a2: enum_lsquic_logger_timestamp_style_570425867,
+    a2: enum_lsquic_logger_timestamp_style,
   ): void {.cdecl, importc: "lsquic_logger_init".}
 
 else:
@@ -2826,7 +2758,7 @@ else:
     hint("Declaration of " & "lsquic_logger_lopt" & " already exists, not redeclaring")
 when not declared(lsquic_engine_quic_versions):
   proc lsquic_engine_quic_versions*(
-    a0: ptr lsquic_engine_t_570425815
+    a0: ptr lsquic_engine_t_570425843
   ): cuint {.cdecl, importc: "lsquic_engine_quic_versions".}
 
 else:
@@ -2849,8 +2781,8 @@ else:
     )
 when not declared(lsquic_conn_quic_version):
   proc lsquic_conn_quic_version*(
-    c: ptr lsquic_conn_t_570425817
-  ): enum_lsquic_version_570425829 {.cdecl, importc: "lsquic_conn_quic_version".}
+    c: ptr lsquic_conn_t_570425845
+  ): enum_lsquic_version {.cdecl, importc: "lsquic_conn_quic_version".}
 
 else:
   static:
@@ -2859,7 +2791,7 @@ else:
     )
 when not declared(lsquic_conn_crypto_keysize):
   proc lsquic_conn_crypto_keysize*(
-    c: ptr lsquic_conn_t_570425817
+    c: ptr lsquic_conn_t_570425845
   ): cint {.cdecl, importc: "lsquic_conn_crypto_keysize".}
 
 else:
@@ -2870,7 +2802,7 @@ else:
     )
 when not declared(lsquic_conn_crypto_alg_keysize):
   proc lsquic_conn_crypto_alg_keysize*(
-    c: ptr lsquic_conn_t_570425817
+    c: ptr lsquic_conn_t_570425845
   ): cint {.cdecl, importc: "lsquic_conn_crypto_alg_keysize".}
 
 else:
@@ -2881,8 +2813,8 @@ else:
     )
 when not declared(lsquic_conn_crypto_ver):
   proc lsquic_conn_crypto_ver*(
-    c: ptr lsquic_conn_t_570425817
-  ): enum_lsquic_crypto_ver_570425876 {.cdecl, importc: "lsquic_conn_crypto_ver".}
+    c: ptr lsquic_conn_t_570425845
+  ): enum_lsquic_crypto_ver {.cdecl, importc: "lsquic_conn_crypto_ver".}
 
 else:
   static:
@@ -2891,7 +2823,7 @@ else:
     )
 when not declared(lsquic_conn_crypto_cipher):
   proc lsquic_conn_crypto_cipher*(
-    c: ptr lsquic_conn_t_570425817
+    c: ptr lsquic_conn_t_570425845
   ): cstring {.cdecl, importc: "lsquic_conn_crypto_cipher".}
 
 else:
@@ -2903,7 +2835,7 @@ else:
 when not declared(lsquic_str2ver):
   proc lsquic_str2ver*(
     str: cstring, len: csize_t
-  ): enum_lsquic_version_570425829 {.cdecl, importc: "lsquic_str2ver".}
+  ): enum_lsquic_version {.cdecl, importc: "lsquic_str2ver".}
 
 else:
   static:
@@ -2911,14 +2843,14 @@ else:
 when not declared(lsquic_alpn2ver):
   proc lsquic_alpn2ver*(
     alpn: cstring, len: csize_t
-  ): enum_lsquic_version_570425829 {.cdecl, importc: "lsquic_alpn2ver".}
+  ): enum_lsquic_version {.cdecl, importc: "lsquic_alpn2ver".}
 
 else:
   static:
     hint("Declaration of " & "lsquic_alpn2ver" & " already exists, not redeclaring")
 when not declared(lsquic_engine_cooldown):
   proc lsquic_engine_cooldown*(
-    a0: ptr lsquic_engine_t_570425815
+    a0: ptr lsquic_engine_t_570425843
   ): void {.cdecl, importc: "lsquic_engine_cooldown".}
 
 else:
@@ -2928,15 +2860,15 @@ else:
     )
 when not declared(lsquic_conn_get_ctx):
   proc lsquic_conn_get_ctx*(
-    a0: ptr lsquic_conn_t_570425817
-  ): ptr lsquic_conn_ctx_t_570425819 {.cdecl, importc: "lsquic_conn_get_ctx".}
+    a0: ptr lsquic_conn_t_570425845
+  ): ptr lsquic_conn_ctx_t_570425847 {.cdecl, importc: "lsquic_conn_get_ctx".}
 
 else:
   static:
     hint("Declaration of " & "lsquic_conn_get_ctx" & " already exists, not redeclaring")
 when not declared(lsquic_conn_set_ctx):
   proc lsquic_conn_set_ctx*(
-    a0: ptr lsquic_conn_t_570425817, a1: ptr lsquic_conn_ctx_t_570425819
+    a0: ptr lsquic_conn_t_570425845, a1: ptr lsquic_conn_ctx_t_570425847
   ): void {.cdecl, importc: "lsquic_conn_set_ctx".}
 
 else:
@@ -2944,7 +2876,7 @@ else:
     hint("Declaration of " & "lsquic_conn_set_ctx" & " already exists, not redeclaring")
 when not declared(lsquic_conn_get_peer_ctx):
   proc lsquic_conn_get_peer_ctx*(
-    a0: ptr lsquic_conn_t_570425817, local_sa: ptr SockAddr
+    a0: ptr lsquic_conn_t_570425845, local_sa: ptr SockAddr
   ): pointer {.cdecl, importc: "lsquic_conn_get_peer_ctx".}
 
 else:
@@ -2954,7 +2886,7 @@ else:
     )
 when not declared(lsquic_conn_get_sni):
   proc lsquic_conn_get_sni*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): cstring {.cdecl, importc: "lsquic_conn_get_sni".}
 
 else:
@@ -2962,7 +2894,7 @@ else:
     hint("Declaration of " & "lsquic_conn_get_sni" & " already exists, not redeclaring")
 when not declared(lsquic_conn_abort):
   proc lsquic_conn_abort*(
-    a0: ptr lsquic_conn_t_570425817
+    a0: ptr lsquic_conn_t_570425845
   ): void {.cdecl, importc: "lsquic_conn_abort".}
 
 else:
@@ -2970,7 +2902,7 @@ else:
     hint("Declaration of " & "lsquic_conn_abort" & " already exists, not redeclaring")
 when not declared(lsquic_conn_get_info):
   proc lsquic_conn_get_info*(
-    conn: ptr lsquic_conn_t_570425817, info: ptr struct_lsquic_conn_info_570425880
+    conn: ptr lsquic_conn_t_570425845, info: ptr struct_lsquic_conn_info_570425896
   ): cint {.cdecl, importc: "lsquic_conn_get_info".}
 
 else:
@@ -2980,8 +2912,8 @@ else:
     )
 when not declared(lsquic_conn_set_param):
   proc lsquic_conn_set_param*(
-    conn: ptr lsquic_conn_t_570425817,
-    param: enum_lsquic_conn_param_570425878,
+    conn: ptr lsquic_conn_t_570425845,
+    param: enum_lsquic_conn_param,
     value: pointer,
     value_len: csize_t,
   ): cint {.cdecl, importc: "lsquic_conn_set_param".}
@@ -2993,8 +2925,8 @@ else:
     )
 when not declared(lsquic_conn_get_param):
   proc lsquic_conn_get_param*(
-    conn: ptr lsquic_conn_t_570425817,
-    param: enum_lsquic_conn_param_570425878,
+    conn: ptr lsquic_conn_t_570425845,
+    param: enum_lsquic_conn_param,
     value: pointer,
     value_len: ptr csize_t,
   ): cint {.cdecl, importc: "lsquic_conn_get_param".}
@@ -3025,7 +2957,7 @@ else:
     hint("Declaration of " & "lsquic_get_h3_alpns" & " already exists, not redeclaring")
 when not declared(lsquic_is_valid_hs_packet):
   proc lsquic_is_valid_hs_packet*(
-    a0: ptr lsquic_engine_t_570425815, a1: ptr uint8, a2: csize_t
+    a0: ptr lsquic_engine_t_570425843, a1: ptr uint8, a2: csize_t
   ): cint {.cdecl, importc: "lsquic_is_valid_hs_packet".}
 
 else:
@@ -3036,7 +2968,7 @@ else:
     )
 when not declared(lsquic_cid_from_packet):
   proc lsquic_cid_from_packet*(
-    a0: ptr uint8, bufsz: csize_t, cid: ptr lsquic_cid_t_570425811
+    a0: ptr uint8, bufsz: csize_t, cid: ptr lsquic_cid_t_570425839
   ): cint {.cdecl, importc: "lsquic_cid_from_packet".}
 
 else:
@@ -3056,7 +2988,7 @@ else:
     )
 when not declared(lsquic_engine_earliest_adv_tick):
   proc lsquic_engine_earliest_adv_tick*(
-    engine: ptr lsquic_engine_t_570425815, diff: ptr cint
+    engine: ptr lsquic_engine_t_570425843, diff: ptr cint
   ): cint {.cdecl, importc: "lsquic_engine_earliest_adv_tick".}
 
 else:
@@ -3067,7 +2999,7 @@ else:
     )
 when not declared(lsquic_engine_count_attq):
   proc lsquic_engine_count_attq*(
-    engine: ptr lsquic_engine_t_570425815, from_now: cint
+    engine: ptr lsquic_engine_t_570425843, from_now: cint
   ): cuint {.cdecl, importc: "lsquic_engine_count_attq".}
 
 else:
@@ -3077,8 +3009,8 @@ else:
     )
 when not declared(lsquic_conn_status):
   proc lsquic_conn_status*(
-    a0: ptr lsquic_conn_t_570425817, errbuf: cstring, bufsz: csize_t
-  ): enum_LSQUIC_CONN_STATUS_570425882 {.cdecl, importc: "lsquic_conn_status".}
+    a0: ptr lsquic_conn_t_570425845, errbuf: cstring, bufsz: csize_t
+  ): enum_LSQUIC_CONN_STATUS {.cdecl, importc: "lsquic_conn_status".}
 
 else:
   static:
@@ -3091,7 +3023,7 @@ else:
 when not declared(lsquic_ssl_to_conn):
   proc lsquic_ssl_to_conn*(
     a0: ptr struct_ssl_st
-  ): ptr lsquic_conn_t_570425817 {.cdecl, importc: "lsquic_ssl_to_conn".}
+  ): ptr lsquic_conn_t_570425845 {.cdecl, importc: "lsquic_ssl_to_conn".}
 
 else:
   static:
