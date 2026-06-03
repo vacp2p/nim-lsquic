@@ -33,8 +33,9 @@ proc onNewConn(
     onClose: proc() =
       discard,
   )
-  GC_ref(quicConn) # Keep it pinned until on_conn_closed is called
   let serverCtx = cast[ServerContext](stream_if_ctx)
+  serverCtx.trackConnectionCid(conn)
+  GC_ref(quicConn) # Keep it pinned until on_conn_closed is called
   serverCtx.incoming.putNoWait(quicConn)
   cast[ptr lsquic_conn_ctx_t](quicConn)
 
@@ -58,6 +59,7 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
   ctx.running = true
   ctx.incoming = newAsyncQueue[QuicConnection]()
   ctx.setupSSLContext()
+  ctx.initCidTracking()
 
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
@@ -92,6 +94,10 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
     ea_get_ssl_ctx: getSSLCtx,
     ea_packets_out: sendPacketsOut,
   )
+  ctx.api.ea_new_scids = addCids
+  ctx.api.ea_live_scids = addCids
+  ctx.api.ea_old_scids = removeCids
+  ctx.api.ea_cids_update_ctx = cast[pointer](ctx)
 
   ctx.engine = lsquic_engine_new(LSENG_SERVER, addr ctx.api)
   if ctx.engine.isNil:

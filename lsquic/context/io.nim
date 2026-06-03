@@ -9,6 +9,7 @@ import ../helpers/[openarray, sequninit, transportaddr]
 import std/[nativesockets, net]
 
 when not defined(windows):
+  import chronicles
   import posix
 
 when defined(windows):
@@ -144,6 +145,7 @@ proc sendPacketsOut*(
 
       let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
       if res < 0:
+        trace "sendmsg failed", sent, nspecs
         break
 
     sent.inc

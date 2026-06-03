@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
-import std/deques
+import std/[deques, hashes, sets, strutils]
 import boringssl
 import chronos
 import chronos/osdefs
@@ -12,17 +12,96 @@ import
 let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is global
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
 
-type QuicContext* = ref object of RootObj
-  settings*: struct_lsquic_engine_settings
-  api*: struct_lsquic_engine_api
-  engine*: ptr struct_lsquic_engine
-  stream_if*: struct_lsquic_stream_if
-  tlsConfig*: TLSConfig
-  tickTimeout*: Timeout
-  sslCtx*: ptr SSL_CTX
-  fd*: cint
-  processing: bool
-  running*: bool
+type
+  CidKey* = object
+    len*: uint8
+    bytes*: array[MAX_CID_LEN, uint8]
+
+  LsquicCidArray = UncheckedArray[lsquic_cid_t]
+
+  QuicContext* = ref object of RootObj
+    settings*: struct_lsquic_engine_settings
+    api*: struct_lsquic_engine_api
+    engine*: ptr struct_lsquic_engine
+    stream_if*: struct_lsquic_stream_if
+    tlsConfig*: TLSConfig
+    tickTimeout*: Timeout
+    sslCtx*: ptr SSL_CTX
+    fd*: cint
+    processing: bool
+    running*: bool
+    ownedCids: HashSet[CidKey]
+
+func hash*(cid: CidKey): Hash =
+  var h = hash(cid.len)
+  for i in 0 ..< cid.len.int:
+    h = h !& hash(cid.bytes[i])
+  !$h
+
+func shortLog*(cid: CidKey): string =
+  var ret = $cid.len & ":"
+  for i in 0 ..< min(cid.len.int, 8):
+    ret.add(toHex(cid.bytes[i], 2))
+  ret
+
+chronicles.formatIt(CidKey):
+  shortLog(it)
+
+func toCidKey(cid: lsquic_cid_t, key: var CidKey): bool =
+  if cid.len == 0 or cid.len.int > MAX_CID_LEN:
+    return false
+
+  key = CidKey(len: cid.len)
+  for i in 0 ..< cid.len.int:
+    key.bytes[i] = cid.buf[i]
+  true
+
+proc initCidTracking*(ctx: QuicContext) {.raises: [].} =
+  ctx.ownedCids = initHashSet[CidKey]()
+
+proc addCids*(
+    ctx: pointer, _: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
+) {.cdecl, raises: [].} =
+  let quicCtx = cast[QuicContext](ctx)
+  if quicCtx.isNil or cids.isNil:
+    return
+
+  let cidsArr = cast[ptr LsquicCidArray](cids)
+  for i in 0 ..< nCids.int:
+    var key: CidKey
+    if toCidKey(cidsArr[i], key):
+      quicCtx.ownedCids.incl(key)
+      trace "Registered CID", cid = key, cidCount = quicCtx.ownedCids.len
+
+proc removeCids*(
+    ctx: pointer, _: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
+) {.cdecl, raises: [].} =
+  let quicCtx = cast[QuicContext](ctx)
+  if quicCtx.isNil or cids.isNil:
+    return
+
+  let cidsArr = cast[ptr LsquicCidArray](cids)
+  for i in 0 ..< nCids.int:
+    var key: CidKey
+    if toCidKey(cidsArr[i], key):
+      quicCtx.ownedCids.excl(key)
+      trace "Removed CID", cid = key, cidCount = quicCtx.ownedCids.len
+
+proc trackConnectionCid*(ctx: QuicContext, conn: ptr lsquic_conn_t) {.raises: [].} =
+  if ctx.isNil or conn.isNil:
+    return
+
+  let cid = lsquic_conn_id(conn)
+  if cid.isNil:
+    return
+
+  var key: CidKey
+  if toCidKey(cid[], key):
+    ctx.ownedCids.incl(key)
+    trace "Tracked connection CID", cid = key, cidCount = ctx.ownedCids.len
+
+proc ownsCid*(ctx: QuicContext, cid: CidKey): bool {.raises: [].} =
+  not ctx.isNil and cid in ctx.ownedCids
 
 proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
   not ctx.isNil and ctx.running and not ctx.engine.isNil

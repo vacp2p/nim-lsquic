@@ -109,6 +109,7 @@ method dial*(
     return err("could not dial: " & $remote)
 
   quicClientConn.lsquicConn = conn
+  ctx.trackConnectionCid(conn)
   ctx.processWhenReady()
 
   ok(quicClientConn)
@@ -121,6 +122,7 @@ proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
   ctx.tlsConfig = tlsConfig
   ctx.running = true
   ctx.setupSSLContext()
+  ctx.initCidTracking()
 
   lsquic_engine_init_settings(addr ctx.settings, 0)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
@@ -155,6 +157,10 @@ proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
     ea_get_ssl_ctx: getSSLCtx,
     ea_packets_out: sendPacketsOut,
   )
+  ctx.api.ea_new_scids = addCids
+  ctx.api.ea_live_scids = addCids
+  ctx.api.ea_old_scids = removeCids
+  ctx.api.ea_cids_update_ctx = cast[pointer](ctx)
 
   ctx.engine = lsquic_engine_new(0, addr ctx.api)
   if ctx.engine.isNil:

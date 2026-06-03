@@ -3,7 +3,7 @@
 
 {.used.}
 
-import chronos, chronos/unittest2/asynctests, results, chronicles
+import chronos, chronos/unittest2/asynctests, results, chronicles, sequtils
 import lsquic
 import ./helpers/clientserver
 
@@ -153,6 +153,54 @@ proc runEndpointDialOnlyTest(address: TransportAddress) {.async.} =
   incomingConn.close()
   await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture())
 
+proc runEndpointSharedSocketCrossDialTest(address: TransportAddress) {.async.} =
+  let endpointA = makeEndpoint(address)
+  let endpointB = makeEndpoint(address)
+  let addressA = endpointA.localAddress()
+  let addressB = endpointB.localAddress()
+  defer:
+    await allFutures(endpointA.stop(), endpointB.stop())
+
+  let acceptInitial = endpointB.accept()
+  let initialOutgoing = await endpointA.dial(addressB)
+  let initialIncoming = await acceptInitial
+
+  check:
+    initialOutgoing.localAddress().port == addressA.port
+    initialOutgoing.remoteAddress().port == addressB.port
+    initialIncoming.localAddress().port == addressB.port
+    initialIncoming.remoteAddress().port == addressA.port
+
+  let
+    acceptA = endpointA.accept()
+    acceptB = endpointB.accept()
+    dialAtoB = endpointA.dial(addressB)
+    dialBtoA = endpointB.dial(addressA)
+
+  let
+    outgoingAtoB = await dialAtoB.wait(5.seconds)
+    outgoingBtoA = await dialBtoA.wait(5.seconds)
+    incomingA = await acceptA.wait(5.seconds)
+    incomingB = await acceptB.wait(5.seconds)
+
+  check:
+    outgoingAtoB.localAddress().port == addressA.port
+    outgoingAtoB.remoteAddress().port == addressB.port
+    outgoingBtoA.localAddress().port == addressB.port
+    outgoingBtoA.remoteAddress().port == addressA.port
+    incomingA.localAddress().port == addressA.port
+    incomingA.remoteAddress().port == addressB.port
+    incomingB.localAddress().port == addressB.port
+    incomingB.remoteAddress().port == addressA.port
+
+  let conns = @[
+    initialOutgoing, initialIncoming, outgoingAtoB, outgoingBtoA, incomingA, incomingB
+  ]
+  for conn in conns:
+    conn.close()
+
+  await allFutures(conns.mapIt(it.closedFuture()))
+
 proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
   const streamCount = 16
 
@@ -220,3 +268,6 @@ suite "connection":
 
   asyncTest "dial-only endpoint works without listener":
     await runEndpointDialOnlyTest(initTAddress("127.0.0.1:0"))
+
+  asyncTest "endpoints cross-dial from shared listener sockets":
+    await runEndpointSharedSocketCrossDialTest(initTAddress("127.0.0.1:0"))
