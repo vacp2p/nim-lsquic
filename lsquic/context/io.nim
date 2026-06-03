@@ -3,13 +3,13 @@
 
 import chronos
 import chronos/osdefs
-import chronicles
 import ./context
 import ../[lsquic_ffi, datagram]
 import ../helpers/[openarray, sequninit, transportaddr]
 import std/[nativesockets, net]
 
 when not defined(windows):
+  import chronicles
   import posix
 
 when defined(windows):

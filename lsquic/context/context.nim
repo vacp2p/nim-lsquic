@@ -30,7 +30,7 @@ type
     fd*: cint
     processing: bool
     running*: bool
-    ownedCids*: HashSet[CidKey]
+    ownedCids: HashSet[CidKey]
 
 func hash*(cid: CidKey): Hash =
   var h = hash(cid.len)
@@ -60,7 +60,7 @@ proc initCidTracking*(ctx: QuicContext) {.raises: [].} =
   ctx.ownedCids = initHashSet[CidKey]()
 
 proc addCids*(
-    ctx: pointer, peerCtxs: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
+    ctx: pointer, _: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
 ) {.cdecl, raises: [].} =
   let quicCtx = cast[QuicContext](ctx)
   if quicCtx.isNil or cids.isNil:
@@ -74,7 +74,7 @@ proc addCids*(
       trace "Registered CID", cid = key, cidCount = quicCtx.ownedCids.len
 
 proc removeCids*(
-    ctx: pointer, peerCtxs: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
+    ctx: pointer, _: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
 ) {.cdecl, raises: [].} =
   let quicCtx = cast[QuicContext](ctx)
   if quicCtx.isNil or cids.isNil:
