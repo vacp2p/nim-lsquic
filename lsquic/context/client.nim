@@ -118,6 +118,9 @@ const Cubic = 1
 const Adaptive = 3
 
 proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
+  if tlsConfig.certVerifier.isNone:
+    return err("client TLSConfig requires a certificate verifier")
+
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig
   ctx.running = true
