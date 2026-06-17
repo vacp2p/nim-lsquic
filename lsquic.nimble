@@ -3,7 +3,7 @@ version = "0.5.1"
 author = "Status Research & Development GmbH"
 description = "Nim wrapper around the lsquic library"
 license = "MIT"
-installDirs = @["libs", "scripts"]
+installDirs = @["libs", "scripts", "lsquic_units"]
 installFiles = @["lsquic.nim"]
 
 requires "nim >= 2.0.0"
