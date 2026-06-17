@@ -33,6 +33,13 @@ proc rejectingCertificateCb(
   discard derCertificates
   false
 
+proc raisingCertificateCb(
+    serverName: string, derCertificates: seq[seq[byte]]
+): bool {.gcsafe.} =
+  discard serverName
+  discard derCertificates
+  raise newException(ValueError, "verifier failed")
+
 proc makeRejectingCertificateCb(
     recorder: RejectVerifierRecorder
 ): certificateVerifierCB =
@@ -83,6 +90,18 @@ suite "certificate verifier":
   asyncTest "rejecting client verifier rejects handshake":
     let client =
       makeClientWithVerifier(CustomCertificateVerifier.init(rejectingCertificateCb))
+    let server =
+      makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    defer:
+      await allFutures(client.stop(), listener.stop())
+
+    expect DialError:
+      discard await client.dial(listener.localAddress())
+
+  asyncTest "raising client verifier rejects handshake":
+    let client =
+      makeClientWithVerifier(CustomCertificateVerifier.init(raisingCertificateCb))
     let server =
       makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
     let listener = server.listen(initTAddress("127.0.0.1:0"))
