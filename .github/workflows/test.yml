@@ -30,11 +30,13 @@ jobs:
           - os: windows
             cpu: amd64
         nim:
-          - ref: version-2-0
+          - ref: v2.2.4
             memory_management: refc
-          - ref: version-2-2
+          - ref: v2.2.4
+            memory_management: orc
+          - ref: v2.2.10
             memory_management: refc
-          - ref: version-2-2
+          - ref: v2.2.10
             memory_management: orc
         include:
           - platform:
