@@ -90,6 +90,40 @@ proc abortPendingWrites*(stream: Stream, error: ref StreamError) {.raises: [].} 
 proc abortPendingWrites*(stream: Stream, reason: string = "") {.raises: [].} =
   stream.abortPendingWrites(newException(StreamError, reason))
 
+proc clearPendingRead(
+    stream: Stream,
+    doneFut: Future[int].Raising([CancelledError, StreamError]),
+) {.raises: [].} =
+  let task = stream.toRead.valueOr:
+    return
+  if task.doneFut != doneFut:
+    return
+
+  stream.toRead = Opt.none(ReadTask)
+
+  if stream.closedByEngine or stream.quicStream.isNil:
+    return
+
+  if lsquic_stream_wantread(stream.quicStream, 0) == -1:
+    error "could not set stream wantread", streamId = lsquic_stream_id(stream.quicStream)
+
+proc clearPendingWrite(
+    stream: Stream,
+    doneFut: Future[void].Raising([CancelledError, StreamError]),
+) {.raises: [].} =
+  let task = stream.toWrite.valueOr:
+    return
+  if task.doneFut != doneFut:
+    return
+
+  stream.toWrite = Opt.none(WriteTask)
+
+  if stream.closedByEngine or stream.quicStream.isNil:
+    return
+
+  if lsquic_stream_wantwrite(stream.quicStream, 0) == -1:
+    error "could not set stream wantwrite", streamId = lsquic_stream_id(stream.quicStream)
+
 template raiseIfReadReset(stream: Stream) =
   if stream.readResetByPeer():
     raise stream.newStreamResetError("stream read")
@@ -187,18 +221,21 @@ proc readOnce*(
     Future[int].Raising([CancelledError, StreamError]).init("Stream.readOnce")
   stream.toRead = Opt.some(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
 
-  stream.doProcess()
+  try:
+    stream.doProcess()
 
-  let raceFut = await race(stream.closedWaiter, doneFut)
-  if raceFut == stream.closedWaiter:
-    if not doneFut.finished:
-      await doneFut.cancelAndWait()
-    raiseIfReadReset(stream)
-    stream.isEof = true
-    stream.closeWrite = true
-    return 0
+    let raceFut = await race(stream.closedWaiter, doneFut)
+    if raceFut == stream.closedWaiter:
+      if not doneFut.finished:
+        await doneFut.cancelAndWait()
+      raiseIfReadReset(stream)
+      stream.isEof = true
+      stream.closeWrite = true
+      return 0
 
-  return await doneFut
+    return await doneFut
+  finally:
+    stream.clearPendingRead(doneFut)
 
 template readOnce*(stream: Stream, dst: var openArray[byte]): untyped =
   ## Convenience helper that forwards an openArray/seq to the pointer-based API.
@@ -256,13 +293,16 @@ proc write*(
     WriteTask(data: data[0].addr, dataLen: data.len, doneFut: doneFut, offset: n)
   )
 
-  stream.doProcess()
+  try:
+    stream.doProcess()
 
-  let raceFut = await race(stream.closedWaiter, doneFut)
-  if raceFut == stream.closedWaiter:
-    raiseIfWriteReset(stream)
-    if not doneFut.finished:
-      doneFut.fail(newException(StreamError, "stream closed"))
-    stream.closeWrite = true
+    let raceFut = await race(stream.closedWaiter, doneFut)
+    if raceFut == stream.closedWaiter:
+      raiseIfWriteReset(stream)
+      if not doneFut.finished:
+        doneFut.fail(newException(StreamError, "stream closed"))
+      stream.closeWrite = true
 
-  await doneFut
+    await doneFut
+  finally:
+    stream.clearPendingWrite(doneFut)
