@@ -247,21 +247,32 @@ proc alpnSelectProtoCB(
 
 proc verifyCertificate(
     ssl: ptr SSL, out_alert: ptr uint8
-): enum_ssl_verify_result_t {.cdecl.} =
-  let sslCtx = SSL_get_SSL_CTX(ssl)
+): enum_ssl_verify_result_t {.cdecl, raises: [].} =
+  try:
+    let sslCtx = SSL_get_SSL_CTX(ssl)
+    if sslCtx.isNil:
+      if not out_alert.isNil:
+        out_alert[] = SSL_AD_INTERNAL_ERROR
+      return ssl_verify_invalid
 
-  let quicCtx = cast[QuicContext](SSL_CTX_get_ex_data(sslCtx, SSL_CTX_ID))
-  if quicCtx.isNil:
-    raiseAssert "could not obtain context"
+    let quicCtx = cast[QuicContext](SSL_CTX_get_ex_data(sslCtx, SSL_CTX_ID))
+    if quicCtx.isNil or quicCtx.tlsConfig.certVerifier.isNone:
+      if not out_alert.isNil:
+        out_alert[] = SSL_AD_INTERNAL_ERROR
+      return ssl_verify_invalid
 
-  let derCertificates = getFullCertChain(ssl)
+    let derCertificates = getFullCertChain(ssl)
+    let serverName = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name)
+    if quicCtx.tlsConfig.certVerifier.get().verify($serverName, derCertificates):
+      return ssl_verify_ok
 
-  let serverName = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name)
-  doAssert quicCtx.tlsConfig.certVerifier.isSome, "no custom validator set"
-  if quicCtx.tlsConfig.certVerifier.get().verify($serverName, derCertificates):
-    return ssl_verify_ok
-  else:
-    out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
+    if not out_alert.isNil:
+      out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
+    return ssl_verify_invalid
+  except Exception as exc:
+    warn "certificate verifier raised", errorMsg = exc.msg
+    if not out_alert.isNil:
+      out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
     return ssl_verify_invalid
 
 proc setupSSLContext*(quicCtx: QuicContext) =
