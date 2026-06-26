@@ -161,10 +161,10 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
       if lsquic_stream_close(stream.quicStream) != 0:
         stream.abort()
         raise newException(StreamError, "could not close the stream")
-      stream.doProcess()
 
     stream.abortPendingWrites("stream closed")
     stream.closeWrite = true
+    stream.doProcess()
   else:
     raise newException(StreamError, "could not close the stream")
 
