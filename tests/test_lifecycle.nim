@@ -203,6 +203,29 @@ suite "lifecycle":
     check (await incomingStream.readOnce(buf)) == 0
     await incomingStream.close()
 
+  asyncTest "cancel pending write clears stream write task":
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    let outgoingStream = await peers.outgoing.openStream()
+    let writing = outgoingStream.write(newData(16 * 1024 * 1024, 0x7A'u8))
+
+    var observedPending = false
+    for _ in 0 ..< 200:
+      if outgoingStream.toWrite.isSome:
+        observedPending = true
+        break
+      if writing.finished:
+        break
+      await sleepAsync(10.milliseconds)
+
+    check observedPending
+    if not writing.finished:
+      await writing.cancelAndWait()
+
+    check outgoingStream.toWrite.isNone()
+
   asyncTest "read once returns zero repeatedly after eof":
     let peers = await connectPeers()
     defer:
@@ -242,6 +265,43 @@ suite "lifecycle":
 
     check (await reading.withTimeout(2.seconds))
     check (await reading) == 0
+    await incomingStream.close()
+
+  asyncTest "cancelled blocked read clears pending read":
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    let incomingWaiting = peers.incoming.incomingStream()
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[1'u8])
+    check (await incomingWaiting.withTimeout(2.seconds))
+    let incomingStream = await incomingWaiting
+
+    var firstByte = newSeq[byte](1)
+    check (await incomingStream.readOnce(firstByte)) == 1
+    check firstByte[0] == 1
+
+    var cancelledBuf = newSeq[byte](8)
+    let reading = incomingStream.readOnce(cancelledBuf)
+
+    await sleepAsync(100.milliseconds)
+    check not reading.finished
+    check incomingStream.toRead.isSome
+
+    await reading.cancelAndWait()
+
+    check incomingStream.toRead.isNone()
+
+    await outgoingStream.write(@[99'u8])
+    await sleepAsync(100.milliseconds)
+    check cancelledBuf[0] == 0
+
+    var buf = newSeq[byte](1)
+    let nextRead = incomingStream.readOnce(buf)
+    check (await nextRead.withTimeout(2.seconds))
+    check (await nextRead) == 1
+    check buf[0] == 99
     await incomingStream.close()
 
   asyncTest "peer reset":
