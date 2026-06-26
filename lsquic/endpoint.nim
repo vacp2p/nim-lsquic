@@ -167,9 +167,21 @@ proc new*(
   )
   endpoint.udp = endpoint.createUdp(address)
 
+  var initialized = false
+
+  defer:
+    if not initialized:
+      if not endpoint.serverContext.isNil:
+        endpoint.serverContext.destroy()
+      if not endpoint.clientContext.isNil:
+        endpoint.clientContext.destroy()
+      if not endpoint.udp.isNil:
+        endpoint.udp.close()
+
   if CanListen in capabilities:
     endpoint.serverContext = createServerContext(tlsConfig, cint(endpoint.udp.fd))
 
+  initialized = true
   endpoint
 
 proc new*(
