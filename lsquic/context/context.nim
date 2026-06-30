@@ -276,7 +276,7 @@ proc verifyCertificate(
     return ssl_verify_invalid
 
 proc setupSSLContext*(quicCtx: QuicContext) =
-  let sslCtx = SSL_CTX_new(
+  var sslCtx = SSL_CTX_new(
     if quicCtx is ServerContext:
       TLS_server_method()
     else:
@@ -284,6 +284,12 @@ proc setupSSLContext*(quicCtx: QuicContext) =
   )
   if sslCtx.isNil:
     raiseAssert "failed to create sslCtx"
+
+  var sslCtxInstalled = false
+  defer:
+    if not sslCtxInstalled and not sslCtx.isNil:
+      SSL_CTX_free(sslCtx)
+      sslCtx = nil
 
   if SSL_CTX_set_ex_data(sslCtx, SSL_CTX_ID, cast[pointer](quicCtx)) != 1:
     raiseAssert "could not set data in sslCtx"
@@ -296,13 +302,13 @@ proc setupSSLContext*(quicCtx: QuicContext) =
   if quicCtx.tlsConfig.key.len != 0 and quicCtx.tlsConfig.certificate.len != 0:
     let pkey = quicCtx.tlsConfig.key.toPKey().valueOr:
       raiseAssert "could not convert certificate to pkey: " & error
+    defer:
+      EVP_PKEY_free(pkey)
 
     let cert = quicCtx.tlsConfig.certificate.toX509().valueOr:
       raiseAssert "could not convert certificate to x509: " & error
-
     defer:
       X509_free(cert)
-      EVP_PKEY_free(pkey)
 
     if SSL_CTX_use_certificate(sslCtx, cert) != 1:
       raiseAssert "could not use certificate"
@@ -335,6 +341,7 @@ proc setupSSLContext*(quicCtx: QuicContext) =
   discard SSL_CTX_set_max_proto_version(sslCtx, TLS1_3_VERSION)
 
   quicCtx.sslCtx = sslCtx
+  sslCtxInstalled = true
 
 proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.} =
   let quicCtx = cast[QuicContext](peer_ctx)

@@ -37,5 +37,19 @@ proc getCertChain*(chain: ptr struct_stack_st_X509): seq[seq[byte]] =
 
   return output
 
+proc freeCertChain*(chain: ptr struct_stack_st_X509) {.raises: [].} =
+  ## Frees chains returned by lsquic_conn_get_*_cert_chain.
+  if chain.isNil:
+    return
+
+  let stack = cast[ptr OPENSSL_STACK](chain)
+  let x509num = OPENSSL_sk_num(stack)
+  for i in 0 ..< x509num:
+    let cert = cast[ptr X509](OPENSSL_sk_value(stack, csize_t(i)))
+    if not cert.isNil:
+      X509_free(cert)
+
+  OPENSSL_sk_free(stack)
+
 proc getFullCertChain*(ssl: ptr SSL): seq[seq[byte]] =
   SSL_get_peer_full_cert_chain(ssl).getCertChain()

@@ -37,7 +37,7 @@ proc onHandshakeDone(
   else:
     let x509chain = lsquic_conn_get_full_cert_chain(quicClientConn.lsquicConn)
     let certChain = x509chain.getCertChain()
-    OPENSSL_sk_free(cast[ptr OPENSSL_STACK](x509chain))
+    x509chain.freeCertChain()
     quicClientConn.certChain = certChain
 
     quicClientConn.connectedFut.complete()
@@ -60,7 +60,9 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
       )
     quicClientConn.cancelPending()
     quicClientConn.onClose()
+    quicClientConn.onClose = nil
     quicClientConn.lsquicConn = nil
+    quicClientConn.connectedFut = nil
     GC_unref(quicClientConn)
   lsquic_conn_set_ctx(conn, nil)
 
@@ -167,6 +169,7 @@ proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
 
   ctx.engine = lsquic_engine_new(0, addr ctx.api)
   if ctx.engine.isNil:
+    ctx.destroy()
     return err("failed to create lsquic engine")
 
   ctx.tickTimeout = newTimeout(
