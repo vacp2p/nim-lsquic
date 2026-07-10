@@ -122,7 +122,7 @@ proc sendPacketsOut*(
         break
     else:
       let msg =
-        when defined(linux) and defined(x86_64):
+        when defined(linux) and defined(x86_64) and not defined(android):
           Tmsghdr(
             msg_name: cast[pointer](addr destStorage),
             msg_namelen: destAddrLen,
