@@ -15,7 +15,7 @@ requires "unittest2"
 requires "chronicles >= 0.11.0"
 requires "https://github.com/vacp2p/nim-boringssl >= 0.0.4"
 
-import os, strutils, sequtils
+import std/[os, strutils, sequtils]
 
 var flags = getEnv("NIMFLAGS", "") # Extra flags for the compiler
 
