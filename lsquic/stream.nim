@@ -133,6 +133,10 @@ template raiseIfWriteReset(stream: Stream) =
   if stream.writeResetByPeer():
     raise stream.newStreamResetError("stream write")
 
+template processWhenAvailable(stream: Stream) =
+  if not isNil(stream.doProcess):
+    stream.doProcess()
+
 proc requestClose(stream: Stream): bool {.raises: [].} =
   if stream.closedByEngine or stream.quicStream.isNil or stream.closeRequested:
     return true
@@ -142,7 +146,7 @@ proc requestClose(stream: Stream): bool {.raises: [].} =
   if ret != 0:
     let closeErrno = errno
     if closeErrno == EBADF:
-      stream.doProcess()
+      stream.processWhenAvailable()
       return true
 
     stream.closeRequested = false
@@ -150,7 +154,7 @@ proc requestClose(stream: Stream): bool {.raises: [].} =
       streamId = lsquic_stream_id(stream.quicStream), errno = closeErrno
     return false
 
-  stream.doProcess()
+  stream.processWhenAvailable()
   true
 
 proc closeIfDone*(stream: Stream): bool {.raises: [].} =
