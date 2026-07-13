@@ -162,8 +162,8 @@ proc closeIfDone*(stream: Stream): bool {.raises: [].} =
 proc abort*(stream: Stream) =
   stream.closeWrite = true
   stream.isEof = true
-  discard stream.requestClose()
   stream.abortPendingWrites("stream aborted")
+  discard stream.requestClose()
   if not stream.closed.isSet():
     stream.closed.fire()
 
