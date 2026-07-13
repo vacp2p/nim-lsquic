@@ -267,6 +267,52 @@ suite "lifecycle":
     check (await reading) == 0
     await incomingStream.close()
 
+  asyncTest "close then EOF retires peer-initiated stream credit":
+    const StreamCount = 120
+    const StreamCreditTimeout = 30.seconds
+    let peers = await connectPeers()
+    defer:
+      await stopPeers(peers)
+
+    proc openStreamWithTimeout(
+        conn: Connection
+    ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
+      let opening = conn.openStream()
+      if not await opening.withTimeout(StreamCreditTimeout):
+        await opening.cancelAndWait()
+        doAssert false,
+          "timed out opening stream; close+EOF should retire stream credit"
+      await opening
+
+    proc serve() {.async.} =
+      for i in 0 ..< StreamCount:
+        let stream = await peers.incoming.incomingStream()
+        var buf = newSeq[byte](1)
+        check (await stream.readOnce(buf)) == 1
+        check buf[0] == byte(i mod 256)
+
+        await stream.write(@[byte((i + 1) mod 256)])
+        await stream.close()
+        check (await stream.readOnce(buf)) == 0
+
+    let serving = serve()
+
+    for i in 0 ..< StreamCount:
+      let stream = await peers.outgoing.openStreamWithTimeout()
+      await stream.write(@[byte(i mod 256)])
+      await stream.close()
+
+      var buf = newSeq[byte](1)
+      check (await stream.readOnce(buf)) == 1
+      check buf[0] == byte((i + 1) mod 256)
+      check (await stream.readOnce(buf)) == 0
+
+    if not await serving.withTimeout(StreamCreditTimeout):
+      await serving.cancelAndWait()
+      doAssert false,
+        "timed out serving streams; close+EOF should not leave stream handlers blocked"
+    await serving
+
   asyncTest "cancelled blocked read clears pending read":
     let peers = await connectPeers()
     defer:

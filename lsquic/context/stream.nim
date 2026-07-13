@@ -104,6 +104,10 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
 
   streamCtx.toRead = Opt.none(ReadTask)
 
+  if n == 0 and not streamCtx.closeIfDone():
+    error "could not close stream after EOF", streamId = lsquic_stream_id(stream)
+    streamCtx.abort()
+
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "onWrite"
 
