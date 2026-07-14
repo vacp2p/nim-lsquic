@@ -21,6 +21,7 @@ type Stream* = ref object
   quicStream*: ptr lsquic_stream_t
   closedByEngine*: bool
   closeWrite*: bool
+  closeRequested: bool
   # This is called when on_close callback is executed
   closed*: AsyncEvent
   # Reuse a single closed-event waiter to minimize allocations on hot paths.
@@ -132,23 +133,43 @@ template raiseIfWriteReset(stream: Stream) =
   if stream.writeResetByPeer():
     raise stream.newStreamResetError("stream write")
 
-proc abort*(stream: Stream) =
-  if stream.closeWrite and stream.isEof:
-    if not stream.closed.isSet():
-      stream.closed.fire()
-    stream.abortPendingWrites("stream aborted")
-    return
-
-  if not stream.closedByEngine:
-    let ret = lsquic_stream_close(stream.quicStream)
-    if ret != 0:
-      trace "could not abort stream", streamId = lsquic_stream_id(stream.quicStream)
+template processWhenAvailable(stream: Stream) =
+  if not isNil(stream.doProcess):
     stream.doProcess()
 
+proc requestClose(stream: Stream): bool {.raises: [].} =
+  if stream.closedByEngine or stream.quicStream.isNil or stream.closeRequested:
+    return true
+
+  stream.closeRequested = true
+  let ret = lsquic_stream_close(stream.quicStream)
+  if ret != 0:
+    let closeErrno = errno
+    if closeErrno == EBADF:
+      stream.processWhenAvailable()
+      return true
+
+    stream.closeRequested = false
+    trace "could not close stream",
+      streamId = lsquic_stream_id(stream.quicStream), errno = closeErrno
+    return false
+
+  stream.processWhenAvailable()
+  true
+
+proc closeIfDone*(stream: Stream): bool {.raises: [].} =
+  if stream.closeWrite and stream.isEof:
+    return stream.requestClose()
+
+  true
+
+proc abort*(stream: Stream) =
   stream.closeWrite = true
   stream.isEof = true
   stream.abortPendingWrites("stream aborted")
-  stream.closed.fire()
+  discard stream.requestClose()
+  if not stream.closed.isSet():
+    stream.closed.fire()
 
 proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
   if stream.closeWrite or stream.closedByEngine:
@@ -157,14 +178,13 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
   # Closing only the write side
   let ret = lsquic_stream_shutdown(stream.quicStream, 1)
   if ret == 0:
-    if stream.isEof:
-      if lsquic_stream_close(stream.quicStream) != 0:
-        stream.abort()
-        raise newException(StreamError, "could not close the stream")
-
     stream.abortPendingWrites("stream closed")
     stream.closeWrite = true
-    stream.doProcess()
+    if not stream.closeIfDone():
+      stream.abort()
+      raise newException(StreamError, "could not close the stream")
+    if not stream.isEof:
+      stream.doProcess()
   else:
     raise newException(StreamError, "could not close the stream")
 
@@ -200,6 +220,9 @@ proc readOnce*(
 
   if n == 0:
     stream.isEof = true
+    if not stream.closeIfDone():
+      stream.abort()
+      raise newException(StreamError, "could not close the stream")
     return 0
   elif n > 0:
     return n
@@ -231,6 +254,7 @@ proc readOnce*(
       raiseIfReadReset(stream)
       stream.isEof = true
       stream.closeWrite = true
+      discard stream.closeIfDone()
       return 0
 
     return await doneFut

@@ -95,6 +95,11 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
 
   if n == 0:
     streamCtx.isEof = true
+    if not streamCtx.closeIfDone():
+      error "could not close stream after EOF", streamId = lsquic_stream_id(stream)
+      streamCtx.failPendingRead(newException(StreamError, "could not close the stream"))
+      streamCtx.abort()
+      return
 
   if lsquic_stream_wantread(stream, 0) == -1:
     error "could not set stream wantread", streamId = lsquic_stream_id(stream)
