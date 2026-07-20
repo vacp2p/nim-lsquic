@@ -64,9 +64,6 @@ proc makeServerWithVerifier(
   QuicServer.new(tlsConfig)
 
 suite "certificate verifier":
-  teardown:
-    cleanupLsquic()
-
   asyncTest "accepting custom verifier allows handshake":
     let client =
       makeClientWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))

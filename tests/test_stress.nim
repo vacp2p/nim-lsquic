@@ -71,9 +71,6 @@ proc runSequentialRound(round: int) {.async.} =
   check (await incoming.closedFuture().withTimeout(2.seconds))
 
 suite "stress":
-  teardown:
-    cleanupLsquic()
-
   asyncTest "repeated connect and transfer":
     for round in 0 ..< SequentialRounds:
       await runSequentialRound(round)

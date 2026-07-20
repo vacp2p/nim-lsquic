@@ -245,9 +245,6 @@ proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
     check seen
 
 suite "connection":
-  teardown:
-    cleanupLsquic()
-
   asyncTest "ipv4":
     await runConnectionTest(initTAddress("127.0.0.1:12345"))
 

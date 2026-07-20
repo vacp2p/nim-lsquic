@@ -37,9 +37,6 @@ proc stopPeers(peers: ConnectedPeers) {.async.} =
   await allFutures(peers.client.stop(), peers.listener.stop())
 
 suite "lifecycle":
-  teardown:
-    cleanupLsquic()
-
   asyncTest "listener stop makes accept fail":
     let server = makeServer()
     let listener = server.listen(initTAddress("127.0.0.1:0"))
