@@ -244,6 +244,64 @@ proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
   for seen in received:
     check seen
 
+proc runCloseNotifiesPeerOnce(
+    address: TransportAddress, closeIncomingSide: bool
+) {.async.} =
+  let client = makeClient()
+  let server = makeServer()
+  let listener = server.listen(address)
+  let boundAddress = listener.localAddress()
+  defer:
+    await allFutures(client.stop(), listener.stop())
+
+  let accepting = listener.accept()
+  let outgoingConn = await client.dial(boundAddress)
+  let incomingConn = await accepting
+
+  let (closingConn, victimConn) =
+    if closeIncomingSide:
+      (incomingConn, outgoingConn)
+    else:
+      (outgoingConn, incomingConn)
+
+  let victimStream = await victimConn.openStream()
+  await victimStream.write(@[1'u8, 2, 3])
+  let closerStream = await closingConn.incomingStream()
+  var buf = newSeq[byte](3)
+  discard await closerStream.readOnce(buf)
+
+  closingConn.close()
+
+  # The victim, not yet aware of the close, keeps opening streams, like
+  # keepalive pings and gossip traffic. Streams that reach the closing
+  # side after its own streams were torn down must not prevent the close
+  # from being signaled.
+  let opener = proc() {.async.} =
+    try:
+      let s = await victimConn.openStream()
+      await s.write(@[0'u8])
+    except CatchableError:
+      discard
+
+  var opens: seq[Future[void]]
+  for _ in 0 ..< 20:
+    opens.add(opener())
+  defer:
+    for fut in opens:
+      await fut.cancelAndWait()
+
+  # Both sides must observe the close promptly, not via the 30s idle
+  # timeout or retransmission give-up.
+  await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture()).wait(
+    1.seconds
+  )
+
+proc runCloseNotifiesPeerTest(
+    address: TransportAddress, closeIncomingSide: bool
+) {.async.} =
+  for _ in 0 ..< 3:
+    await runCloseNotifiesPeerOnce(address, closeIncomingSide)
+
 suite "connection":
   teardown:
     cleanupLsquic()
@@ -271,3 +329,9 @@ suite "connection":
 
   asyncTest "endpoints cross-dial from shared listener sockets":
     await runEndpointSharedSocketCrossDialTest(initTAddress("127.0.0.1:0"))
+
+  asyncTest "close by accepting side reaches the dialer":
+    await runCloseNotifiesPeerTest(initTAddress("127.0.0.1:0"), true)
+
+  asyncTest "close by dialing side reaches the acceptor":
+    await runCloseNotifiesPeerTest(initTAddress("127.0.0.1:0"), false)
