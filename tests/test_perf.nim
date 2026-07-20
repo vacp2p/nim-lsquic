@@ -19,12 +19,13 @@ const
   chunkSize = 65536 # 64KB chunks like perf
 
 proc runPerf(): Future[Duration] {.async.} =
-  let address = initTAddress("127.0.0.1:12345")
+  let address = initTAddress("127.0.0.1:0")
   let client = makeClient()
   let server = makeServer()
   let listener = server.listen(address)
+  let boundAddress = listener.localAddress()
   let accepting = listener.accept()
-  let dialing = client.dial(address)
+  let dialing = client.dial(boundAddress)
 
   let outgoingConn = await dialing
   let incomingConn = await accepting

@@ -18,6 +18,9 @@ proc runConnectionTest(
   let server = makeServer()
   let listener = server.listen(listenAddress)
   let boundAddress = listener.localAddress()
+  # dial the requested address on the port the listener actually bound
+  var dialAddress = dialAddress
+  dialAddress.port = boundAddress.port
   defer:
     await allFutures(client.stop(), listener.stop())
   let accepting = listener.accept()
@@ -207,11 +210,12 @@ proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
   let client = makeClient()
   let server = makeServer()
   let listener = server.listen(address)
+  let boundAddress = listener.localAddress()
   defer:
     await allFutures(client.stop(), listener.stop())
 
   let accepting = listener.accept()
-  let dialing = client.dial(address)
+  let dialing = client.dial(boundAddress)
 
   let outgoingConn = await dialing
   let incomingConn = await accepting
@@ -246,16 +250,16 @@ proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
 
 suite "connection":
   asyncTest "ipv4":
-    await runConnectionTest(initTAddress("127.0.0.1:12345"))
+    await runConnectionTest(initTAddress("127.0.0.1:0"))
 
   asyncTest "ipv6":
-    await runConnectionTest(initTAddress("[::1]:12345"))
+    await runConnectionTest(initTAddress("[::1]:0"))
 
   asyncTest "ipv6 dual-stack listener accepts ipv4 dial":
-    await runConnectionTest(initTAddress("[::]:12347"), initTAddress("127.0.0.1:12347"))
+    await runConnectionTest(initTAddress("[::]:0"), initTAddress("127.0.0.1:0"))
 
   asyncTest "multiple concurrent stream opens":
-    await runConcurrentStreamOpenTest(initTAddress("127.0.0.1:12346"))
+    await runConcurrentStreamOpenTest(initTAddress("127.0.0.1:0"))
 
   asyncTest "endpoint accepts inbound quic":
     await runEndpointAcceptTest(initTAddress("127.0.0.1:0"))
