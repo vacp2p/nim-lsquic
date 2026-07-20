@@ -14,6 +14,7 @@ initializeLsquic(true, true)
 
 type RejectVerifierRecorder = ref object
   rejectCount: int
+  fired: AsyncEvent
 
 proc singleAlpn(name: string = "test"): HashSet[string] =
   var alpn = initHashSet[string]()
@@ -47,6 +48,7 @@ proc makeRejectingCertificateCb(
     discard serverName
     discard derCertificates
     inc recorder.rejectCount
+    recorder.fired.fire()
     false
 
 proc makeClientWithVerifier(
@@ -123,7 +125,7 @@ suite "certificate verifier":
       discard await client.dial(listener.localAddress())
 
   asyncTest "server-side verifier callback does not fail handshake without client auth":
-    let recorder = RejectVerifierRecorder()
+    let recorder = RejectVerifierRecorder(fired: newAsyncEvent())
     let client =
       makeClientWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
     let server = makeServerWithVerifier(
@@ -134,7 +136,7 @@ suite "certificate verifier":
       await allFutures(client.stop(), listener.stop())
 
     let outgoing = await client.dial(listener.localAddress())
-    await sleepAsync(100.milliseconds)
+    check (await recorder.fired.wait().withTimeout(2.seconds))
 
     check:
       outgoing.certificates().len == 1
