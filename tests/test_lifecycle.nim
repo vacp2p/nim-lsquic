@@ -14,28 +14,6 @@ trace "chronicles has to be imported to fix Error: undeclared identifier: 'activ
 
 initializeLsquic(true, true)
 
-type ConnectedPeers =
-  tuple[
-    client: QuicClient, listener: Listener, outgoing: Connection, incoming: Connection
-  ]
-
-proc connectPeers(): Future[ConnectedPeers] {.async.} =
-  let client = makeClient()
-  let server = makeServer()
-  let listener = server.listen(initTAddress("127.0.0.1:0"))
-  let accepting = listener.accept()
-  let outgoing = await client.dial(listener.localAddress())
-  let incoming = await accepting
-
-  (client, listener, outgoing, incoming)
-
-proc stopPeers(peers: ConnectedPeers) {.async.} =
-  if not peers.outgoing.isNil:
-    peers.outgoing.close()
-  if not peers.incoming.isNil:
-    peers.incoming.close()
-  await allFutures(peers.client.stop(), peers.listener.stop())
-
 suite "lifecycle":
   asyncTest "listener stop makes accept fail":
     let server = makeServer()

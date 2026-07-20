@@ -3,7 +3,6 @@
 
 {.used.}
 
-import std/sets
 import results
 import unittest2
 import boringssl
@@ -11,11 +10,6 @@ import lsquic
 import lsquic/certificates
 import lsquic/lsquic_ffi
 import ./helpers/certificate
-
-proc singleAlpn(): HashSet[string] =
-  var alpn = initHashSet[string]()
-  alpn.incl("test")
-  alpn
 
 suite "tls config":
   test "certificate requires key":

@@ -3,10 +3,9 @@
 
 {.used.}
 
-import std/sets
 import chronos, chronos/unittest2/asynctests, results, chronicles
 import lsquic
-import ./helpers/certificate
+import ./helpers/[certificate, clientserver]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -15,11 +14,6 @@ initializeLsquic(true, true)
 type RejectVerifierRecorder = ref object
   rejectCount: int
   fired: AsyncEvent
-
-proc singleAlpn(name: string = "test"): HashSet[string] =
-  var alpn = initHashSet[string]()
-  alpn.incl(name)
-  alpn
 
 proc acceptingCertificateCb(
     serverName: string, derCertificates: seq[seq[byte]]
@@ -51,26 +45,10 @@ proc makeRejectingCertificateCb(
     recorder.fired.fire()
     false
 
-proc makeClientWithVerifier(
-    verifier: CertificateVerifier, alpn: HashSet[string] = singleAlpn()
-): QuicClient =
-  let tlsConfig =
-    TLSConfig.new(testCertificate(), testPrivateKey(), alpn, Opt.some(verifier))
-  QuicClient.new(tlsConfig)
-
-proc makeServerWithVerifier(
-    verifier: CertificateVerifier, alpn: HashSet[string] = singleAlpn()
-): QuicServer =
-  let tlsConfig =
-    TLSConfig.new(testCertificate(), testPrivateKey(), alpn, Opt.some(verifier))
-  QuicServer.new(tlsConfig)
-
 suite "certificate verifier":
   asyncTest "accepting custom verifier allows handshake":
-    let client =
-      makeClientWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
-    let server =
-      makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let client = makeClient(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))
     let listener = server.listen(initTAddress("127.0.0.1:0"))
     defer:
       await allFutures(client.stop(), listener.stop())
@@ -87,10 +65,8 @@ suite "certificate verifier":
     incoming.close()
 
   asyncTest "rejecting client verifier rejects handshake":
-    let client =
-      makeClientWithVerifier(CustomCertificateVerifier.init(rejectingCertificateCb))
-    let server =
-      makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let client = makeClient(CustomCertificateVerifier.init(rejectingCertificateCb))
+    let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))
     let listener = server.listen(initTAddress("127.0.0.1:0"))
     defer:
       await allFutures(client.stop(), listener.stop())
@@ -99,10 +75,8 @@ suite "certificate verifier":
       discard await client.dial(listener.localAddress())
 
   asyncTest "raising client verifier rejects handshake":
-    let client =
-      makeClientWithVerifier(CustomCertificateVerifier.init(raisingCertificateCb))
-    let server =
-      makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let client = makeClient(CustomCertificateVerifier.init(raisingCertificateCb))
+    let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))
     let listener = server.listen(initTAddress("127.0.0.1:0"))
     defer:
       await allFutures(client.stop(), listener.stop())
@@ -111,10 +85,10 @@ suite "certificate verifier":
       discard await client.dial(listener.localAddress())
 
   asyncTest "alpn mismatch rejects handshake":
-    let client = makeClientWithVerifier(
+    let client = makeClient(
       CustomCertificateVerifier.init(acceptingCertificateCb), singleAlpn("client-proto")
     )
-    let server = makeServerWithVerifier(
+    let server = makeServer(
       CustomCertificateVerifier.init(acceptingCertificateCb), singleAlpn("server-proto")
     )
     let listener = server.listen(initTAddress("127.0.0.1:0"))
@@ -126,11 +100,9 @@ suite "certificate verifier":
 
   asyncTest "server-side verifier callback does not fail handshake without client auth":
     let recorder = RejectVerifierRecorder(fired: newAsyncEvent())
-    let client =
-      makeClientWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
-    let server = makeServerWithVerifier(
-      CustomCertificateVerifier.init(recorder.makeRejectingCertificateCb())
-    )
+    let client = makeClient(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let server =
+      makeServer(CustomCertificateVerifier.init(recorder.makeRejectingCertificateCb()))
     let listener = server.listen(initTAddress("127.0.0.1:0"))
     defer:
       await allFutures(client.stop(), listener.stop())
@@ -145,9 +117,8 @@ suite "certificate verifier":
     outgoing.close()
 
   asyncTest "insecure verifier allows handshake":
-    let client = makeClientWithVerifier(InsecureCertificateVerifier.init())
-    let server =
-      makeServerWithVerifier(CustomCertificateVerifier.init(acceptingCertificateCb))
+    let client = makeClient(InsecureCertificateVerifier.init())
+    let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))
     let listener = server.listen(initTAddress("127.0.0.1:0"))
     defer:
       await allFutures(client.stop(), listener.stop())
