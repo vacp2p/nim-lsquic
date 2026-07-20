@@ -34,7 +34,7 @@ proc close*(conn: Connection) {.raises: [].} =
     return
   conn.isClosed = true
   conn.quicConn.closedLocal = true
-  conn.quicContext.close(conn.quicConn)
+  conn.quicContext.abort(conn.quicConn)
 
 proc abort*(conn: Connection) {.gcsafe, raises: [].} =
   if conn.isClosed:
