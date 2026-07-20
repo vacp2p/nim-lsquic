@@ -144,7 +144,6 @@ suite "lifecycle":
       await stopPeers(peers)
 
     let incomingWaiting = peers.incoming.incomingStream()
-    await sleepAsync(100.milliseconds)
     peers.outgoing.abort()
 
     expect ConnectionClosedError:
@@ -206,20 +205,12 @@ suite "lifecycle":
       await stopPeers(peers)
 
     let outgoingStream = await peers.outgoing.openStream()
+    # 16 MB exceeds the send window, so the write parks with a pending write task
     let writing = outgoingStream.write(newData(16 * 1024 * 1024, 0x7A'u8))
 
-    var observedPending = false
-    for _ in 0 ..< 200:
-      if outgoingStream.toWrite.isSome:
-        observedPending = true
-        break
-      if writing.finished:
-        break
-      await sleepAsync(10.milliseconds)
+    check outgoingStream.toWrite.isSome
 
-    check observedPending
-    if not writing.finished:
-      await writing.cancelAndWait()
+    await writing.cancelAndWait()
 
     check outgoingStream.toWrite.isNone()
 
@@ -363,7 +354,6 @@ suite "lifecycle":
     var buf = newSeq[byte](8)
     let reading = incomingStream.readOnce(buf)
 
-    await sleepAsync(100.milliseconds)
     outgoingStream.abort()
 
     check (await reading.withTimeout(2.seconds))
