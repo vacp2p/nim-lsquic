@@ -146,6 +146,14 @@ suite "certificate verifier":
     outgoing.close()
     incoming.close()
 
+  asyncTest "dial without default or per-dial verifier fails fast":
+    let client = makeClientWithoutVerifier()
+    defer:
+      await client.stop()
+
+    expect QuicError:
+      discard await client.dial(AutoAddressIP4)
+
   asyncTest "concurrent per-dial verifiers stay isolated":
     let client = makeClientWithoutVerifier()
     let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))
@@ -159,11 +167,11 @@ suite "certificate verifier":
     let accepting = okListener.accept()
     let okDial = client.dial(
       okListener.localAddress(),
-      CustomCertificateVerifier.init(okRecorder.makeCertificateCb(true)),
+      CustomCertificateVerifier.init(okRecorder.makeCertificateCb(true))
     )
     let rejectDial = client.dial(
       rejectListener.localAddress(),
-      CustomCertificateVerifier.init(rejectRecorder.makeCertificateCb(false)),
+      CustomCertificateVerifier.init(rejectRecorder.makeCertificateCb(false))
     )
 
     let outgoing = await okDial

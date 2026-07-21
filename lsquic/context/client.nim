@@ -7,7 +7,8 @@ import chronicles
 import chronos
 import chronos/osdefs
 import ./[context, io, stream]
-import ../[lsquic_ffi, errors, tlsconfig, timeout, stream, certificates, certificateverifier]
+import
+  ../[lsquic_ffi, errors, tlsconfig, timeout, stream, certificates, certificateverifier]
 import ../helpers/sequninit
 
 proc onNewConn(

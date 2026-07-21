@@ -2,7 +2,11 @@
 # Copyright (c) Status Research & Development GmbH
 
 import chronos, chronicles, results
-import ./[errors, connection, tlsconfig, datagram, connectionmanager, lsquic_ffi, certificateverifier]
+import
+  ./[
+    errors, connection, tlsconfig, datagram, connectionmanager, lsquic_ffi,
+    certificateverifier,
+  ]
 import ./context/[server, client, context, io]
 
 type
@@ -264,6 +268,12 @@ proc dial*(
 ): Future[Connection] {.
     async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
 .} =
+  if endpoint.tlsConfig.certVerifier.isNone:
+    raise newException(
+      QuicError,
+      "certificate verifier is required; use dial(address, certVerifier)"
+    )
+
   await endpoint.dial(address, Opt.none(CertificateVerifier))
 
 proc dial*(
