@@ -271,7 +271,7 @@ proc verifyCertificate(
         if quicConn.certVerifier.isSome:
           certVerifier = quicConn.certVerifier
 
-    if certVerifier.isNone:
+    if certVerifier.isNone or certVerifier.get().isNil:
       if not out_alert.isNil:
         out_alert[] = SSL_AD_INTERNAL_ERROR
       return ssl_verify_invalid
