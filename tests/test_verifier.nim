@@ -167,11 +167,11 @@ suite "certificate verifier":
     let accepting = okListener.accept()
     let okDial = client.dial(
       okListener.localAddress(),
-      CustomCertificateVerifier.init(okRecorder.makeCertificateCb(true))
+      CustomCertificateVerifier.init(okRecorder.makeCertificateCb(true)),
     )
     let rejectDial = client.dial(
       rejectListener.localAddress(),
-      CustomCertificateVerifier.init(rejectRecorder.makeCertificateCb(false))
+      CustomCertificateVerifier.init(rejectRecorder.makeCertificateCb(false)),
     )
 
     let outgoing = await okDial
