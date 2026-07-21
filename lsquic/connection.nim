@@ -2,8 +2,8 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import chronicles
-import chronos
-import ./[errors, stream, lsquic_ffi]
+import chronos, results
+import ./[errors, stream, lsquic_ffi, certificateverifier]
 import ./context/context
 
 type
@@ -21,6 +21,7 @@ type
   IncomingConnection = ref object of Connection
 
   OutgoingConnection = ref object of Connection
+    certVerifier: Opt[CertificateVerifier]
 
 proc ensureClosed(connection: Connection) {.async: (raises: [CancelledError]).} =
   await connection.closedWaiter
@@ -46,7 +47,10 @@ proc abort*(conn: Connection) {.gcsafe, raises: [].} =
 # TODO: refactor this into a single newConnection
 
 proc newOutgoingConnection*(
-    quicContext: QuicContext, local: TransportAddress, remote: TransportAddress
+    quicContext: QuicContext,
+    local: TransportAddress,
+    remote: TransportAddress,
+    certVerifier: Opt[CertificateVerifier] = Opt.none(CertificateVerifier),
 ): OutgoingConnection =
   let closed = newAsyncEvent()
   let closedWaiter = closed.wait()
@@ -55,6 +59,7 @@ proc newOutgoingConnection*(
     local: local,
     remote: remote,
     closed: closed,
+    certVerifier: certVerifier,
     closedWaiter: closedWaiter,
   )
   conn.ensureClosedFut = conn.ensureClosed()
@@ -90,7 +95,7 @@ proc dial*(
     connection.closed.fire()
 
   connection.quicConn = connection.quicContext.dial(
-    connection.local, connection.remote, retFut, onClose
+    connection.local, connection.remote, retFut, onClose, connection.certVerifier
   ).valueOr:
     retFut.fail(newException(DialError, "could not dial: " & error))
     nil

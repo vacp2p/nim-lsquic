@@ -2,7 +2,7 @@
 # Copyright (c) Status Research & Development GmbH
 
 import chronos, chronicles, results
-import ./[errors, connection, tlsconfig, datagram, connectionmanager, lsquic_ffi]
+import ./[errors, connection, tlsconfig, datagram, connectionmanager, lsquic_ffi, certificateverifier]
 import ./context/[server, client, context, io]
 
 type
@@ -238,13 +238,16 @@ proc accept*(
     endpoint.connman.addConnection(conn)
     return conn
 
-proc dial*(
-    endpoint: QuicEndpoint, address: TransportAddress
+proc dial(
+    endpoint: QuicEndpoint,
+    address: TransportAddress,
+    certVerifier: Opt[CertificateVerifier],
 ): Future[Connection] {.
     async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
 .} =
   let ctx = endpoint.ensureClientContext()
-  let connection = newOutgoingConnection(ctx, endpoint.udp.localAddress(), address)
+  let connection =
+    newOutgoingConnection(ctx, endpoint.udp.localAddress(), address, certVerifier)
   endpoint.connman.addConnection(connection)
   var connected = false
   try:
@@ -255,6 +258,23 @@ proc dial*(
       endpoint.connman.removeConnection(connection)
 
   connection
+
+proc dial*(
+    endpoint: QuicEndpoint, address: TransportAddress
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  await endpoint.dial(address, Opt.none(CertificateVerifier))
+
+proc dial*(
+    endpoint: QuicEndpoint, address: TransportAddress, certVerifier: CertificateVerifier
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  if certVerifier.isNil:
+    raise newException(QuicError, "certificate verifier is nil")
+
+  await endpoint.dial(address, Opt.some(certVerifier))
 
 proc localAddress*(
     endpoint: QuicEndpoint

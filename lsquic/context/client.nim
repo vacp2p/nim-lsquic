@@ -7,7 +7,7 @@ import chronicles
 import chronos
 import chronos/osdefs
 import ./[context, io, stream]
-import ../[lsquic_ffi, errors, tlsconfig, timeout, stream, certificates]
+import ../[lsquic_ffi, errors, tlsconfig, timeout, stream, certificates, certificateverifier]
 import ../helpers/sequninit
 
 proc onNewConn(
@@ -72,6 +72,7 @@ method dial*(
     remote: TransportAddress,
     connectedFut: Future[void],
     onClose: proc() {.gcsafe, raises: [].},
+    certVerifier: Opt[CertificateVerifier],
 ): Result[QuicConnection, string] {.raises: [], gcsafe.} =
   var
     localAddress: Sockaddr_storage
@@ -90,6 +91,7 @@ method dial*(
     remote: remote,
     incoming: newAsyncQueue[Stream](),
     onClose: onClose,
+    certVerifier: certVerifier,
   )
   GC_ref(quicClientConn) # Keep it pinned until on_conn_closed is called
   let conn = lsquic_engine_connect(
@@ -120,9 +122,6 @@ const Cubic = 1
 const Adaptive = 3
 
 proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
-  if tlsConfig.certVerifier.isNone:
-    return err("client TLSConfig requires a certificate verifier")
-
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig
   ctx.running = true

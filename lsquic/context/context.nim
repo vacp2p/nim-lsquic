@@ -164,6 +164,7 @@ type QuicConnection* = ref object of RootObj
   local*: TransportAddress
   remote*: TransportAddress
   lsquicConn*: ptr lsquic_conn_t
+  certVerifier*: Opt[CertificateVerifier]
   onClose*: proc() {.gcsafe, raises: [].}
   closedLocal*: bool
   closedRemote*: bool
@@ -256,14 +257,28 @@ proc verifyCertificate(
       return ssl_verify_invalid
 
     let quicCtx = cast[QuicContext](SSL_CTX_get_ex_data(sslCtx, SSL_CTX_ID))
-    if quicCtx.isNil or quicCtx.tlsConfig.certVerifier.isNone:
+    if quicCtx.isNil:
+      if not out_alert.isNil:
+        out_alert[] = SSL_AD_INTERNAL_ERROR
+      return ssl_verify_invalid
+
+    var certVerifier = quicCtx.tlsConfig.certVerifier
+    let conn = lsquic_ssl_to_conn(ssl)
+    if not conn.isNil:
+      let connCtx = lsquic_conn_get_ctx(conn)
+      if not connCtx.isNil:
+        let quicConn = cast[QuicConnection](connCtx)
+        if quicConn.certVerifier.isSome:
+          certVerifier = quicConn.certVerifier
+
+    if certVerifier.isNone:
       if not out_alert.isNil:
         out_alert[] = SSL_AD_INTERNAL_ERROR
       return ssl_verify_invalid
 
     let derCertificates = getFullCertChain(ssl)
     let serverName = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name)
-    if quicCtx.tlsConfig.certVerifier.get().verify($serverName, derCertificates):
+    if certVerifier.get().verify($serverName, derCertificates):
       return ssl_verify_ok
 
     if not out_alert.isNil:
@@ -322,7 +337,7 @@ proc setupSSLContext*(quicCtx: QuicContext) =
   if (SSL_CTX_set1_sigalgs_list(sslCtx, "ed25519:ecdsa_secp256r1_sha256") != 1):
     raiseAssert "could not set supported algorithm list"
 
-  if quicCtx.tlsConfig.certVerifier.isSome:
+  if quicCtx of ClientContext or quicCtx.tlsConfig.certVerifier.isSome:
     SSL_CTX_set_custom_verify(
       sslCtx, SSL_VERIFY_PEER or SSL_VERIFY_FAIL_IF_NO_PEER_CERT, verifyCertificate
     )
@@ -363,6 +378,7 @@ method dial*(
     remote: TransportAddress,
     connectedFut: Future[void],
     onClose: proc() {.gcsafe, raises: [].},
+    certVerifier: Opt[CertificateVerifier],
 ): Result[QuicConnection, string] {.base, gcsafe, raises: [].} =
   raiseAssert "dial not implemented"
 
