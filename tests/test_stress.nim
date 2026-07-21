@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results, chronicles
 import lsquic
-import ./helpers/[clientserver, param, stream]
+import ./helpers/[address, clientserver, param, stream]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -34,20 +34,10 @@ proc payload(id: int, size: int): seq[byte] =
     data[i] = byte((id + i) mod 251)
   data
 
-proc connectPeers(): Future[(QuicClient, Listener, Connection, Connection)] {.async.} =
-  let client = makeClient()
-  let server = makeServer()
-  let listener = server.listen(initTAddress("127.0.0.1:0"))
-  let accepting = listener.accept()
-  let outgoing = await client.dial(listener.localAddress())
-  let incoming = await accepting
-
-  (client, listener, outgoing, incoming)
-
 proc runSequentialRound(round: int) {.async.} =
   let client = makeClient()
   let server = makeServer()
-  let listener = server.listen(initTAddress("127.0.0.1:0"))
+  let listener = server.listen(AutoAddressIP4)
   defer:
     await allFutures(client.stop(), listener.stop())
 
@@ -71,24 +61,19 @@ proc runSequentialRound(round: int) {.async.} =
   check (await incoming.closedFuture().withTimeout(2.seconds))
 
 suite "stress":
-  teardown:
-    cleanupLsquic()
-
   asyncTest "repeated connect and transfer":
     for round in 0 ..< SequentialRounds:
       await runSequentialRound(round)
 
   asyncTest "large single write roundtrip":
-    let (client, listener, outgoing, incoming) = await connectPeers()
+    let peers = await connectPeers()
     defer:
-      outgoing.close()
-      incoming.close()
-      await allFutures(client.stop(), listener.stop())
+      await peers.stop()
 
     let sent = payload(99, LargeWriteSize)
-    let outgoingStream = await outgoing.openStream()
+    let outgoingStream = await peers.outgoing.openStream()
     let writing = outgoingStream.write(sent)
-    let incomingStream = await incoming.incomingStream()
+    let incomingStream = await peers.incoming.incomingStream()
     let reading = incomingStream.readStreamTillEOF()
 
     await writing
@@ -98,18 +83,16 @@ suite "stress":
     await incomingStream.close()
 
   asyncTest "concurrent writes on one stream preserve chunk boundaries":
-    let (client, listener, outgoing, incoming) = await connectPeers()
+    let peers = await connectPeers()
     defer:
-      outgoing.close()
-      incoming.close()
-      await allFutures(client.stop(), listener.stop())
+      await peers.stop()
 
-    let outgoingStream = await outgoing.openStream()
+    let outgoingStream = await peers.outgoing.openStream()
     var writes: seq[Future[void]]
     for chunkId in 0 ..< ConcurrentWriteChunks:
       writes.add(outgoingStream.write(payload(chunkId, ConcurrentWriteChunkSize)))
 
-    let incomingStream = await incoming.incomingStream()
+    let incomingStream = await peers.incoming.incomingStream()
     let reading = incomingStream.readStreamTillEOF()
 
     await allFutures(writes)
@@ -135,7 +118,7 @@ suite "stress":
 
   asyncTest "multiple concurrent clients":
     let server = makeServer()
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     let address = listener.localAddress()
     defer:
       await listener.stop()

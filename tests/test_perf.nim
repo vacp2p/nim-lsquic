@@ -6,7 +6,7 @@
 import
   chronos, chronos/unittest2/asynctests, results, stew/endians2, sequtils, chronicles
 import lsquic
-import ./helpers/[clientserver, param]
+import ./helpers/[address, clientserver, param]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -19,12 +19,13 @@ const
   chunkSize = 65536 # 64KB chunks like perf
 
 proc runPerf(): Future[Duration] {.async.} =
-  let address = initTAddress("127.0.0.1:12345")
+  let address = AutoAddressIP4
   let client = makeClient()
   let server = makeServer()
   let listener = server.listen(address)
+  let boundAddress = listener.localAddress()
   let accepting = listener.accept()
-  let dialing = client.dial(address)
+  let dialing = client.dial(boundAddress)
 
   let outgoingConn = await dialing
   let incomingConn = await accepting
@@ -118,9 +119,6 @@ proc runPerf(): Future[Duration] {.async.} =
   return duration
 
 suite "perf protocol simulation":
-  teardown:
-    cleanupLsquic()
-
   asyncTest "test":
     var total: Duration
 

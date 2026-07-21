@@ -3,7 +3,7 @@
 
 import results, std/sets, chronos, chronicles
 import lsquic
-import ./certificate
+import ./[address, certificate]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -12,23 +12,26 @@ proc certificateCb(
 ): bool {.gcsafe.} =
   return derCertificates.len > 0
 
-proc makeTLSConfig*(): TLSConfig {.raises: [QuicConfigError].} =
-  let customCertVerif: CertificateVerifier =
-    CustomCertificateVerifier.init(certificateCb)
-  TLSConfig.new(
-    testCertificate(),
-    testPrivateKey(),
-    @["test"].toHashSet(),
-    Opt.some(customCertVerif),
-  )
+proc defaultCertificateVerifier*(): CertificateVerifier =
+  CustomCertificateVerifier.init(certificateCb)
 
-proc makeClient*(): QuicClient {.
-    raises: [QuicConfigError, QuicError, TransportOsError]
-.} =
-  return QuicClient.new(makeTLSConfig())
+proc makeTLSConfig*(
+    verifier: CertificateVerifier = defaultCertificateVerifier(),
+    alpn: HashSet[string] = makeAlpn(),
+): TLSConfig {.raises: [QuicConfigError].} =
+  TLSConfig.new(testCertificate(), testPrivateKey(), alpn, Opt.some(verifier))
 
-proc makeServer*(): QuicServer {.raises: [QuicConfigError].} =
-  return QuicServer.new(makeTLSConfig())
+proc makeClient*(
+    verifier: CertificateVerifier = defaultCertificateVerifier(),
+    alpn: HashSet[string] = makeAlpn(),
+): QuicClient {.raises: [QuicConfigError, QuicError, TransportOsError].} =
+  return QuicClient.new(makeTLSConfig(verifier, alpn))
+
+proc makeServer*(
+    verifier: CertificateVerifier = defaultCertificateVerifier(),
+    alpn: HashSet[string] = makeAlpn(),
+): QuicServer {.raises: [QuicConfigError].} =
+  return QuicServer.new(makeTLSConfig(verifier, alpn))
 
 proc makeEndpoint*(
     address: TransportAddress,
@@ -40,3 +43,25 @@ proc makeDialEndpoint*(
     family: AddressFamily
 ): QuicEndpoint {.raises: [QuicError, TransportOsError].} =
   QuicEndpoint.new(makeTLSConfig(), family)
+
+type ConnectedPeers* =
+  tuple[
+    client: QuicClient, listener: Listener, outgoing: Connection, incoming: Connection
+  ]
+
+proc connectPeers*(): Future[ConnectedPeers] {.async.} =
+  let client = makeClient()
+  let server = makeServer()
+  let listener = server.listen(AutoAddressIP4)
+  let accepting = listener.accept()
+  let outgoing = await client.dial(listener.localAddress())
+  let incoming = await accepting
+
+  (client, listener, outgoing, incoming)
+
+proc stop*(peers: ConnectedPeers) {.async.} =
+  if not peers.outgoing.isNil:
+    peers.outgoing.close()
+  if not peers.incoming.isNil:
+    peers.incoming.close()
+  await allFutures(peers.client.stop(), peers.listener.stop())
