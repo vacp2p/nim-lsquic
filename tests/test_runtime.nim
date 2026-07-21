@@ -22,9 +22,11 @@ suite "runtime":
     # QuicServer.listen builds a real lsquic engine
     initializeLsquic(true, true)
     let listener = QuicServer.new(makeTLSConfig()).listen(AutoAddressIP4)
+    defer:
+      await listener.stop()
+      cleanupLsquic()
+
     check listener.localAddress().port != Port(0)
-    await listener.stop()
-    cleanupLsquic()
 
   test "per-role init flags are accepted":
     cleanupLsquic()
