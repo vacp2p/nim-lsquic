@@ -28,7 +28,7 @@ suite "runtime":
 
   test "per-role init flags are accepted":
     cleanupLsquic()
-    initializeLsquic(client = true, server = false) # `if server:` false path
+    initializeLsquic(client = true, server = false)
     cleanupLsquic()
-    initializeLsquic(client = false, server = true) # `if client:` false path
+    initializeLsquic(client = false, server = true)
     cleanupLsquic()
