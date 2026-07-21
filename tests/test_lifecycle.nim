@@ -4,13 +4,11 @@
 {.used.}
 
 import std/sets
-import chronos, chronos/unittest2/asynctests, results, chronicles
+import chronos, chronos/unittest2/asynctests, results
 import lsquic
 import lsquic/[datagram]
 import lsquic/context/[client, context, io]
 import ./helpers/[address, certificate, clientserver, stream]
-
-trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
 initializeLsquic(true, true)
 

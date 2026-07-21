@@ -3,11 +3,9 @@
 
 {.used.}
 
-import chronos, chronos/unittest2/asynctests, results, chronicles, sequtils
+import chronos, chronos/unittest2/asynctests, results, sequtils
 import lsquic
 import ./helpers/[address, clientserver]
-
-trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
 initializeLsquic(true, true)
 
