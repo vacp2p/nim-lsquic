@@ -8,7 +8,7 @@ import chronos, chronos/unittest2/asynctests, results, chronicles
 import lsquic
 import lsquic/[datagram]
 import lsquic/context/[client, context, io]
-import ./helpers/[certificate, clientserver, stream]
+import ./helpers/[address, certificate, clientserver, stream]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -17,7 +17,7 @@ initializeLsquic(true, true)
 suite "lifecycle":
   asyncTest "listener stop makes accept fail":
     let server = makeServer()
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     let accepting = listener.accept()
 
     await listener.stop()
@@ -27,7 +27,7 @@ suite "lifecycle":
 
   asyncTest "listener stop fails all pending accepts":
     let server = makeServer()
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     let accepting1 = listener.accept()
     let accepting2 = listener.accept()
     let accepting3 = listener.accept()
@@ -44,7 +44,7 @@ suite "lifecycle":
   asyncTest "connection close propagates to peer":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     peers.outgoing.close()
 
@@ -54,7 +54,7 @@ suite "lifecycle":
 
   asyncTest "accept skips closed connection and client redials":
     let server = makeServer()
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     let address = listener.localAddress()
     let client = makeClient()
     var accepted: Future[Connection]
@@ -104,7 +104,7 @@ suite "lifecycle":
   asyncTest "operations fail after connection close":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     peers.outgoing.close()
     check (await peers.outgoing.closedFuture().withTimeout(2.seconds))
@@ -119,7 +119,7 @@ suite "lifecycle":
   asyncTest "abort wakes pending incoming stream":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     let incomingWaiting = peers.incoming.incomingStream()
     peers.outgoing.abort()
@@ -145,7 +145,7 @@ suite "lifecycle":
   asyncTest "abort after open stream still closes connection":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     let opening = peers.outgoing.openStream()
     peers.outgoing.abort()
@@ -159,7 +159,7 @@ suite "lifecycle":
   asyncTest "write after close raises stream error":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     let outgoingStream = await peers.outgoing.openStream()
     await outgoingStream.write(@[1'u8])
@@ -180,7 +180,7 @@ suite "lifecycle":
   asyncTest "cancel pending write clears stream write task":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     let outgoingStream = await peers.outgoing.openStream()
     # 16 MB exceeds the send window, so the write parks with a pending write task
@@ -195,7 +195,7 @@ suite "lifecycle":
   asyncTest "read once returns zero repeatedly after eof":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     let outgoingStream = await peers.outgoing.openStream()
     await outgoingStream.write(@[9'u8, 8, 7, 6])
@@ -212,7 +212,7 @@ suite "lifecycle":
   asyncTest "blocked read completes when peer half closes":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     let outgoingStream = await peers.outgoing.openStream()
     await outgoingStream.write(@[42'u8])
@@ -238,7 +238,7 @@ suite "lifecycle":
     const StreamCreditTimeout = 30.seconds
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     proc openStreamWithTimeout(
         conn: Connection
@@ -282,7 +282,7 @@ suite "lifecycle":
   asyncTest "cancelled blocked read clears pending read":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     let incomingWaiting = peers.incoming.incomingStream()
     let outgoingStream = await peers.outgoing.openStream()
@@ -319,7 +319,7 @@ suite "lifecycle":
   asyncTest "peer reset":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     let outgoingStream = await peers.outgoing.openStream()
     await outgoingStream.write(@[1'u8])

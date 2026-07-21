@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results, chronicles
 import lsquic
-import ./helpers/[clientserver, param, stream]
+import ./helpers/[address, clientserver, param, stream]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -37,7 +37,7 @@ proc payload(id: int, size: int): seq[byte] =
 proc runSequentialRound(round: int) {.async.} =
   let client = makeClient()
   let server = makeServer()
-  let listener = server.listen(initTAddress("127.0.0.1:0"))
+  let listener = server.listen(AutoAddressIP4)
   defer:
     await allFutures(client.stop(), listener.stop())
 
@@ -68,7 +68,7 @@ suite "stress":
   asyncTest "large single write roundtrip":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     let sent = payload(99, LargeWriteSize)
     let outgoingStream = await peers.outgoing.openStream()
@@ -85,7 +85,7 @@ suite "stress":
   asyncTest "concurrent writes on one stream preserve chunk boundaries":
     let peers = await connectPeers()
     defer:
-      await stopPeers(peers)
+      await peers.stop()
 
     let outgoingStream = await peers.outgoing.openStream()
     var writes: seq[Future[void]]
@@ -118,7 +118,7 @@ suite "stress":
 
   asyncTest "multiple concurrent clients":
     let server = makeServer()
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     let address = listener.localAddress()
     defer:
       await listener.stop()

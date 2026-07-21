@@ -18,7 +18,7 @@ proc testCertificate*(): seq[byte] =
 proc testPrivateKey*(): seq[byte] =
   strToSeq(privateKeyStr)
 
-proc singleAlpn*(name: string = "test"): HashSet[string] =
+proc makeAlpn*(name: string = "test"): HashSet[string] =
   var alpn = initHashSet[string]()
   alpn.incl(name)
   alpn

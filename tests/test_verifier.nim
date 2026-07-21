@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results, chronicles
 import lsquic
-import ./helpers/[certificate, clientserver]
+import ./helpers/[address, certificate, clientserver]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -49,7 +49,7 @@ suite "certificate verifier":
   asyncTest "accepting custom verifier allows handshake":
     let client = makeClient(CustomCertificateVerifier.init(acceptingCertificateCb))
     let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     defer:
       await allFutures(client.stop(), listener.stop())
 
@@ -67,7 +67,7 @@ suite "certificate verifier":
   asyncTest "rejecting client verifier rejects handshake":
     let client = makeClient(CustomCertificateVerifier.init(rejectingCertificateCb))
     let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     defer:
       await allFutures(client.stop(), listener.stop())
 
@@ -77,7 +77,7 @@ suite "certificate verifier":
   asyncTest "raising client verifier rejects handshake":
     let client = makeClient(CustomCertificateVerifier.init(raisingCertificateCb))
     let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     defer:
       await allFutures(client.stop(), listener.stop())
 
@@ -86,12 +86,12 @@ suite "certificate verifier":
 
   asyncTest "alpn mismatch rejects handshake":
     let client = makeClient(
-      CustomCertificateVerifier.init(acceptingCertificateCb), singleAlpn("client-proto")
+      CustomCertificateVerifier.init(acceptingCertificateCb), makeAlpn("client-proto")
     )
     let server = makeServer(
-      CustomCertificateVerifier.init(acceptingCertificateCb), singleAlpn("server-proto")
+      CustomCertificateVerifier.init(acceptingCertificateCb), makeAlpn("server-proto")
     )
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     defer:
       await allFutures(client.stop(), listener.stop())
 
@@ -103,7 +103,7 @@ suite "certificate verifier":
     let client = makeClient(CustomCertificateVerifier.init(acceptingCertificateCb))
     let server =
       makeServer(CustomCertificateVerifier.init(recorder.makeRejectingCertificateCb()))
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     defer:
       await allFutures(client.stop(), listener.stop())
 
@@ -119,7 +119,7 @@ suite "certificate verifier":
   asyncTest "insecure verifier allows handshake":
     let client = makeClient(InsecureCertificateVerifier.init())
     let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))
-    let listener = server.listen(initTAddress("127.0.0.1:0"))
+    let listener = server.listen(AutoAddressIP4)
     defer:
       await allFutures(client.stop(), listener.stop())
 

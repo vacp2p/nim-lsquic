@@ -3,7 +3,7 @@
 
 import results, std/sets, chronos, chronicles
 import lsquic
-import ./certificate
+import ./[address, certificate]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -17,19 +17,19 @@ proc defaultCertificateVerifier*(): CertificateVerifier =
 
 proc makeTLSConfig*(
     verifier: CertificateVerifier = defaultCertificateVerifier(),
-    alpn: HashSet[string] = singleAlpn(),
+    alpn: HashSet[string] = makeAlpn(),
 ): TLSConfig {.raises: [QuicConfigError].} =
   TLSConfig.new(testCertificate(), testPrivateKey(), alpn, Opt.some(verifier))
 
 proc makeClient*(
     verifier: CertificateVerifier = defaultCertificateVerifier(),
-    alpn: HashSet[string] = singleAlpn(),
+    alpn: HashSet[string] = makeAlpn(),
 ): QuicClient {.raises: [QuicConfigError, QuicError, TransportOsError].} =
   return QuicClient.new(makeTLSConfig(verifier, alpn))
 
 proc makeServer*(
     verifier: CertificateVerifier = defaultCertificateVerifier(),
-    alpn: HashSet[string] = singleAlpn(),
+    alpn: HashSet[string] = makeAlpn(),
 ): QuicServer {.raises: [QuicConfigError].} =
   return QuicServer.new(makeTLSConfig(verifier, alpn))
 
@@ -52,14 +52,14 @@ type ConnectedPeers* =
 proc connectPeers*(): Future[ConnectedPeers] {.async.} =
   let client = makeClient()
   let server = makeServer()
-  let listener = server.listen(initTAddress("127.0.0.1:0"))
+  let listener = server.listen(AutoAddressIP4)
   let accepting = listener.accept()
   let outgoing = await client.dial(listener.localAddress())
   let incoming = await accepting
 
   (client, listener, outgoing, incoming)
 
-proc stopPeers*(peers: ConnectedPeers) {.async.} =
+proc stop*(peers: ConnectedPeers) {.async.} =
   if not peers.outgoing.isNil:
     peers.outgoing.close()
   if not peers.incoming.isNil:

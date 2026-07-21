@@ -6,7 +6,7 @@
 import
   chronos, chronos/unittest2/asynctests, results, stew/endians2, sequtils, chronicles
 import lsquic
-import ./helpers/[clientserver, param]
+import ./helpers/[address, clientserver, param]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -19,7 +19,7 @@ const
   chunkSize = 65536 # 64KB chunks like perf
 
 proc runPerf(): Future[Duration] {.async.} =
-  let address = initTAddress("127.0.0.1:0")
+  let address = AutoAddressIP4
   let client = makeClient()
   let server = makeServer()
   let listener = server.listen(address)

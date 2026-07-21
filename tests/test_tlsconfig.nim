@@ -25,7 +25,7 @@ suite "tls config":
       discard QuicServer.new(TLSConfig.new())
 
   test "single alpn value is encoded":
-    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), singleAlpn())
+    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), makeAlpn())
 
     check cfg.alpnWire == "\x04test"
 

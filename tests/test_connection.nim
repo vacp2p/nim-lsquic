@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results, chronicles, sequtils
 import lsquic
-import ./helpers/clientserver
+import ./helpers/[address, clientserver]
 
 trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
 
@@ -19,12 +19,12 @@ proc runConnectionTest(
   let listener = server.listen(listenAddress)
   let boundAddress = listener.localAddress()
   # dial the requested address on the port the listener actually bound
-  var dialAddress = dialAddress
-  dialAddress.port = boundAddress.port
+  var effectiveDialAddress = dialAddress
+  effectiveDialAddress.port = boundAddress.port
   defer:
     await allFutures(client.stop(), listener.stop())
   let accepting = listener.accept()
-  let dialing = client.dial(dialAddress)
+  let dialing = client.dial(effectiveDialAddress)
 
   let outgoingConn = await dialing
   let incomingConn = await accepting
@@ -32,8 +32,8 @@ proc runConnectionTest(
   check:
     outgoingConn.certificates().len == 1
     incomingConn.certificates().len == 1
-    outgoingConn.remoteAddress().family == dialAddress.family
-    outgoingConn.remoteAddress().port == dialAddress.port
+    outgoingConn.remoteAddress().family == effectiveDialAddress.family
+    outgoingConn.remoteAddress().port == effectiveDialAddress.port
     incomingConn.localAddress().family == boundAddress.family
     incomingConn.localAddress().port == boundAddress.port
     outgoingConn.localAddress().port == incomingConn.remoteAddress().port
@@ -250,25 +250,25 @@ proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
 
 suite "connection":
   asyncTest "ipv4":
-    await runConnectionTest(initTAddress("127.0.0.1:0"))
+    await runConnectionTest(AutoAddressIP4)
 
   asyncTest "ipv6":
-    await runConnectionTest(initTAddress("[::1]:0"))
+    await runConnectionTest(AutoAddressIP6)
 
   asyncTest "ipv6 dual-stack listener accepts ipv4 dial":
-    await runConnectionTest(initTAddress("[::]:0"), initTAddress("127.0.0.1:0"))
+    await runConnectionTest(WildcardIP6, AutoAddressIP4)
 
   asyncTest "multiple concurrent stream opens":
-    await runConcurrentStreamOpenTest(initTAddress("127.0.0.1:0"))
+    await runConcurrentStreamOpenTest(AutoAddressIP4)
 
   asyncTest "endpoint accepts inbound quic":
-    await runEndpointAcceptTest(initTAddress("127.0.0.1:0"))
+    await runEndpointAcceptTest(AutoAddressIP4)
 
   asyncTest "endpoint dials from listener socket":
-    await runEndpointSharedSocketDialTest(initTAddress("127.0.0.1:0"))
+    await runEndpointSharedSocketDialTest(AutoAddressIP4)
 
   asyncTest "dial-only endpoint works without listener":
-    await runEndpointDialOnlyTest(initTAddress("127.0.0.1:0"))
+    await runEndpointDialOnlyTest(AutoAddressIP4)
 
   asyncTest "endpoints cross-dial from shared listener sockets":
-    await runEndpointSharedSocketCrossDialTest(initTAddress("127.0.0.1:0"))
+    await runEndpointSharedSocketCrossDialTest(AutoAddressIP4)
