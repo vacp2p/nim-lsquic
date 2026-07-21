@@ -24,6 +24,7 @@ const
       16 * 1024
     else:
       64 * 1024
+  timeout = 2.seconds
 
 proc payload(id: int, size: int): seq[byte] =
   var data = newSeq[byte](size)
@@ -55,8 +56,8 @@ proc runSequentialRound(round: int) {.async.} =
     await incomingStream.close()
 
   outgoing.close()
-  check (await outgoing.closedFuture().withTimeout(2.seconds))
-  check (await incoming.closedFuture().withTimeout(2.seconds))
+  check (await outgoing.closedFuture().withTimeout(timeout))
+  check (await incoming.closedFuture().withTimeout(timeout))
 
 suite "stress":
   asyncTest "repeated connect and transfer":
@@ -138,7 +139,7 @@ suite "stress":
               await stream.write(@[got[0]])
               await stream.close()
               conn.close()
-              check (await conn.closedFuture().withTimeout(2.seconds))
+              check (await conn.closedFuture().withTimeout(timeout))
           )(incoming)
         )
 
@@ -161,7 +162,7 @@ suite "stress":
       check ack[0] == byte(id)
       check (await stream.readOnce(ack)) == 0
       conn.close()
-      check (await conn.closedFuture().withTimeout(2.seconds))
+      check (await conn.closedFuture().withTimeout(timeout))
 
     var clients: seq[Future[void]]
     for id in 0 ..< ConcurrentClients:
