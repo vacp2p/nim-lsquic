@@ -2,7 +2,7 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import chronos
-import ./[errors, connection, tlsconfig, endpoint]
+import ./[errors, connection, tlsconfig, endpoint, certificateverifier]
 
 type QuicClient* = ref object of RootObj
   tlsConfig: TLSConfig
@@ -35,6 +35,13 @@ proc dial*(
     async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
 .} =
   await self.getEndpoint(address.family).dial(address)
+
+proc dial*(
+    self: QuicClient, address: TransportAddress, certVerifier: CertificateVerifier
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  await self.getEndpoint(address.family).dial(address, certVerifier)
 
 proc stop*(self: QuicClient) {.async: (raises: [CancelledError]).} =
   var stops: seq[Future[void]]

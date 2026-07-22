@@ -2,7 +2,7 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import chronos, results
-import ./[errors, connection, tlsconfig, endpoint]
+import ./[errors, connection, tlsconfig, endpoint, certificateverifier]
 
 type
   QuicServer* = ref object of RootObj
@@ -44,6 +44,16 @@ proc dial*(
     async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
 .} =
   await listener.endpoint.dial(address)
+
+proc dial*(
+    listener: Listener, address: TransportAddress, certVerifier: CertificateVerifier
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  if certVerifier.isNil:
+    raise newException(QuicError, "certificate verifier is nil")
+
+  await listener.endpoint.dial(address, certVerifier)
 
 proc localAddress*(
     listener: Listener
