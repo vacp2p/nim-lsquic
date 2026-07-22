@@ -7,8 +7,9 @@ import std/sets
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
 import lsquic/[datagram]
-import lsquic/context/[client, context, io]
+import lsquic/context/[client, context, io, stream]
 import ./helpers/[address, certificate, clientserver, stream]
+from lsquic/lsquic_ffi import lsquic_stream_ctx_t
 
 initializeLsquic(true, true)
 
@@ -374,3 +375,46 @@ suite "lifecycle":
     ctx.destroy()
     ctx.receive(Datagram(data: @[4'u8, 5, 6]), local, remote)
     ctx.processWhenReady()
+
+  asyncTest "peer reset in both directions merges to read-write":
+    let stream = Stream.new()
+
+    onReset(nil, cast[ptr lsquic_stream_ctx_t](stream), 0.cint)
+    check:
+      stream.resetHow == ResetRead
+      stream.readResetByPeer()
+      not stream.writeResetByPeer()
+      not stream.closeWrite
+
+    onReset(nil, cast[ptr lsquic_stream_ctx_t](stream), 1.cint)
+    check:
+      stream.resetHow == ResetReadWrite
+      stream.readResetByPeer()
+      stream.writeResetByPeer()
+      stream.closeWrite
+
+  asyncTest "peer read reset fails a parked read":
+    let stream = Stream.new()
+    var buf = newSeq[byte](8)
+    let doneFut =
+      Future[int].Raising([CancelledError, StreamError]).init("test parked read")
+    stream.toRead =
+      Opt.some(ReadTask(data: buf[0].addr, dataLen: buf.len, doneFut: doneFut))
+
+    onReset(nil, cast[ptr lsquic_stream_ctx_t](stream), 0.cint)
+
+    check:
+      stream.resetHow == ResetRead
+      stream.toRead.isNone()
+
+    expect StreamResetError:
+      discard await doneFut
+
+  asyncTest "read after read reset raises":
+    let stream = Stream.new()
+    stream.markResetByPeer(ResetRead)
+    check stream.resetHow == ResetRead
+
+    var buf = newSeq[byte](8)
+    expect StreamResetError:
+      discard await stream.readOnce(buf)
