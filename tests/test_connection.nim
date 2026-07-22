@@ -223,6 +223,49 @@ proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
   for seen in received:
     check seen
 
+proc runServerInitiatedStreamTest(address: TransportAddress) {.async.} =
+  let client = makeClient()
+  let server = makeServer()
+  let listener = server.listen(address)
+  let boundAddress = listener.localAddress()
+  defer:
+    await allFuturesRaising(client.stop(), listener.stop())
+
+  let accepting = listener.accept()
+  let dialing = client.dial(boundAddress)
+
+  let outgoingConn = await dialing # client side
+  let incomingConn = await accepting # server side
+
+  # The accepting (server) side opens the stream, the dialing (client) side
+  # receives it. This drives the server-initiated (odd stream id) parity.
+  let serverBehaviour = proc() {.async.} =
+    let stream = await incomingConn.openStream()
+
+    await stream.write(@[1'u8, 2, 3, 4, 5])
+    await stream.write(@[6'u8, 7, 8, 9, 10])
+    await stream.close()
+
+  let clientBehaviour = proc() {.async.} =
+    let stream = await outgoingConn.incomingStream()
+
+    let received = await readStreamTillEOF(stream)
+
+    check:
+      received == @[1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      stream.isEof
+
+    var buf = newSeq[byte](8)
+    check (await stream.readOnce(buf)) == 0
+
+    await stream.close()
+
+  await allFuturesRaising(serverBehaviour(), clientBehaviour())
+
+  outgoingConn.close()
+  incomingConn.close()
+  await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture())
+
 proc runChunkedReadTest(peers: ConnectedPeers, bufSize, payloadSize: int) {.async.} =
   let payload = patternData(payloadSize)
 
@@ -265,6 +308,9 @@ suite "connection":
 
   asyncTest "multiple concurrent stream opens":
     await runConcurrentStreamOpenTest(AutoAddressIP4)
+
+  asyncTest "server initiated stream reaches client incomingStream":
+    await runServerInitiatedStreamTest(AutoAddressIP4)
 
   asyncTest "endpoint accepts inbound quic":
     await runEndpointAcceptTest(AutoAddressIP4)
