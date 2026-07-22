@@ -223,6 +223,36 @@ proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
   for seen in received:
     check seen
 
+proc runChunkedReadTest(peers: ConnectedPeers, bufSize, payloadSize: int) {.async.} =
+  let payload = patternData(payloadSize)
+
+  let sender = proc() {.async.} =
+    let stream = await peers.outgoing.openStream()
+    await stream.write(payload)
+    await stream.close()
+
+  let receiver = proc() {.async.} =
+    let stream = await peers.incoming.incomingStream()
+    let (received, reads) = await readAllChunked(stream, bufSize)
+
+    # A single readOnce never returns more than bufSize bytes, so draining the
+    # whole payload takes at least ceil(payloadSize / bufSize) reads.
+    # Chunked delivery can split it into more reads than that.
+    let minReads = (payloadSize + bufSize - 1) div bufSize
+
+    check:
+      received.len == payloadSize
+      received == payload
+      reads >= minReads
+      stream.isEof
+
+    var buf = newSeq[byte](bufSize)
+    check (await stream.readOnce(buf)) == 0
+
+    await stream.close()
+
+  await allFuturesRaising(sender(), receiver())
+
 suite "connection":
   asyncTest "ipv4":
     await runConnectionTest(AutoAddressIP4)
@@ -247,3 +277,21 @@ suite "connection":
 
   asyncTest "endpoints cross-dial from shared listener sockets":
     await runEndpointSharedSocketCrossDialTest(AutoAddressIP4)
+
+  asyncTest "reads reassemble payloads across buffer sizes":
+    # (bufSize, payloadSize):
+    #   (1, 10)     one byte at a time (max iterations)
+    #   (3, 10)     undersized buffer, non-divisor
+    #   (10, 10)    buffer exactly fits the payload
+    #   (16, 10)    oversized buffer
+    #   (100, 4096) non-divisor across the 4096 stream-buffer boundary
+    #   (1, 65536)  large payload one byte at a time
+    const cases = [(1, 10), (3, 10), (10, 10), (16, 10), (100, 4096), (1, 65536)]
+
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    for (bufSize, payloadSize) in cases:
+      checkpoint("bufSize=" & $bufSize & " payloadSize=" & $payloadSize)
+      await runChunkedReadTest(peers, bufSize, payloadSize)
