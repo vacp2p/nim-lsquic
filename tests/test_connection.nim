@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results, sequtils
 import lsquic
-import ./helpers/[address, clientserver]
+import ./helpers/[address, clientserver, futures, stream]
 
 initializeLsquic(true, true)
 
@@ -48,29 +48,18 @@ proc runConnectionTest(
   let incomingBehaviour = proc() {.async.} =
     let stream = await incomingConn.incomingStream()
 
-    var buf = newSeq[byte](16)
-    var received: seq[byte]
-    while true:
-      let n = await stream.readOnce(buf)
-      if n == 0:
-        break
-      received.add(buf[0 ..< n])
+    let received = await readStreamTillEOF(stream)
 
     check:
       received == @[1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       stream.isEof
 
-    let eofRead = await stream.readOnce(buf)
-    check eofRead == 0
+    var buf = newSeq[byte](8)
+    check (await stream.readOnce(buf)) == 0
 
     await stream.close()
 
-  # Run both concurrently, then await each so a failure in either surfaces
-  let clientBehaviour = outgoingBehaviour()
-  let serverBehaviour = incomingBehaviour()
-  await allFutures(clientBehaviour, serverBehaviour)
-  await clientBehaviour
-  await serverBehaviour
+  await allFuturesRaising(outgoingBehaviour(), incomingBehaviour())
 
   outgoingConn.close()
   incomingConn.close()
