@@ -41,9 +41,6 @@ proc dial*(
 ): Future[Connection] {.
     async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
 .} =
-  if certVerifier.isNil:
-    raise newException(QuicError, "certificate verifier is nil")
-
   await self.getEndpoint(address.family).dial(address, certVerifier)
 
 proc stop*(self: QuicClient) {.async: (raises: [CancelledError]).} =
