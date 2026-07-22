@@ -31,7 +31,7 @@ proc readAllChunked*(
     if n == 0:
       break
     check n <= bufSize
-    received.add(buf[0 ..< n])
+    received.add(buf.toOpenArray(0, n - 1))
     inc reads
   return (received, reads)
 

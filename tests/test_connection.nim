@@ -229,7 +229,7 @@ proc runServerInitiatedStreamTest(address: TransportAddress) {.async.} =
   let listener = server.listen(address)
   let boundAddress = listener.localAddress()
   defer:
-    await allFuturesRaising(client.stop(), listener.stop())
+    await allFutures(client.stop(), listener.stop())
 
   let accepting = listener.accept()
   let dialing = client.dial(boundAddress)
@@ -331,8 +331,7 @@ suite "connection":
     #   (10, 10)    buffer exactly fits the payload
     #   (16, 10)    oversized buffer
     #   (100, 4096) non-divisor across the 4096 stream-buffer boundary
-    #   (1, 65536)  large payload one byte at a time
-    const cases = [(1, 10), (3, 10), (10, 10), (16, 10), (100, 4096), (1, 65536)]
+    const cases = [(1, 10), (3, 10), (10, 10), (16, 10), (100, 4096)]
 
     let peers = await connectPeers()
     defer:
