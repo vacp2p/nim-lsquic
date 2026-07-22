@@ -3,6 +3,7 @@
 
 {.used.}
 
+import std/sets
 import results
 import unittest2
 import boringssl
@@ -21,8 +22,9 @@ suite "tls config":
       discard TLSConfig.new(key = testPrivateKey())
 
   test "server requires certificate":
+    let cfg = TLSConfig.new()
     expect QuicConfigError:
-      discard QuicServer.new(TLSConfig.new())
+      discard QuicServer.new(cfg)
 
   test "single alpn value is encoded":
     let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), makeAlpn())

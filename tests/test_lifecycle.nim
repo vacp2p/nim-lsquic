@@ -4,15 +4,15 @@
 {.used.}
 
 import std/sets
-import chronos, chronos/unittest2/asynctests, results, chronicles
+import chronos, chronos/unittest2/asynctests, results
 import lsquic
 import lsquic/[datagram]
 import lsquic/context/[client, context, io]
 import ./helpers/[address, certificate, clientserver, stream]
 
-trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
-
 initializeLsquic(true, true)
+
+const timeout = 2.seconds
 
 suite "lifecycle":
   asyncTest "listener stop makes accept fail":
@@ -48,8 +48,8 @@ suite "lifecycle":
 
     peers.outgoing.close()
 
-    check (await peers.outgoing.closedFuture().withTimeout(2.seconds))
-    check (await peers.incoming.closedFuture().withTimeout(2.seconds))
+    check (await peers.outgoing.closedFuture().withTimeout(timeout))
+    check (await peers.incoming.closedFuture().withTimeout(timeout))
     check peers.incoming.isClosed
 
   asyncTest "accept skips closed connection and client redials":
@@ -68,17 +68,17 @@ suite "lifecycle":
 
     let stale = await client.dial(address)
     stale.abort()
-    check (await stale.closedFuture().withTimeout(2.seconds))
+    check (await stale.closedFuture().withTimeout(timeout))
 
     accepted = listener.accept()
     let outgoing = await client.dial(address)
-    check (await accepted.withTimeout(2.seconds))
+    check (await accepted.withTimeout(timeout))
     let incoming = await accepted
 
     incomingStream = incoming.incomingStream()
     let outgoingStream = await outgoing.openStream()
     await outgoingStream.write(@[1'u8])
-    check (await incomingStream.withTimeout(2.seconds))
+    check (await incomingStream.withTimeout(timeout))
 
     let acceptedStream = await incomingStream
     var buf = newSeq[byte](1)
@@ -95,8 +95,8 @@ suite "lifecycle":
 
     await peers.client.stop()
 
-    check (await peers.outgoing.closedFuture().withTimeout(2.seconds))
-    check (await peers.incoming.closedFuture().withTimeout(2.seconds))
+    check (await peers.outgoing.closedFuture().withTimeout(timeout))
+    check (await peers.incoming.closedFuture().withTimeout(timeout))
 
     peers.incoming.close()
     await peers.listener.stop()
@@ -107,8 +107,8 @@ suite "lifecycle":
       await peers.stop()
 
     peers.outgoing.close()
-    check (await peers.outgoing.closedFuture().withTimeout(2.seconds))
-    check (await peers.incoming.closedFuture().withTimeout(2.seconds))
+    check (await peers.outgoing.closedFuture().withTimeout(timeout))
+    check (await peers.incoming.closedFuture().withTimeout(timeout))
 
     expect ConnectionClosedError:
       discard await peers.outgoing.openStream()
@@ -149,9 +149,9 @@ suite "lifecycle":
 
     let opening = peers.outgoing.openStream()
     peers.outgoing.abort()
-    check (await opening.withTimeout(2.seconds))
+    check (await opening.withTimeout(timeout))
     let stream = await opening
-    check (await peers.outgoing.closedFuture().withTimeout(2.seconds))
+    check (await peers.outgoing.closedFuture().withTimeout(timeout))
 
     expect StreamError:
       await stream.write(@[1'u8])
@@ -229,7 +229,7 @@ suite "lifecycle":
 
     await outgoingStream.close()
 
-    check (await reading.withTimeout(2.seconds))
+    check (await reading.withTimeout(timeout))
     check (await reading) == 0
     await incomingStream.close()
 
@@ -287,7 +287,7 @@ suite "lifecycle":
     let incomingWaiting = peers.incoming.incomingStream()
     let outgoingStream = await peers.outgoing.openStream()
     await outgoingStream.write(@[1'u8])
-    check (await incomingWaiting.withTimeout(2.seconds))
+    check (await incomingWaiting.withTimeout(timeout))
     let incomingStream = await incomingWaiting
 
     var firstByte = newSeq[byte](1)
@@ -311,7 +311,7 @@ suite "lifecycle":
 
     var buf = newSeq[byte](1)
     let nextRead = incomingStream.readOnce(buf)
-    check (await nextRead.withTimeout(2.seconds))
+    check (await nextRead.withTimeout(timeout))
     check (await nextRead) == 1
     check buf[0] == 99
     await incomingStream.close()
@@ -334,7 +334,7 @@ suite "lifecycle":
 
     outgoingStream.abort()
 
-    check (await reading.withTimeout(2.seconds))
+    check (await reading.withTimeout(timeout))
     check (await reading) == 0
     check incomingStream.isEof
 

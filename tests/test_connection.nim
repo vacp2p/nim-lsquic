@@ -3,13 +3,13 @@
 
 {.used.}
 
-import chronos, chronos/unittest2/asynctests, results, chronicles, sequtils
+import chronos, chronos/unittest2/asynctests, results, sequtils
 import lsquic
-import ./helpers/[address, clientserver]
-
-trace "chronicles has to be imported to fix Error: undeclared identifier: 'activeChroniclesStream'"
+import ./helpers/[address, clientserver, futures, stream]
 
 initializeLsquic(true, true)
+
+const dialTimeout = 5.seconds
 
 proc runConnectionTest(
     listenAddress: TransportAddress, dialAddress: TransportAddress
@@ -38,53 +38,28 @@ proc runConnectionTest(
     incomingConn.localAddress().port == boundAddress.port
     outgoingConn.localAddress().port == incomingConn.remoteAddress().port
 
-  echo "Connected!"
-
   let outgoingBehaviour = proc() {.async.} =
     let stream = await outgoingConn.openStream()
 
     await stream.write(@[1'u8, 2, 3, 4, 5])
     await stream.write(@[6'u8, 7, 8, 9, 10])
-
-    echo "Closing client stream"
-
-    echo "Client closed"
     await stream.close()
 
-    #echo "Client aborted"
-    # stream.abort() # Not interested in RW anything else
-
   let incomingBehaviour = proc() {.async.} =
-    try:
-      let stream = await incomingConn.incomingStream()
-      echo "Received stream in server"
+    let stream = await incomingConn.incomingStream()
 
-      var buf = newSeq[byte](16)
-      var received: seq[byte]
-      while true:
-        let n = await stream.readOnce(buf)
-        if n == 0:
-          break
-        received.add(buf[0 ..< n])
+    let received = await readStreamTillEOF(stream)
 
-      check:
-        received == @[1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        stream.isEof
+    check:
+      received == @[1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      stream.isEof
 
-      let eofRead = await stream.readOnce(buf)
-      check eofRead == 0
+    var buf = newSeq[byte](8)
+    check (await stream.readOnce(buf)) == 0
 
-      echo "Server closed"
-      await stream.close()
+    await stream.close()
 
-      #echo "Server aborted"
-      #stream.abort() # Not interested in RW anything else
-    except StreamError:
-      raiseAssert "Stream error: " & getCurrentExceptionMsg()
-    except CancelledError:
-      raiseAssert "Canceled incoming behavior"
-
-  await allFutures(outgoingBehaviour(), incomingBehaviour())
+  await allFuturesRaising(outgoingBehaviour(), incomingBehaviour())
 
   outgoingConn.close()
   incomingConn.close()
@@ -181,10 +156,10 @@ proc runEndpointSharedSocketCrossDialTest(address: TransportAddress) {.async.} =
     dialBtoA = endpointB.dial(addressA)
 
   let
-    outgoingAtoB = await dialAtoB.wait(5.seconds)
-    outgoingBtoA = await dialBtoA.wait(5.seconds)
-    incomingA = await acceptA.wait(5.seconds)
-    incomingB = await acceptB.wait(5.seconds)
+    outgoingAtoB = await dialAtoB.wait(dialTimeout)
+    outgoingBtoA = await dialBtoA.wait(dialTimeout)
+    incomingA = await acceptA.wait(dialTimeout)
+    incomingB = await acceptB.wait(dialTimeout)
 
   check:
     outgoingAtoB.localAddress().port == addressA.port
