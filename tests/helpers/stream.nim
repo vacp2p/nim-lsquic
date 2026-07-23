@@ -5,13 +5,7 @@ import chronos
 import unittest2
 import lsquic
 
-proc newData*(size: int, val: byte = byte(0xEE)): seq[byte] =
-  var data = newSeq[byte](size)
-  for i in 0 ..< size:
-    data[i] = val
-  return data
-
-proc patternData*(size: int): seq[byte] =
+proc makeData*(size: int): seq[byte] =
   var data = newSeq[byte](size)
   for i in 0 ..< size:
     data[i] = byte(i mod 251)

@@ -267,7 +267,7 @@ proc runServerInitiatedStreamTest(address: TransportAddress) {.async.} =
   await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture())
 
 proc runChunkedReadTest(peers: ConnectedPeers, bufSize, payloadSize: int) {.async.} =
-  let payload = patternData(payloadSize)
+  var payload = makeData(payloadSize)
 
   let sender = proc() {.async.} =
     let stream = await peers.outgoing.openStream()
@@ -283,9 +283,8 @@ proc runChunkedReadTest(peers: ConnectedPeers, bufSize, payloadSize: int) {.asyn
     # Chunked delivery can split it into more reads than that.
     let minReads = (payloadSize + bufSize - 1) div bufSize
 
+    checkEqual(received, payload)
     check:
-      received.len == payloadSize
-      received == payload
       reads >= minReads
       stream.isEof
 
