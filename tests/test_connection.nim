@@ -267,7 +267,7 @@ proc runServerInitiatedStreamTest(address: TransportAddress) {.async.} =
   await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture())
 
 proc runChunkedReadTest(peers: ConnectedPeers, bufSize, payloadSize: int) {.async.} =
-  var payload = makeData(payloadSize)
+  let payload = makeData(payloadSize)
 
   let sender = proc() {.async.} =
     let stream = await peers.outgoing.openStream()
