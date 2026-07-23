@@ -5,11 +5,29 @@ import chronos
 import unittest2
 import lsquic
 
-proc newData*(size: int, val: byte = byte(0xEE)): seq[byte] =
+proc makeData*(size: int): seq[byte] =
   var data = newSeq[byte](size)
   for i in 0 ..< size:
-    data[i] = val
+    data[i] = byte(i mod 251)
   return data
+
+proc readAllChunked*(
+    stream: Stream, bufSize: int
+): Future[tuple[data: seq[byte], reads: int]] {.async.} =
+  ## Drains `stream` to EOF using a fixed `bufSize` buffer, asserting that no
+  ## read ever returns more than the buffer can hold. Returns the reassembled
+  ## data together with the number of non-empty reads it took to receive it.
+  var buf = newSeq[byte](bufSize)
+  var received: seq[byte]
+  var reads = 0
+  while true:
+    let n = await stream.readOnce(buf)
+    if n == 0:
+      break
+    check n <= bufSize
+    received.add(buf.toOpenArray(0, n - 1))
+    inc reads
+  return (received, reads)
 
 proc readStreamTillEOF*(
     stream: Stream, maxBytes: int = int.high

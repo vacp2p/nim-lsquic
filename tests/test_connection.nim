@@ -223,6 +223,78 @@ proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
   for seen in received:
     check seen
 
+proc runServerInitiatedStreamTest(address: TransportAddress) {.async.} =
+  let client = makeClient()
+  let server = makeServer()
+  let listener = server.listen(address)
+  let boundAddress = listener.localAddress()
+  defer:
+    await allFutures(client.stop(), listener.stop())
+
+  let accepting = listener.accept()
+  let dialing = client.dial(boundAddress)
+
+  let outgoingConn = await dialing # client side
+  let incomingConn = await accepting # server side
+
+  # The accepting (server) side opens the stream, the dialing (client) side
+  # receives it. This drives the server-initiated (odd stream id) parity.
+  let serverBehaviour = proc() {.async.} =
+    let stream = await incomingConn.openStream()
+
+    await stream.write(@[1'u8, 2, 3, 4, 5])
+    await stream.write(@[6'u8, 7, 8, 9, 10])
+    await stream.close()
+
+  let clientBehaviour = proc() {.async.} =
+    let stream = await outgoingConn.incomingStream()
+
+    let received = await readStreamTillEOF(stream)
+
+    check:
+      received == @[1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      stream.isEof
+
+    var buf = newSeq[byte](8)
+    check (await stream.readOnce(buf)) == 0
+
+    await stream.close()
+
+  await allFuturesRaising(serverBehaviour(), clientBehaviour())
+
+  outgoingConn.close()
+  incomingConn.close()
+  await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture())
+
+proc runChunkedReadTest(peers: ConnectedPeers, bufSize, payloadSize: int) {.async.} =
+  let payload = makeData(payloadSize)
+
+  let sender = proc() {.async.} =
+    let stream = await peers.outgoing.openStream()
+    await stream.write(payload)
+    await stream.close()
+
+  let receiver = proc() {.async.} =
+    let stream = await peers.incoming.incomingStream()
+    let (received, reads) = await readAllChunked(stream, bufSize)
+
+    # A single readOnce never returns more than bufSize bytes, so draining the
+    # whole payload takes at least ceil(payloadSize / bufSize) reads.
+    # Chunked delivery can split it into more reads than that.
+    let minReads = (payloadSize + bufSize - 1) div bufSize
+
+    checkEqual(received, payload)
+    check:
+      reads >= minReads
+      stream.isEof
+
+    var buf = newSeq[byte](bufSize)
+    check (await stream.readOnce(buf)) == 0
+
+    await stream.close()
+
+  await allFuturesRaising(sender(), receiver())
+
 suite "connection":
   asyncTest "ipv4":
     await runConnectionTest(AutoAddressIP4)
@@ -236,6 +308,9 @@ suite "connection":
   asyncTest "multiple concurrent stream opens":
     await runConcurrentStreamOpenTest(AutoAddressIP4)
 
+  asyncTest "server initiated stream reaches client incomingStream":
+    await runServerInitiatedStreamTest(AutoAddressIP4)
+
   asyncTest "endpoint accepts inbound quic":
     await runEndpointAcceptTest(AutoAddressIP4)
 
@@ -247,3 +322,20 @@ suite "connection":
 
   asyncTest "endpoints cross-dial from shared listener sockets":
     await runEndpointSharedSocketCrossDialTest(AutoAddressIP4)
+
+  asyncTest "reads reassemble payloads across buffer sizes":
+    # (bufSize, payloadSize):
+    #   (1, 10)     one byte at a time (max iterations)
+    #   (3, 10)     undersized buffer, non-divisor
+    #   (10, 10)    buffer exactly fits the payload
+    #   (16, 10)    oversized buffer
+    #   (100, 4096) non-divisor across the 4096 stream-buffer boundary
+    const cases = [(1, 10), (3, 10), (10, 10), (16, 10), (100, 4096)]
+
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    for (bufSize, payloadSize) in cases:
+      checkpoint("bufSize=" & $bufSize & " payloadSize=" & $payloadSize)
+      await runChunkedReadTest(peers, bufSize, payloadSize)

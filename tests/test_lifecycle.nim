@@ -184,7 +184,7 @@ suite "lifecycle":
 
     let outgoingStream = await peers.outgoing.openStream()
     # 16 MB exceeds the send window, so the write parks with a pending write task
-    let writing = outgoingStream.write(newData(16 * 1024 * 1024, 0x7A'u8))
+    let writing = outgoingStream.write(makeData(16 * 1024 * 1024))
 
     check outgoingStream.toWrite.isSome
 
