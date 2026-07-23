@@ -9,7 +9,7 @@ import lsquic
 import lsquic/[datagram]
 import lsquic/context/[client, context, io, stream]
 import ./helpers/[address, certificate, clientserver, stream]
-from lsquic/lsquic_ffi import lsquic_stream_ctx_t
+from lsquic/lsquic_ffi import lsquic_stream_ctx_t, lsquic_conn_t
 
 initializeLsquic(true, true)
 
@@ -375,6 +375,55 @@ suite "lifecycle":
     ctx.destroy()
     ctx.receive(Datagram(data: @[4'u8, 5, 6]), local, remote)
     ctx.processWhenReady()
+
+  asyncTest "connection operations are guarded after context stops":
+    let ctx = ClientContext.new(makeTLSConfig()).valueOr:
+      raiseAssert error
+    defer:
+      ctx.destroy()
+
+    # A stopped context must not act on any connection. We prove that by using an invalid connection pointer
+    # While the context is stopped, the calls below must skip it, so the pointer is never used.
+    # If a call went through, it would dereference the pointer and crash.
+    # The pointer has to be non-nil: these calls already skip a nil connection.
+    let quicConn = QuicConnection(lsquicConn: cast[ptr lsquic_conn_t](0xF00D))
+
+    check ctx.isRunning()
+    ctx.stop()
+    check not ctx.isRunning()
+
+    # While stopped, close and abort must do nothing (never reach the connection).
+    ctx.close(quicConn)
+    ctx.abort(quicConn)
+
+    # While stopped, makeStream must fail cleanly instead of opening a stream.
+    expect ConnectionClosedError:
+      ctx.makeStream(quicConn)
+
+  asyncTest "context destroy is idempotent":
+    let ctx = ClientContext.new(makeTLSConfig()).valueOr:
+      raiseAssert error
+
+    ctx.stop()
+    ctx.destroy()
+    check not ctx.isRunning()
+
+    # second destroy is a safe no-op: it must not free the engine or SSL_CTX twice.
+    ctx.destroy()
+    check not ctx.isRunning()
+
+  asyncTest "listen-capable endpoint requires a certificate":
+    # QuicEndpoint.new rejects a listen-capable endpoint with no certificate,
+    # before any socket or context is created.
+    expect QuicConfigError:
+      discard QuicEndpoint.new(TLSConfig.new(), AutoAddressIP4, {CanListen})
+
+  asyncTest "endpoint stop is idempotent":
+    let endpoint = makeEndpoint(AutoAddressIP4)
+
+    await endpoint.stop()
+    # second stop is a safe no-op: the socket is not closed twice.
+    await endpoint.stop()
 
   asyncTest "peer reset in both directions merges to read-write":
     let stream = Stream.new()
