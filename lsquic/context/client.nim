@@ -97,7 +97,7 @@ method dial*(
     onClose: onClose,
     certVerifier: certVerifier,
   )
-  pin(quicClientConn) # released when on_conn_closed fires
+  pin(quicClientConn) # Keep it pinned until on_conn_closed is called
   let conn = lsquic_engine_connect(
     ctx.engine,
     N_LSQVER,
