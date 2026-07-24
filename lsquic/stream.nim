@@ -4,7 +4,7 @@
 import std/[deques, posix]
 import chronos
 import chronicles
-import ./[lsquic_ffi, errors]
+import ./[lsquic_ffi, errors, tracking]
 
 type WriteTask* = object
   data*: ptr byte
@@ -46,7 +46,7 @@ proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
     readLock: newAsyncLock(),
     writeLock: newAsyncLock(),
   )
-  GC_ref(s) # Keep it pinned until stream_if.on_close is executed
+  pin(s) # Keep it pinned until stream_if.on_close is executed
   s
 
 proc readResetByPeer*(stream: Stream): bool {.raises: [].} =

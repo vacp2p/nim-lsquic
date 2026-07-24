@@ -4,7 +4,7 @@
 import std/[posix]
 import chronicles
 import chronos
-import ../[lsquic_ffi, errors, stream]
+import ../[lsquic_ffi, errors, stream, tracking]
 import ../helpers/sequninit
 
 proc onReset*(
@@ -61,7 +61,7 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       doneFut.fail(newException(StreamError, "stream closed"))
     streamCtx.toRead = Opt.none(ReadTask)
 
-  GC_unref(streamCtx)
+  unpin(streamCtx)
 
 proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "stream read"

@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# Copyright (c) Status Research & Development GmbH
+
+## Pinning for objects handed across the lsquic FFI boundary: 
+## `pin` keeps a heap object alive while C holds a raw pointer to it,
+## `unpin` releases it once the engine is done (its `on_close` / `on_conn_closed` callback fired).
+##
+## Under `-d:lsquic_testing`, pin/unpin also tracks the objects.
+
+when defined(lsquic_testing):
+  import std/typetraits
+  import chronos
+
+proc pin*[T](obj: T) {.inline.} =
+  GC_ref(obj)
+  when defined(lsquic_testing):
+    trackCounter(typetraits.name(T))
+
+proc unpin*[T](obj: T) {.inline.} =
+  when defined(lsquic_testing):
+    untrackCounter(typetraits.name(T))
+  GC_unref(obj)
