@@ -5,9 +5,12 @@
 
 import chronos, chronos/unittest2/asynctests
 import lsquic
-import ./helpers/[address, clientserver]
+import ./helpers/[address, clientserver, trackers]
 
 suite "runtime":
+  teardown:
+    checkTrackers()
+
   asyncTest "init and cleanup are repeatable and leave a usable global":
     # start from a known-clean global regardless of prior state
     cleanupLsquic()

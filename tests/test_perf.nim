@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results, stew/endians2, sequtils
 import lsquic
-import ./helpers/[address, clientserver, param]
+import ./helpers/[address, clientserver, param, trackers]
 
 initializeLsquic(true, true)
 
@@ -116,6 +116,9 @@ proc runPerf(): Future[Duration] {.async.} =
   return duration
 
 suite "perf protocol simulation":
+  teardown:
+    checkTrackers()
+
   asyncTest "test":
     var total: Duration
 
