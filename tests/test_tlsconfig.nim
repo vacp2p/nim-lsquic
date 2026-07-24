@@ -10,9 +10,12 @@ import boringssl
 import lsquic
 import lsquic/certificates
 import lsquic/lsquic_ffi
-import ./helpers/certificate
+import ./helpers/[certificate, trackers]
 
 suite "tls config":
+  teardown:
+    checkTrackers()
+
   test "certificate requires key":
     expect QuicConfigError:
       discard TLSConfig.new(certificate = testCertificate())

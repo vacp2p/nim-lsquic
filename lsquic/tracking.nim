@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH
 
-## Pinning for objects handed across the lsquic FFI boundary: 
-## `pin` keeps a heap object alive while C holds a raw pointer to it,
-## `unpin` releases it once the engine is done (its `on_close` / `on_conn_closed` callback fired).
+## Pinning for objects handed across the lsquic FFI boundary:
+## `pin` - keeps a heap object alive while C holds a raw pointer to it
+## `unpin` - releases it once C is done, an engine `on_close`/`on_conn_closed` callback,
+##  or a local cleanup path (cancelled pending stream, failed dial).
 ##
 ## Under `-d:lsquic_testing`, pin/unpin also tracks the objects.
 
