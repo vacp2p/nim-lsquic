@@ -12,6 +12,17 @@ when not defined(windows):
   import chronicles
   import posix
 
+when defined(linux):
+  {.passc: "-D_GNU_SOURCE".}
+
+  type MMsgHdr {.importc: "struct mmsghdr", header: "<sys/socket.h>", bycopy.} = object
+    msg_hdr: Tmsghdr
+    msg_len: cuint
+
+  proc sendmmsg(
+    sockfd: SocketHandle, msgvec: ptr MMsgHdr, vlen: cuint, flags: cint
+  ): cint {.importc, header: "<sys/socket.h>".}
+
 when defined(windows):
   import std/winlean
 
@@ -54,6 +65,33 @@ proc prepareDestAddr(
     destAddrLen = sockAddrLen(destSa.sa_family.int)
     copyMem(addr destStorage, destSa, destAddrLen)
 
+when not defined(windows):
+  proc makeMsgHdr(
+      spec: struct_lsquic_out_spec,
+      destStorage: var Sockaddr_storage,
+      destAddrLen: SockLen,
+  ): Tmsghdr =
+    when defined(linux) and defined(x86_64) and not defined(android):
+      Tmsghdr(
+        msg_name: cast[pointer](addr destStorage),
+        msg_namelen: destAddrLen,
+        msg_iov: cast[ptr IOVec](spec.iov),
+        msg_iovlen: spec.iovlen.csize_t,
+        msg_control: nil,
+        msg_controllen: 0,
+        msg_flags: 0,
+      )
+    else:
+      Tmsghdr(
+        msg_name: cast[pointer](addr destStorage),
+        msg_namelen: destAddrLen,
+        msg_iov: cast[ptr IOVec](spec.iov),
+        msg_iovlen: spec.iovlen.cint,
+        msg_control: nil,
+        msg_controllen: 0,
+        msg_flags: 0,
+      )
+
 proc receive*(
     ctx: QuicContext,
     datagram: sink Datagram,
@@ -88,66 +126,79 @@ proc sendPacketsOut*(
     ctx: pointer, specs: ptr struct_lsquic_out_spec, nspecs: cuint
 ): cint {.cdecl.} =
   let quicCtx = cast[QuicContext](ctx)
-  var sent = 0
+  if nspecs == 0:
+    return 0
+
   let specsArr = cast[ptr UncheckedArray[struct_lsquic_out_spec]](specs)
-  for i in 0 ..< nspecs.int:
-    let curr = specsArr[i]
+
+  when defined(linux):
     var
-      destStorage: Sockaddr_storage
-      destAddrLen: SockLen
-    prepareDestAddr(curr.local_sa, curr.dest_sa, destStorage, destAddrLen)
+      destStorages = newSeq[Sockaddr_storage](nspecs.int)
+      msgs = newSeq[MMsgHdr](nspecs.int)
 
-    when defined(windows):
-      let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
+    for i in 0 ..< nspecs.int:
+      let curr = specsArr[i]
+      var destAddrLen: SockLen
+      prepareDestAddr(curr.local_sa, curr.dest_sa, destStorages[i], destAddrLen)
+      msgs[i] =
+        MMsgHdr(msg_hdr: makeMsgHdr(curr, destStorages[i], destAddrLen), msg_len: 0)
 
-      var bufs = newSeq[WSABUF](curr.iovlen.int)
-      for j in 0 ..< curr.iovlen.int:
-        let src = iovArr[j]
-        bufs[j].len = culong(src.iov_len)
-        bufs[j].buf = cast[ptr char](src.iov_base)
-
-      var bytesSent: culong = 0
-      let res = WSASendTo(
-        SocketHandle(quicCtx.fd),
-        addr bufs[0],
-        culong(curr.iovlen),
-        addr bytesSent,
-        0, # flags
-        cast[ptr SockAddr](addr destStorage),
-        cint(destAddrLen),
-        nil,
-        nil, # no overlapped
-      )
-      if res != 0:
-        break
-    else:
-      let msg =
-        when defined(linux) and defined(x86_64) and not defined(android):
-          Tmsghdr(
-            msg_name: cast[pointer](addr destStorage),
-            msg_namelen: destAddrLen,
-            msg_iov: cast[ptr IOVec](curr.iov),
-            msg_iovlen: curr.iovlen.csize_t,
-            msg_control: nil,
-            msg_controllen: 0,
-            msg_flags: 0,
-          )
-        else:
-          Tmsghdr(
-            msg_name: cast[pointer](addr destStorage),
-            msg_namelen: destAddrLen,
-            msg_iov: cast[ptr IOVec](curr.iov),
-            msg_iovlen: curr.iovlen.cint,
-            msg_control: nil,
-            msg_controllen: 0,
-            msg_flags: 0,
-          )
-
-      let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
+    let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nspecs, 0)
+    let savedErrno = errno
+    if res < nspecs.cint:
       if res < 0:
-        trace "sendmsg failed", sent, nspecs
-        break
+        trace "sendmmsg failed", nspecs
+        errno = savedErrno
+      elif res > 0:
+        trace "sendmmsg partially sent", sent = res, nspecs
+        errno = EAGAIN
+      else:
+        errno = savedErrno
+    res
+  else:
+    var sent = 0
+    for i in 0 ..< nspecs.int:
+      let curr = specsArr[i]
+      var
+        destStorage: Sockaddr_storage
+        destAddrLen: SockLen
+      prepareDestAddr(curr.local_sa, curr.dest_sa, destStorage, destAddrLen)
 
-    sent.inc
+      when defined(windows):
+        let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
 
-  sent.cint
+        var bufs = newSeq[WSABUF](curr.iovlen.int)
+        for j in 0 ..< curr.iovlen.int:
+          let src = iovArr[j]
+          bufs[j].len = culong(src.iov_len)
+          bufs[j].buf = cast[ptr char](src.iov_base)
+
+        var bytesSent: culong = 0
+        let res = WSASendTo(
+          SocketHandle(quicCtx.fd),
+          addr bufs[0],
+          culong(curr.iovlen),
+          addr bytesSent,
+          0, # flags
+          cast[ptr SockAddr](addr destStorage),
+          cint(destAddrLen),
+          nil,
+          nil, # no overlapped
+        )
+        if res != 0:
+          if sent == 0:
+            return -1
+          break
+      else:
+        let msg = makeMsgHdr(curr, destStorage, destAddrLen)
+
+        let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
+        if res < 0:
+          trace "sendmsg failed", sent, nspecs
+          if sent == 0:
+            return -1
+          break
+
+      sent.inc
+
+    sent.cint
