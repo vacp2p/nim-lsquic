@@ -2,8 +2,15 @@
 # Copyright (c) Status Research & Development GmbH
 
 import chronos, chronicles, results
+when defined(windows):
+  from chronos/osdefs import SOL_SOCKET, SO_RCVBUF
+else:
+  from posix import SOL_SOCKET, SO_RCVBUF
 import
-  ./[errors, connection, tlsconfig, connectionmanager, lsquic_ffi, certificateverifier]
+  ./[
+    errors, connection, tlsconfig, connectionmanager, lsquic_ffi, certificateverifier,
+    socketconfig,
+  ]
 import ./context/[server, client, context, io]
 
 type
@@ -23,6 +30,40 @@ type
     stopped: bool
 
 const CloseWait: Duration = 300.milliseconds
+
+proc socketReceiveBufferBytes(
+    udp: DatagramTransport
+): int {.raises: [TransportOsError].} =
+  let value = getSockOpt2(udp.fd, int(SOL_SOCKET), int(SO_RCVBUF)).valueOr:
+    raiseTransportOsError(error)
+    return
+  value.int
+
+proc configureReceiveBuffer(
+    udp: DatagramTransport, socketConfig: QuicSocketConfig
+) {.raises: [TransportOsError].} =
+  let requested = socketConfig.receiveBufferBytes
+  if requested == 0:
+    # Zero keeps the OS default socket buffer.
+    return
+
+  let setRes = setSockOpt2(udp.fd, int(SOL_SOCKET), int(SO_RCVBUF), requested)
+  if setRes.isErr():
+    raiseTransportOsError(setRes.error())
+
+  let effective = udp.socketReceiveBufferBytes()
+  if effective < requested:
+    when defined(linux):
+      warn "QUIC UDP receive buffer capped below requested size",
+        requestedBytes = requested,
+        effectiveBytes = effective,
+        hint = "raise net.core.rmem_max if Linux caps SO_RCVBUF"
+    else:
+      warn "QUIC UDP receive buffer capped below requested size",
+        requestedBytes = requested, effectiveBytes = effective
+  else:
+    debug "Configured QUIC UDP receive buffer",
+      requestedBytes = requested, effectiveBytes = effective
 
 proc createServerContext(
     tlsConfig: TLSConfig, fd: cint
@@ -130,50 +171,61 @@ proc receiveFromUdp(
     warn "Could not read received datagram", errorMsg = e.msg
 
 proc createUdp(
-    endpoint: QuicEndpoint, address: TransportAddress
+    endpoint: QuicEndpoint, address: TransportAddress, socketConfig: QuicSocketConfig
 ): DatagramTransport {.raises: [QuicError, TransportOsError].} =
   proc onReceive(
       udp: DatagramTransport, remote: TransportAddress
   ) {.async: (raises: []).} =
     endpoint.receiveFromUdp(udp, remote)
 
-  case address.family
-  of AddressFamily.IPv4:
-    newDatagramTransport(onReceive, local = address)
-  of AddressFamily.IPv6:
-    newDatagramTransport6(onReceive, local = address)
-  else:
-    raise newException(QuicError, "only IPv4/IPv6 address is supported")
+  let udp =
+    case address.family
+    of AddressFamily.IPv4:
+      newDatagramTransport(onReceive, local = address)
+    of AddressFamily.IPv6:
+      newDatagramTransport6(onReceive, local = address)
+    else:
+      raise newException(QuicError, "only IPv4/IPv6 address is supported")
+
+  udp.configureReceiveBuffer(socketConfig)
+  udp
 
 proc createUdp(
-    endpoint: QuicEndpoint, family: AddressFamily
+    endpoint: QuicEndpoint, family: AddressFamily, socketConfig: QuicSocketConfig
 ): DatagramTransport {.raises: [QuicError, TransportOsError].} =
   proc onReceive(
       udp: DatagramTransport, remote: TransportAddress
   ) {.async: (raises: []).} =
     endpoint.receiveFromUdp(udp, remote)
 
-  case family
-  of AddressFamily.IPv4:
-    newDatagramTransport(onReceive)
-  of AddressFamily.IPv6:
-    newDatagramTransport6(onReceive)
-  else:
-    raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
+  let udp =
+    case family
+    of AddressFamily.IPv4:
+      newDatagramTransport(onReceive)
+    of AddressFamily.IPv6:
+      newDatagramTransport6(onReceive)
+    else:
+      raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
+
+  udp.configureReceiveBuffer(socketConfig)
+  udp
 
 proc new*(
     _: type QuicEndpoint,
     tlsConfig: TLSConfig,
     address: TransportAddress,
     capabilities: QuicEndpointCapabilities = {CanListen, CanDial},
+    socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
 ): QuicEndpoint {.raises: [QuicConfigError, QuicError, TransportOsError].} =
   if CanListen in capabilities and tlsConfig.certificate.len == 0:
     raise newException(QuicConfigError, "tlsConfig does not contain a certificate")
 
+  socketConfig.validate()
+
   var endpoint = QuicEndpoint(
     tlsConfig: tlsConfig, capabilities: capabilities, connman: ConnectionManager.new()
   )
-  endpoint.udp = endpoint.createUdp(address)
+  endpoint.udp = endpoint.createUdp(address, socketConfig)
 
   var initialized = false
 
@@ -193,12 +245,17 @@ proc new*(
   endpoint
 
 proc new*(
-    _: type QuicEndpoint, tlsConfig: TLSConfig, family: AddressFamily
+    _: type QuicEndpoint,
+    tlsConfig: TLSConfig,
+    family: AddressFamily,
+    socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
 ): QuicEndpoint {.raises: [QuicError, TransportOsError].} =
+  socketConfig.validate()
+
   var endpoint = QuicEndpoint(
     tlsConfig: tlsConfig, capabilities: {CanDial}, connman: ConnectionManager.new()
   )
-  endpoint.udp = endpoint.createUdp(family)
+  endpoint.udp = endpoint.createUdp(family, socketConfig)
   endpoint
 
 proc ensureClientContext(

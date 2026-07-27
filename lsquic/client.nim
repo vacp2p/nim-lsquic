@@ -2,15 +2,20 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import chronos
-import ./[errors, connection, tlsconfig, endpoint, certificateverifier]
+import ./[errors, connection, tlsconfig, endpoint, certificateverifier, socketconfig]
 
 type QuicClient* = ref object of RootObj
   tlsConfig: TLSConfig
+  socketConfig: QuicSocketConfig
   ip4Endpoint: QuicEndpoint
   ip6Endpoint: QuicEndpoint
 
-proc new*(t: typedesc[QuicClient], tlsConfig: TLSConfig): QuicClient {.raises: [].} =
-  QuicClient(tlsConfig: tlsConfig)
+proc new*(
+    t: typedesc[QuicClient],
+    tlsConfig: TLSConfig,
+    socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
+): QuicClient {.raises: [].} =
+  QuicClient(tlsConfig: tlsConfig, socketConfig: socketConfig)
 
 proc getEndpoint(
     self: QuicClient, family: AddressFamily
@@ -18,12 +23,12 @@ proc getEndpoint(
   case family
   of AddressFamily.IPv4:
     if self.ip4Endpoint.isNil:
-      self.ip4Endpoint = QuicEndpoint.new(self.tlsConfig, family)
+      self.ip4Endpoint = QuicEndpoint.new(self.tlsConfig, family, self.socketConfig)
 
     return self.ip4Endpoint
   of AddressFamily.IPv6:
     if self.ip6Endpoint.isNil:
-      self.ip6Endpoint = QuicEndpoint.new(self.tlsConfig, family)
+      self.ip6Endpoint = QuicEndpoint.new(self.tlsConfig, family, self.socketConfig)
 
     return self.ip6Endpoint
   else:

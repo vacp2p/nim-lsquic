@@ -2,35 +2,51 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import chronos, results
-import ./[errors, connection, tlsconfig, endpoint, certificateverifier]
+import ./[errors, connection, tlsconfig, endpoint, certificateverifier, socketconfig]
 
 type
   QuicServer* = ref object of RootObj
     tlsConfig: TLSConfig
+    socketConfig: QuicSocketConfig
 
   Listener* = ref object of RootObj
     endpoint: QuicEndpoint
 
 proc new*(
-    t: typedesc[QuicServer], tlsConfig: TLSConfig
+    t: typedesc[QuicServer],
+    tlsConfig: TLSConfig,
+    socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
 ): QuicServer {.raises: [QuicConfigError].} =
   if tlsConfig.certificate.len == 0:
     raise newException(QuicConfigError, "tlsConfig does not contain a certificate")
-
-  return QuicServer(tlsConfig: tlsConfig)
+  socketConfig.validate()
+  return QuicServer(tlsConfig: tlsConfig, socketConfig: socketConfig)
 
 proc newListener*(
-    tlsConfig: TLSConfig, address: TransportAddress
+    tlsConfig: TLSConfig,
+    address: TransportAddress,
+    socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
 ): Result[Listener, string] =
   try:
-    ok(Listener(endpoint: QuicEndpoint.new(tlsConfig, address, {CanListen, CanDial})))
+    ok(
+      Listener(
+        endpoint:
+          QuicEndpoint.new(tlsConfig, address, {CanListen, CanDial}, socketConfig)
+      )
+    )
   except QuicConfigError, QuicError, TransportOsError:
     err(getCurrentExceptionMsg())
 
 proc listen*(
     self: QuicServer, address: TransportAddress
-): Listener {.raises: [QuicError, TransportOsError].} =
-  newListener(self.tlsConfig, address).valueOr:
+): Listener {.raises: [QuicError].} =
+  newListener(self.tlsConfig, address, self.socketConfig).valueOr:
+    raise newException(QuicError, error)
+
+proc listen*(
+    self: QuicServer, address: TransportAddress, socketConfig: QuicSocketConfig
+): Listener {.raises: [QuicError].} =
+  newListener(self.tlsConfig, address, socketConfig).valueOr:
     raise newException(QuicError, error)
 
 proc accept*(
