@@ -4,9 +4,9 @@
 import
   ./lsquic/[
     errors, endpoint, client, server, connection, stream, lsquic, tlsconfig,
-    certificateverifier,
+    certificateverifier, socketconfig,
   ]
 
 export
   errors, endpoint, client, server, connection, stream, lsquic, tlsconfig,
-  certificateverifier
+  certificateverifier, socketconfig
