@@ -5,7 +5,7 @@ import chronos
 import chronos/osdefs
 import ./context
 import ../[lsquic_ffi, datagram]
-import ../helpers/[openarray, sequninit, transportaddr]
+import ../helpers/[sequninit, transportaddr]
 import std/[nativesockets, net]
 
 when not defined(windows):
@@ -96,11 +96,12 @@ when not defined(windows):
 
 proc receive*(
     ctx: QuicContext,
-    datagram: sink Datagram,
+    data: openArray[byte],
     local: TransportAddress,
     remote: TransportAddress,
+    ecn: cint = 0,
 ) =
-  if datagram.len == 0 or not ctx.isRunning():
+  if data.len == 0 or not ctx.isRunning():
     return
 
   var
@@ -114,15 +115,23 @@ proc receive*(
 
   discard lsquic_engine_packet_in(
     ctx.engine,
-    datagram.data.toPtr,
-    datagram.data.len.csize_t,
+    cast[ptr uint8](addr data[0]),
+    data.len.csize_t,
     cast[ptr SockAddr](addr localAddress),
     cast[ptr SockAddr](addr remoteAddress),
     cast[pointer](ctx),
-    datagram.ecn,
+    ecn,
   )
 
   ctx.processWhenReady()
+
+proc receive*(
+    ctx: QuicContext,
+    datagram: sink Datagram,
+    local: TransportAddress,
+    remote: TransportAddress,
+) =
+  ctx.receive(datagram.data, local, remote, datagram.ecn)
 
 proc sendPacketsOut*(
     ctx: pointer, specs: ptr struct_lsquic_out_spec, nspecs: cuint

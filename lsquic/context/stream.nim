@@ -10,9 +10,9 @@ import ../helpers/sequninit
 proc onReset*(
     stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t, how: cint
 ) {.cdecl.} =
-  debug "Stream reset", how
+  trace "Stream reset", how
   if ctx.isNil:
-    debug "stream_ctx is nil onReset"
+    trace "stream_ctx is nil onReset"
     return
 
   let streamCtx = cast[Stream](ctx)
@@ -33,9 +33,9 @@ proc onReset*(
     streamCtx.abortPendingWrites(streamCtx.newStreamResetError("stream write"))
 
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  debug "Stream closed"
+  trace "Stream closed"
   if ctx.isNil:
-    debug "stream_ctx is nil onClose"
+    trace "stream_ctx is nil onClose"
     return
 
   let streamCtx = cast[Stream](ctx)
@@ -66,14 +66,14 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "stream read"
   if ctx.isNil:
-    debug "stream_ctx is nil onRead"
+    trace "stream_ctx is nil onRead"
     return
 
   let streamCtx = cast[Stream](ctx)
 
   let task = streamCtx.toRead.valueOr:
     if lsquic_stream_wantread(stream, 0) == -1:
-      error "could not set stream wantread", streamId = lsquic_stream_id(stream)
+      trace "could not set stream wantread", streamId = lsquic_stream_id(stream)
       streamCtx.abort()
     return
 
@@ -89,20 +89,20 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       streamCtx.failPendingRead(streamCtx.newStreamResetError("stream read"))
       return
     else:
-      error "could not read", streamId = lsquic_stream_id(stream), errno = errno
+      trace "could not read", streamId = lsquic_stream_id(stream), errno = errno
       streamCtx.abort()
       return
 
   if n == 0:
     streamCtx.isEof = true
     if not streamCtx.closeIfDone():
-      error "could not close stream after EOF", streamId = lsquic_stream_id(stream)
+      trace "could not close stream after EOF", streamId = lsquic_stream_id(stream)
       streamCtx.failPendingRead(newException(StreamError, "could not close the stream"))
       streamCtx.abort()
       return
 
   if lsquic_stream_wantread(stream, 0) == -1:
-    error "could not set stream wantread", streamId = lsquic_stream_id(stream)
+    trace "could not set stream wantread", streamId = lsquic_stream_id(stream)
     streamCtx.abort()
 
   task.doneFut.complete(int(n))
@@ -113,14 +113,14 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   trace "onWrite"
 
   if ctx.isNil:
-    debug "stream_ctx is nil onWrite"
+    trace "stream_ctx is nil onWrite"
     return
 
   let streamCtx = cast[Stream](ctx)
 
   var w = streamCtx.toWrite.valueOr:
     if lsquic_stream_wantwrite(stream, 0) == -1:
-      error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
+      trace "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
       streamCtx.abort()
     return
 
@@ -157,5 +157,5 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   streamCtx.toWrite = Opt.none(WriteTask)
 
   if lsquic_stream_wantwrite(stream, 0) == -1:
-    error "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
+    trace "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
     streamCtx.abort()
