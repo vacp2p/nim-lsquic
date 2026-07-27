@@ -157,7 +157,7 @@ proc sendPacketsOut*(
           return -1
         return sent.cint
 
-      sent.inc(res)
+      sent += res.int
       if res < nmsgs.cint:
         trace "sendmmsg partially sent", sent, nspecs
         errno = EAGAIN
