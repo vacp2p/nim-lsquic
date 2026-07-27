@@ -15,6 +15,8 @@ when not defined(windows):
 when defined(linux):
   {.passc: "-D_GNU_SOURCE".}
 
+  const MaxOutBatchSize = 1024
+
   type MMsgHdr {.importc: "struct mmsghdr", header: "<sys/socket.h>", bycopy.} = object
     msg_hdr: Tmsghdr
     msg_len: cuint
@@ -133,27 +135,27 @@ proc sendPacketsOut*(
 
   when defined(linux):
     var
-      destStorages = newSeq[Sockaddr_storage](nspecs.int)
-      msgs = newSeq[MMsgHdr](nspecs.int)
+      destStorages {.noinit.}: array[MaxOutBatchSize, Sockaddr_storage]
+      msgs {.noinit.}: array[MaxOutBatchSize, MMsgHdr]
+    let nmsgs = min(nspecs.int, MaxOutBatchSize)
 
-    for i in 0 ..< nspecs.int:
+    for i in 0 ..< nmsgs:
       let curr = specsArr[i]
       var destAddrLen: SockLen
       prepareDestAddr(curr.local_sa, curr.dest_sa, destStorages[i], destAddrLen)
       msgs[i] =
         MMsgHdr(msg_hdr: makeMsgHdr(curr, destStorages[i], destAddrLen), msg_len: 0)
 
-    let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nspecs, 0)
-    let savedErrno = errno
+    let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nmsgs.cuint, 0)
+    if res < 0:
+      let savedErrno = errno
+      trace "sendmmsg failed", nspecs
+      errno = savedErrno
+      return res
+
     if res < nspecs.cint:
-      if res < 0:
-        trace "sendmmsg failed", nspecs
-        errno = savedErrno
-      elif res > 0:
-        trace "sendmmsg partially sent", sent = res, nspecs
-        errno = EAGAIN
-      else:
-        errno = savedErrno
+      trace "sendmmsg partially sent", sent = res, nspecs
+      errno = EAGAIN
     res
   else:
     var sent = 0
