@@ -99,6 +99,4 @@ suite "runtime":
 
   test "negative server socket receive buffer is rejected":
     expect QuicConfigError:
-      discard QuicServer.new(
-        makeTLSConfig(), QuicSocketConfig(receiveBufferBytes: -1)
-      )
+      discard QuicServer.new(makeTLSConfig(), QuicSocketConfig(receiveBufferBytes: -1))
