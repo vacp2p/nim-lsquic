@@ -28,6 +28,9 @@ type
     tickTimeout*: Timeout
     sslCtx*: ptr SSL_CTX
     fd*: cint
+    gsoDisabled*: bool
+    when defined(windows):
+      wsaSendMsg*: pointer
     processing: bool
     running*: bool
     ownedCids: HashSet[CidKey]
