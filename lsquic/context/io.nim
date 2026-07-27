@@ -15,7 +15,7 @@ when not defined(windows):
 when defined(linux):
   {.passc: "-D_GNU_SOURCE".}
 
-  const MaxOutBatchSize = 1024
+  const SendmmsgBatchSize = 64
 
   type MMsgHdr {.importc: "struct mmsghdr", header: "<sys/socket.h>", bycopy.} = object
     msg_hdr: Tmsghdr
@@ -135,28 +135,35 @@ proc sendPacketsOut*(
 
   when defined(linux):
     var
-      destStorages {.noinit.}: array[MaxOutBatchSize, Sockaddr_storage]
-      msgs {.noinit.}: array[MaxOutBatchSize, MMsgHdr]
-    let nmsgs = min(nspecs.int, MaxOutBatchSize)
+      destStorages {.noinit.}: array[SendmmsgBatchSize, Sockaddr_storage]
+      msgs {.noinit.}: array[SendmmsgBatchSize, MMsgHdr]
+      sent = 0
 
-    for i in 0 ..< nmsgs:
-      let curr = specsArr[i]
-      var destAddrLen: SockLen
-      prepareDestAddr(curr.local_sa, curr.dest_sa, destStorages[i], destAddrLen)
-      msgs[i] =
-        MMsgHdr(msg_hdr: makeMsgHdr(curr, destStorages[i], destAddrLen), msg_len: 0)
+    while sent < nspecs.int:
+      let nmsgs = min(nspecs.int - sent, SendmmsgBatchSize)
+      for i in 0 ..< nmsgs:
+        let curr = specsArr[sent + i]
+        var destAddrLen: SockLen
+        prepareDestAddr(curr.local_sa, curr.dest_sa, destStorages[i], destAddrLen)
+        msgs[i] =
+          MMsgHdr(msg_hdr: makeMsgHdr(curr, destStorages[i], destAddrLen), msg_len: 0)
 
-    let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nmsgs.cuint, 0)
-    if res < 0:
-      let savedErrno = errno
-      trace "sendmmsg failed", nspecs
-      errno = savedErrno
-      return res
+      let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nmsgs.cuint, 0)
+      if res < 0:
+        let savedErrno = errno
+        trace "sendmmsg failed", sent, nspecs
+        errno = savedErrno
+        if sent == 0:
+          return -1
+        return sent.cint
 
-    if res < nspecs.cint:
-      trace "sendmmsg partially sent", sent = res, nspecs
-      errno = EAGAIN
-    res
+      sent.inc(res)
+      if res < nmsgs.cint:
+        trace "sendmmsg partially sent", sent, nspecs
+        errno = EAGAIN
+        return sent.cint
+
+    sent.cint
   else:
     var sent = 0
     for i in 0 ..< nspecs.int:
