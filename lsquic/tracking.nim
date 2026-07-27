@@ -12,12 +12,12 @@ when defined(lsquic_testing):
   import std/typetraits
   import chronos
 
-proc pin*[T](obj: T) {.inline.} =
+template pin*[T](obj: T) =
   GC_ref(obj)
   when defined(lsquic_testing):
     trackCounter(typetraits.name(T))
 
-proc unpin*[T](obj: T) {.inline.} =
+template unpin*[T](obj: T) =
   when defined(lsquic_testing):
     untrackCounter(typetraits.name(T))
   GC_unref(obj)
