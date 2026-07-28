@@ -12,6 +12,9 @@ when not defined(windows):
   import chronicles
   import posix
 
+when defined(linux) or defined(windows):
+  import ./gso
+
 when defined(linux):
   {.passc: "-D_GNU_SOURCE".}
 
@@ -26,25 +29,81 @@ when defined(linux):
   ): cint {.importc, header: "<sys/socket.h>".}
 
 when defined(windows):
-  import std/winlean
-
   {.pragma: wsa, stdcall, dynlib: "ws2_32.dll".}
 
-  type WSABUF* = object
-    len*: culong
-    buf*: ptr char
+  type
+    WSABUF = object
+      len: culong
+      buf: ptr char
 
-  proc WSASendTo*(
+    WSAMSG = object
+      name: ptr SockAddr
+      namelen: cint
+      lpBuffers: ptr WSABUF
+      dwBufferCount: culong
+      control: WSABUF
+      dwFlags: culong
+
+    # struct _WSACMSGHDR: SIZE_T cmsg_len; INT cmsg_level; INT cmsg_type
+    WsaCmsgHdr = object
+      cmsg_len: csize_t
+      cmsg_level: cint
+      cmsg_type: cint
+
+  const
+    WsaCmsgDataOff =
+      (sizeof(WsaCmsgHdr) + sizeof(csize_t) - 1) and not (sizeof(csize_t) - 1)
+    WsaCmsgLen = WsaCmsgDataOff + sizeof(DWORD)
+    WsaCmsgSpace = (WsaCmsgLen + sizeof(csize_t) - 1) and not (sizeof(csize_t) - 1)
+    WSAEINVAL = 10022
+    WSAEWOULDBLOCK = 10035
+    WSAEMSGSIZE = 10040
+    WSAEOPNOTSUPP = 10045
+
+  proc WSASendMsg(
     s: SocketHandle,
-    lpBuffers: ptr WSABUF,
-    dwBufferCount: culong,
-    lpNumberOfBytesSent: ptr culong,
+    lpMsg: ptr WSAMSG,
     dwFlags: culong,
-    lpTo: ptr SockAddr,
-    iToLen: cint,
+    lpNumberOfBytesSent: ptr culong,
     lpOverlapped: pointer,
     lpCompletionRoutine: pointer,
-  ): cint {.wsa, importc: "WSASendTo".}
+  ): cint {.wsa, importc: "WSASendMsg".}
+
+  # lsquic inspects the CRT errno on Windows too (send_batch compares against
+  # EAGAIN/EMSGSIZE), so WSA errors must be bridged into it
+  var cErrno {.importc: "errno", header: "<errno.h>".}: cint
+  var cEAGAIN {.importc: "EAGAIN", header: "<errno.h>".}: cint
+  var cEMSGSIZE {.importc: "EMSGSIZE", header: "<errno.h>".}: cint
+  var cEIO {.importc: "EIO", header: "<errno.h>".}: cint
+
+  proc setSendErrno(wsaError: cint) =
+    cErrno =
+      if wsaError == WSAEWOULDBLOCK:
+        cEAGAIN
+      elif wsaError == WSAEMSGSIZE:
+        cEMSGSIZE
+      else:
+        cEIO
+
+when defined(linux):
+  const
+    SOL_UDP = 17
+    UDP_SEGMENT = 103
+
+when defined(windows):
+  const UDP_SEND_MSG_SIZE = 2
+
+proc probeSegmentationOffload*(fd: AsyncFD): bool =
+  ## Returns true when the socket supports UDP segmentation offload
+  ## (Linux GSO via UDP_SEGMENT, kernel 4.18+; Windows USO via
+  ## UDP_SEND_MSG_SIZE, Windows 10 1803+). Setting the option to 0 keeps
+  ## socket-wide segmentation off; the send path enables it per message.
+  when defined(linux):
+    setSockOpt2(fd, SOL_UDP, UDP_SEGMENT, 0).isOk()
+  elif defined(windows):
+    setSockOpt2(fd, IPPROTO_UDP, UDP_SEND_MSG_SIZE, 0).isOk()
+  else:
+    false
 
 proc prepareDestAddr(
     localSa: ptr SockAddr,
@@ -148,25 +207,24 @@ proc receive*(
 ) =
   ctx.receive(datagram.data, local, remote, datagram.ecn)
 
-proc sendPacketsOut*(
-    ctx: pointer, specs: ptr struct_lsquic_out_spec, nspecs: cuint
-): cint {.cdecl.} =
-  let quicCtx = cast[QuicContext](ctx)
-  if nspecs == 0:
-    return 0
-
-  let specsArr = cast[ptr UncheckedArray[struct_lsquic_out_spec]](specs)
-
+proc sendPlain(
+    quicCtx: QuicContext,
+    specsArr: ptr UncheckedArray[struct_lsquic_out_spec],
+    first: int,
+    nspecs: int,
+): cint =
+  ## Sends specs[first ..< nspecs] without segmentation offload; returns the
+  ## number of specs sent starting at `first`, with errno set on short returns.
   when defined(linux):
     var
       destStorages {.noinit.}: array[SendmmsgBatchSize, Sockaddr_storage]
       msgs {.noinit.}: array[SendmmsgBatchSize, MMsgHdr]
       sent = 0
 
-    while sent < nspecs.int:
-      let nmsgs = min(nspecs.int - sent, SendmmsgBatchSize)
+    while first + sent < nspecs:
+      let nmsgs = min(nspecs - first - sent, SendmmsgBatchSize)
       for i in 0 ..< nmsgs:
-        let curr = specsArr[sent + i]
+        let curr = specsArr[first + sent + i]
         var destAddrLen: SockLen
         prepareDestAddr(curr.local_sa, curr.dest_sa, destStorages[i], destAddrLen)
         msgs[i] =
@@ -190,7 +248,7 @@ proc sendPacketsOut*(
     sent.cint
   else:
     var sent = 0
-    for i in 0 ..< nspecs.int:
+    for i in first ..< nspecs:
       let curr = specsArr[i]
       var
         destStorage: Sockaddr_storage
@@ -206,19 +264,19 @@ proc sendPacketsOut*(
           bufs[j].len = culong(src.iov_len)
           bufs[j].buf = cast[ptr char](src.iov_base)
 
-        var bytesSent: culong = 0
-        let res = WSASendTo(
-          SocketHandle(quicCtx.fd),
-          addr bufs[0],
-          culong(curr.iovlen),
-          addr bytesSent,
-          0, # flags
-          cast[ptr SockAddr](addr destStorage),
-          cint(destAddrLen),
-          nil,
-          nil, # no overlapped
+        var msg = WSAMSG(
+          name: cast[ptr SockAddr](addr destStorage),
+          namelen: cint(destAddrLen),
+          lpBuffers: addr bufs[0],
+          dwBufferCount: culong(curr.iovlen),
+          control: WSABUF(len: 0, buf: nil),
+          dwFlags: 0,
         )
+        var bytesSent: culong = 0
+        let res =
+          WSASendMsg(SocketHandle(quicCtx.fd), addr msg, 0, addr bytesSent, nil, nil)
         if res != 0:
+          setSendErrno(wsaGetLastError())
           if sent == 0:
             return -1
           break
@@ -235,3 +293,305 @@ proc sendPacketsOut*(
       sent.inc
 
     sent.cint
+
+when defined(linux):
+  type GsoCmsgBuf = object
+    data {.align(8).}: array[32, byte] # >= CMSG_SPACE(sizeof(uint16)) everywhere
+
+  proc makeGsoMsgHdr(
+      destStorage: var Sockaddr_storage,
+      destAddrLen: SockLen,
+      iov: ptr IOVec,
+      iovlen: int,
+      control: pointer,
+      controllen: SockLen,
+  ): Tmsghdr =
+    when defined(x86_64) and not defined(android):
+      Tmsghdr(
+        msg_name: cast[pointer](addr destStorage),
+        msg_namelen: destAddrLen,
+        msg_iov: iov,
+        msg_iovlen: iovlen.csize_t,
+        msg_control: control,
+        msg_controllen: controllen,
+        msg_flags: 0,
+      )
+    else:
+      Tmsghdr(
+        msg_name: cast[pointer](addr destStorage),
+        msg_namelen: destAddrLen,
+        msg_iov: iov,
+        msg_iovlen: iovlen.cint,
+        msg_control: control,
+        msg_controllen: controllen,
+        msg_flags: 0,
+      )
+
+  proc sendOneSpec(quicCtx: QuicContext, spec: struct_lsquic_out_spec): int =
+    var
+      destStorage: Sockaddr_storage
+      destAddrLen: SockLen
+    prepareDestAddr(spec.local_sa, spec.dest_sa, destStorage, destAddrLen)
+    let msg = makeMsgHdr(spec, destStorage, destAddrLen)
+    sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
+
+  proc sendSegmented(
+      quicCtx: QuicContext,
+      specsArr: ptr UncheckedArray[struct_lsquic_out_spec],
+      nspecs: int,
+  ): cint =
+    ## Sends the batch grouped by destination, each multi-packet group as one
+    ## GSO super-datagram. Returns a prefix count of sent specs: groups are
+    ## ordered by ascending firstSpec (see groupSpecs), so when group k is the
+    ## first not fully sent, every spec below groups[k].firstSpec is out.
+    var
+      groups {.noinit.}: array[MaxBatch, GsoGroup]
+      specOrder {.noinit.}: array[MaxBatch, uint16]
+      iovPool {.noinit.}: array[MaxBatch, IOVec]
+      destStorages {.noinit.}: array[SendmmsgBatchSize, Sockaddr_storage]
+      msgs {.noinit.}: array[SendmmsgBatchSize, MMsgHdr]
+      cmsgBufs {.noinit.}: array[SendmmsgBatchSize, GsoCmsgBuf]
+
+    let ngroups = groupSpecs(specsArr, nspecs, groups, specOrder)
+
+    var
+      g = 0
+      orderPos = 0 # specOrder index of group g's first member
+    while g < ngroups:
+      let nmsgs = min(ngroups - g, SendmmsgBatchSize)
+      var
+        iovUsed = 0
+        pos = orderPos
+      for m in 0 ..< nmsgs:
+        let
+          grp = addr groups[g + m]
+          head = addr specsArr[grp.firstSpec.int]
+        var destAddrLen: SockLen
+        prepareDestAddr(head.local_sa, head.dest_sa, destStorages[m], destAddrLen)
+        if grp.useGso:
+          let iovStart = iovUsed
+          for j in 0 ..< grp.count.int:
+            let s = addr specsArr[specOrder[pos + j].int]
+            iovPool[iovUsed] =
+              IOVec(iov_base: s.iov[].iov_base, iov_len: s.iov[].iov_len)
+            inc iovUsed
+          msgs[m] = MMsgHdr(
+            msg_hdr: makeGsoMsgHdr(
+              destStorages[m],
+              destAddrLen,
+              addr iovPool[iovStart],
+              grp.count.int,
+              cast[pointer](addr cmsgBufs[m]),
+              SockLen(CMSG_SPACE(2)),
+            ),
+            msg_len: 0,
+          )
+          let hdr = CMSG_FIRSTHDR(addr msgs[m].msg_hdr)
+          hdr.cmsg_level = SOL_UDP
+          hdr.cmsg_type = UDP_SEGMENT
+          hdr.cmsg_len = SockLen(CMSG_LEN(2))
+          cast[ptr uint16](CMSG_DATA(hdr))[] = uint16(grp.segSize)
+        else:
+          msgs[m] = MMsgHdr(
+            msg_hdr: makeMsgHdr(head[], destStorages[m], destAddrLen), msg_len: 0
+          )
+        pos += grp.count.int
+
+      let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nmsgs.cuint, 0)
+      if res < 0:
+        # the first message of this chunk failed, so groups[g] is the failing
+        # group and groups[g].firstSpec the exact sent-prefix
+        let
+          savedErrno = errno
+          p = groups[g].firstSpec.int
+        if savedErrno == EMSGSIZE and groups[g].useGso:
+          # a segmented datagram was oversized (path MTU shrank); resend its
+          # members individually so lsquic can attribute EMSGSIZE per packet
+          var allSent = true
+          for j in 0 ..< groups[g].count.int:
+            let idx = specOrder[orderPos + j].int
+            if sendOneSpec(quicCtx, specsArr[idx]) < 0:
+              let memberErrno = errno
+              var minUnsent = idx
+              if g + 1 < ngroups:
+                minUnsent = min(minUnsent, groups[g + 1].firstSpec.int)
+              trace "gso member resend failed", idx, minUnsent, nspecs
+              # exact attribution only when the failed spec is the first unsent
+              # one; otherwise defer via EAGAIN so it resurfaces later
+              errno = if idx == minUnsent: memberErrno else: EAGAIN
+              if minUnsent == 0:
+                return -1
+              return minUnsent.cint
+          orderPos += groups[g].count.int
+          inc g
+          continue
+        if savedErrno == EIO or savedErrno == EINVAL or savedErrno == ENOTSUP or
+            savedErrno == EOPNOTSUPP:
+          # kernel/driver rejected the segmented send: disable GSO on this
+          # socket for good and finish the batch unsegmented
+          quicCtx.gsoEnabled = false
+          info "UDP GSO disabled after send error", errorCode = savedErrno
+          let plainSent = sendPlain(quicCtx, specsArr, p, nspecs)
+          if plainSent < 0:
+            if p == 0:
+              return -1
+            return p.cint
+          return (p + plainSent).cint
+        trace "gso sendmmsg failed", p, nspecs
+        errno = if savedErrno == EWOULDBLOCK: EAGAIN else: savedErrno
+        if p == 0:
+          return -1
+        return p.cint
+
+      for m in 0 ..< res:
+        orderPos += groups[g + m].count.int
+      g += res
+      if res < nmsgs.cint:
+        # sendmmsg does not report the error that stopped it; back off and let
+        # lsquic retry the remainder
+        trace "gso sendmmsg partially sent", sentGroups = g, ngroups, nspecs
+        errno = EAGAIN
+        return groups[g].firstSpec.cint
+
+    nspecs.cint
+
+when defined(windows):
+  proc sendOneSpec(quicCtx: QuicContext, spec: struct_lsquic_out_spec): cint =
+    ## single unsegmented WSASendMsg; caller reads wsaGetLastError on failure
+    var
+      destStorage: Sockaddr_storage
+      destAddrLen: SockLen
+    prepareDestAddr(spec.local_sa, spec.dest_sa, destStorage, destAddrLen)
+    var buf =
+      WSABUF(len: culong(spec.iov[].iov_len), buf: cast[ptr char](spec.iov[].iov_base))
+    var msg = WSAMSG(
+      name: cast[ptr SockAddr](addr destStorage),
+      namelen: cint(destAddrLen),
+      lpBuffers: addr buf,
+      dwBufferCount: 1,
+      control: WSABUF(len: 0, buf: nil),
+      dwFlags: 0,
+    )
+    var bytesSent: culong = 0
+    WSASendMsg(SocketHandle(quicCtx.fd), addr msg, 0, addr bytesSent, nil, nil)
+
+  proc sendSegmented(
+      quicCtx: QuicContext,
+      specsArr: ptr UncheckedArray[struct_lsquic_out_spec],
+      nspecs: int,
+  ): cint =
+    ## Sends the batch grouped by destination, each multi-packet group as one
+    ## USO super-datagram (one WSASendMsg per group; Windows has no sendmmsg).
+    ## Same prefix-count accounting as the Linux path: groups are ordered by
+    ## ascending firstSpec, so when group g fails, groups[g].firstSpec specs
+    ## are known sent.
+    var
+      groups {.noinit.}: array[MaxBatch, GsoGroup]
+      specOrder {.noinit.}: array[MaxBatch, uint16]
+      bufPool {.noinit.}: array[MaxBatch, WSABUF]
+      cmsgBuf {.align(8).}: array[32, byte]
+
+    let ngroups = groupSpecs(specsArr, nspecs, groups, specOrder)
+
+    var
+      g = 0
+      orderPos = 0 # specOrder index of group g's first member
+    while g < ngroups:
+      let
+        grp = addr groups[g]
+        head = addr specsArr[grp.firstSpec.int]
+      var
+        destStorage: Sockaddr_storage
+        destAddrLen: SockLen
+      prepareDestAddr(head.local_sa, head.dest_sa, destStorage, destAddrLen)
+
+      var msg = WSAMSG(
+        name: cast[ptr SockAddr](addr destStorage),
+        namelen: cint(destAddrLen),
+        control: WSABUF(len: 0, buf: nil),
+        dwFlags: 0,
+      )
+      if grp.useGso:
+        for j in 0 ..< grp.count.int:
+          let s = addr specsArr[specOrder[orderPos + j].int]
+          bufPool[j] =
+            WSABUF(len: culong(s.iov[].iov_len), buf: cast[ptr char](s.iov[].iov_base))
+        msg.lpBuffers = addr bufPool[0]
+        msg.dwBufferCount = culong(grp.count)
+        let hdr = cast[ptr WsaCmsgHdr](addr cmsgBuf[0])
+        hdr.cmsg_len = csize_t(WsaCmsgLen)
+        hdr.cmsg_level = IPPROTO_UDP
+        hdr.cmsg_type = UDP_SEND_MSG_SIZE
+        cast[ptr DWORD](addr cmsgBuf[WsaCmsgDataOff])[] = DWORD(grp.segSize)
+        msg.control =
+          WSABUF(len: culong(WsaCmsgSpace), buf: cast[ptr char](addr cmsgBuf[0]))
+      else:
+        let iovArr = cast[ptr UncheckedArray[struct_iovec]](head.iov)
+        for j in 0 ..< head.iovlen.int:
+          bufPool[j] = WSABUF(
+            len: culong(iovArr[j].iov_len), buf: cast[ptr char](iovArr[j].iov_base)
+          )
+        msg.lpBuffers = addr bufPool[0]
+        msg.dwBufferCount = culong(head.iovlen)
+
+      var bytesSent: culong = 0
+      let res =
+        WSASendMsg(SocketHandle(quicCtx.fd), addr msg, 0, addr bytesSent, nil, nil)
+      if res != 0:
+        let
+          wsaErr = wsaGetLastError()
+          p = grp.firstSpec.int
+        if wsaErr == WSAEMSGSIZE and grp.useGso:
+          # a segmented datagram was oversized (path MTU shrank); resend its
+          # members individually so lsquic can attribute the error per packet
+          for j in 0 ..< grp.count.int:
+            let idx = specOrder[orderPos + j].int
+            if sendOneSpec(quicCtx, specsArr[idx]) != 0:
+              let memberWsaErr = wsaGetLastError()
+              var minUnsent = idx
+              if g + 1 < ngroups:
+                minUnsent = min(minUnsent, groups[g + 1].firstSpec.int)
+              # exact attribution only when the failed spec is the first
+              # unsent one; otherwise defer via EAGAIN so it resurfaces later
+              if idx == minUnsent:
+                setSendErrno(memberWsaErr)
+              else:
+                cErrno = cEAGAIN
+              if minUnsent == 0:
+                return -1
+              return minUnsent.cint
+          orderPos += grp.count.int
+          inc g
+          continue
+        if wsaErr == WSAEINVAL or wsaErr == WSAEOPNOTSUPP:
+          # the stack rejected the segmented send: disable USO on this socket
+          # for good and finish the batch unsegmented
+          quicCtx.gsoEnabled = false
+          let plainSent = sendPlain(quicCtx, specsArr, p, nspecs)
+          if plainSent < 0:
+            if p == 0:
+              return -1
+            return p.cint
+          return (p + plainSent).cint
+        setSendErrno(wsaErr)
+        if p == 0:
+          return -1
+        return p.cint
+
+      orderPos += grp.count.int
+      inc g
+
+    nspecs.cint
+
+proc sendPacketsOut*(
+    ctx: pointer, specs: ptr struct_lsquic_out_spec, nspecs: cuint
+): cint {.cdecl.} =
+  let quicCtx = cast[QuicContext](ctx)
+  if nspecs == 0:
+    return 0
+
+  let specsArr = cast[ptr UncheckedArray[struct_lsquic_out_spec]](specs)
+  when defined(linux) or defined(windows):
+    if quicCtx.gsoEnabled and nspecs.int <= MaxBatch:
+      return sendSegmented(quicCtx, specsArr, nspecs.int)
+  sendPlain(quicCtx, specsArr, 0, nspecs.int)

@@ -31,6 +31,7 @@ type
     tickTimeout*: Timeout
     sslCtx*: ptr SSL_CTX
     fd*: cint
+    gsoEnabled*: bool
     processing: bool
     running*: bool
     ownedCids: HashSet[CidKey]
