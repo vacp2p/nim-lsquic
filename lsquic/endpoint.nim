@@ -315,3 +315,6 @@ proc stop*(endpoint: QuicEndpoint) {.async: (raises: [CancelledError]).} =
   if not endpoint.serverContext.isNil:
     endpoint.serverContext.destroy()
     endpoint.serverContext = nil
+
+when defined(lsquic_testing):
+  export scidLen, packetDcid, isIetfInitial
