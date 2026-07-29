@@ -39,6 +39,24 @@ suite "timeout":
     check (await fired.wait().withTimeout(fireTimeout))
     check fireCount == 1
 
+  asyncTest "expiry callback can re-arm the timeout":
+    let rearmedFired = newAsyncEvent()
+    var fireCount = 0
+    var timeout: Timeout
+    timeout = newTimeout(
+      proc() =
+        inc fireCount
+        if fireCount == 1:
+          timeout.set(50.milliseconds)
+        else:
+          rearmedFired.fire()
+    )
+
+    timeout.set(50.milliseconds)
+
+    check (await rearmedFired.wait().withTimeout(fireTimeout))
+    check fireCount == 2
+
   asyncTest "stop cancels expiry":
     var fired = 0
     let timeout = newTimeout(

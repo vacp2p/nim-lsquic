@@ -467,3 +467,81 @@ suite "lifecycle":
     var buf = newSeq[byte](8)
     expect StreamResetError:
       discard await stream.readOnce(buf)
+
+  asyncTest "nil read destination is rejected":
+    let stream = Stream.new()
+
+    expect AssertionDefect:
+      discard await stream.readOnce(nil, 8)
+
+  asyncTest "read waiting for the read lock sees the stream closed by the engine":
+    let stream = Stream.new()
+    # hold the lock so the read parks after its pre-lock checks have passed
+    await stream.readLock.acquire()
+
+    var buf = newSeq[byte](8)
+    let reading = stream.readOnce(buf)
+
+    stream.closedByEngine = true
+    stream.readLock.release()
+
+    # the post-lock re-check keeps the read away from the freed native stream
+    check (await reading.withTimeout(timeout))
+    check (await reading) == 0
+
+  asyncTest "read waiting for the read lock sees a peer reset":
+    let stream = Stream.new()
+    await stream.readLock.acquire()
+
+    var buf = newSeq[byte](8)
+    let reading = stream.readOnce(buf)
+
+    stream.markResetByPeer(ResetRead)
+    stream.readLock.release()
+
+    expect StreamResetError:
+      discard await reading
+
+  asyncTest "concurrent reads on one stream are serialized":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[1'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+
+    var kickoff = newSeq[byte](1)
+    check (await incomingStream.readOnce(kickoff)) == 1
+    check kickoff[0] == 1
+
+    # Both reads park. A stream has a single pending-read slot, so `readLock` has
+    # to keep the second reader out until the first one is done; otherwise the
+    # second task would overwrite the first and the first read would hang.
+    # The buffer lengths differ so the pending task identifies its owner.
+    var firstBuf = newSeq[byte](4)
+    var secondBuf = newSeq[byte](8)
+    let firstRead = incomingStream.readOnce(firstBuf)
+    let secondRead = incomingStream.readOnce(secondBuf)
+
+    await sleepAsync(100.milliseconds)
+    check not firstRead.finished
+    check not secondRead.finished
+    check incomingStream.toRead.valueOr(ReadTask()).dataLen == firstBuf.len
+
+    await outgoingStream.write(@[7'u8])
+    check (await firstRead.withTimeout(timeout))
+    check (await firstRead) == 1
+    check firstBuf[0] == 7
+
+    # only now does the second read take the lock and claim the pending slot
+    await sleepAsync(100.milliseconds)
+    check not secondRead.finished
+    check incomingStream.toRead.valueOr(ReadTask()).dataLen == secondBuf.len
+
+    await outgoingStream.write(@[8'u8])
+    check (await secondRead.withTimeout(timeout))
+    check (await secondRead) == 1
+    check secondBuf[0] == 8
+
+    await incomingStream.close()
