@@ -117,17 +117,19 @@ suite "tls config":
     # copy of the i2d buffer.
     let cert = testCertificate().toX509().valueOr:
         raiseAssert "test certificate must parse: " & error
+    defer:
+      X509_free(cert)
+
     let der = cert.x509toDERBytes().valueOr:
       raiseAssert "test certificate must convert to DER"
 
     var readPos = cast[ptr uint8](unsafeAddr der[0])
     let reparsed = d2i_X509(nil, addr readPos, der.len.clong)
+    defer:
+      X509_free(reparsed)
 
     # a rejected encoding leaves reparsed nil, which converts back to Opt.none
     check reparsed.x509toDERBytes() == Opt.some(der)
-
-    X509_free(reparsed)
-    X509_free(cert)
 
   test "nil x509 DER conversion is rejected":
     let cert: ptr X509 = nil
