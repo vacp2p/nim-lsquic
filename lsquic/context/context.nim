@@ -23,9 +23,9 @@ type
   LsquicCidArray = UncheckedArray[lsquic_cid_t]
 
   SegmentationOffload* = ref object
-    ## UDP segmentation offload state for one socket. The server and client
-    ## contexts of an endpoint share a single cell, so a runtime disable
-    ## applies to the socket rather than to whichever context hit the error.
+    ## UDP segmentation offload state for one socket. The server context and
+    ## the client context of an endpoint share one cell. A send error thus
+    ## disables offload for the socket, not for one context only.
     enabled: bool
 
   QuicContext* = ref object of RootObj

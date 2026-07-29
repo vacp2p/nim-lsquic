@@ -49,11 +49,8 @@ proc build(
 proc checkGroupInvariants(
     groups: array[MaxBatch, GsoGroup], ngroups: int, nspecs: int
 ) =
-  ## Properties every grouping must hold regardless of input. The first is what
-  ## the send path's prefix accounting rests on: groups tile specs[0 ..< nspecs]
-  ## contiguously and in order, so groups[k].firstSpec is exactly the number of
-  ## specs preceding group k. The rest keep a segmented send within what the
-  ## kernel will accept.
+  ## Checks the properties that every result must have. The send path depends
+  ## on the coverage check to report a correct prefix count.
   var next = 0
   for g in 0 ..< ngroups:
     check groups[g].firstSpec.int == next
@@ -110,8 +107,7 @@ suite "gso grouping":
         defs.add spec(d, 1200)
     let n = run(dests, defs, groups)
 
-    # Only adjacent specs are grouped, so a round-robin batch yields solo
-    # groups; the send path falls back to plain sendmmsg for them.
+    # the send path uses plain sendmmsg for solo groups
     check n == 9
     for g in 0 ..< n:
       check groups[g].count == 1
@@ -163,9 +159,9 @@ suite "gso grouping":
     check groups[1].count == 1
 
   test "byte cap splits a destination below the kernel limit":
-    # 62 * 1040 = 64480; a 63rd segment would reach 65520, past the 65507 a
-    # single IPv4 datagram can carry - the kernel rejects the whole send with
-    # EMSGSIZE, so the group must close first.
+    # 62 * 1040 = 64480 bytes. A 63rd segment gives 65520 bytes. One IPv4
+    # datagram holds 65507 bytes, so the kernel refuses the whole send with
+    # EMSGSIZE. The group must close first.
     var defs: seq[SpecDef]
     for _ in 0 ..< 63:
       defs.add spec(0, 1040)
@@ -208,7 +204,7 @@ suite "gso grouping":
       defs.add spec(0, 1200)
     let n = run(dests, defs, groups)
 
-    # 54 * 1200 = 64800, and a 55th segment would exceed the byte cap
+    # 54 * 1200 = 64800 bytes. A 55th segment is more than the byte limit.
     check n == 19
     check groups[0].count == 54
 

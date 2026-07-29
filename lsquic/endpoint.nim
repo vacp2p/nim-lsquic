@@ -447,8 +447,9 @@ proc datagramTransport*(endpoint: QuicEndpoint): DatagramTransport {.raises: [].
   endpoint.udp
 
 proc segmentationOffloadActive*(endpoint: QuicEndpoint): bool {.raises: [].} =
-  ## True while UDP segmentation offload is in use on this endpoint's socket:
-  ## requested, supported by the probe, and not disabled by a later send error.
+  ## True while the endpoint socket uses UDP segmentation offload. The config
+  ## must ask for it, the probe must find support, and no send error must
+  ## disable it.
   endpoint.gso.isEnabled()
 
 proc stop*(endpoint: QuicEndpoint) {.async: (raises: [CancelledError]).} =

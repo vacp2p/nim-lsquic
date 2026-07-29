@@ -341,10 +341,8 @@ when defined(linux):
       specsArr: ptr UncheckedArray[struct_lsquic_out_spec],
       nspecs: int,
   ): cint =
-    ## Sends the batch grouped by destination, each multi-packet group as one
-    ## GSO super-datagram. Returns a prefix count of sent specs: a group holds
-    ## adjacent specs (see groupSpecs), so when group k is the first not fully
-    ## sent, groups[k].firstSpec is exactly what came before it.
+    ## Sends each multi-packet group as one segmented datagram. Returns the
+    ## number of specs sent, always as a prefix of the batch.
     var
       groups {.noinit.}: array[MaxBatch, GsoGroup]
       iovPool {.noinit.}: array[MaxBatch, IOVec]
@@ -395,19 +393,18 @@ when defined(linux):
 
       let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nmsgs.cuint, 0)
       if res < 0:
-        # the first message of this chunk failed, so groups[g] is the failing
-        # group and groups[g].firstSpec the exact sent-prefix
+        # the first message of this chunk failed, so groups[g] is the failed
+        # group
         let
           savedErrno = errno
           p = groups[g].firstSpec.int
         if savedErrno == EMSGSIZE and groups[g].useGso:
-          # a segmented datagram was oversized (path MTU shrank); resend its
-          # members individually so lsquic can attribute EMSGSIZE per packet
+          # send each member alone, so lsquic gets one EMSGSIZE per packet
           for j in 0 ..< groups[g].count.int:
             let idx = p + j
             if sendOneSpec(quicCtx, specsArr[idx]) < 0:
-              # members are adjacent, so the failing one is the first unsent
-              # spec of the whole batch and takes the errno verbatim
+              # members are adjacent, so this is the first unsent spec of the
+              # batch and can keep its own errno
               let memberErrno = errno
               trace "gso member resend failed", idx, nspecs
               errno = memberErrno
@@ -418,8 +415,7 @@ when defined(linux):
           continue
         if savedErrno == EIO or savedErrno == EINVAL or savedErrno == ENOTSUP or
             savedErrno == EOPNOTSUPP:
-          # kernel/driver rejected the segmented send: disable GSO on this
-          # socket for good and finish the batch unsegmented
+          # the kernel refused the segmented send
           quicCtx.gso.disable()
           info "UDP GSO disabled after send error", errorCode = savedErrno
           let plainSent = sendPlain(quicCtx, specsArr, p, nspecs)
@@ -436,8 +432,7 @@ when defined(linux):
 
       g += res
       if res < nmsgs.cint:
-        # sendmmsg does not report the error that stopped it; back off and let
-        # lsquic retry the remainder
+        # sendmmsg does not report the error that stopped it
         trace "gso sendmmsg partially sent", sentGroups = g, ngroups, nspecs
         errno = EAGAIN
         return groups[g].firstSpec.cint
@@ -446,8 +441,8 @@ when defined(linux):
 
 when defined(windows):
   proc sendOneSpec(quicCtx: QuicContext, spec: struct_lsquic_out_spec): cint =
-    ## single unsegmented WSASendMsg; caller reads wsaGetLastError on failure.
-    ## Only ever called on GSO group members, which carry one iovec each.
+    ## Sends one spec without segmentation. On failure the caller reads
+    ## wsaGetLastError. Only GSO group members use this proc.
     doAssert spec.iovlen == 1
     var
       destStorage: Sockaddr_storage
@@ -471,10 +466,9 @@ when defined(windows):
       specsArr: ptr UncheckedArray[struct_lsquic_out_spec],
       nspecs: int,
   ): cint =
-    ## Sends the batch grouped by destination, each multi-packet group as one
-    ## USO super-datagram (one WSASendMsg per group; Windows has no sendmmsg).
-    ## Same prefix-count accounting as the Linux path: a group holds adjacent
-    ## specs, so when group g fails, groups[g].firstSpec specs are known sent.
+    ## Sends each multi-packet group as one segmented datagram. Windows has no
+    ## sendmmsg, so this proc sends one WSASendMsg per group. Returns a prefix
+    ## count, as the Linux path does.
     var
       groups {.noinit.}: array[MaxBatch, GsoGroup]
       bufPool {.noinit.}: array[MaxBatch, WSABUF]
@@ -530,13 +524,12 @@ when defined(windows):
           wsaErr = wsaGetLastError()
           p = grp.firstSpec.int
         if wsaErr == WSAEMSGSIZE and grp.useGso:
-          # a segmented datagram was oversized (path MTU shrank); resend its
-          # members individually so lsquic can attribute the error per packet
+          # send each member alone, so lsquic gets one error per packet
           for j in 0 ..< grp.count.int:
             let idx = p + j
             if sendOneSpec(quicCtx, specsArr[idx]) != 0:
-              # members are adjacent, so the failing one is the first unsent
-              # spec of the whole batch and takes the error verbatim
+              # members are adjacent, so this is the first unsent spec of the
+              # batch and can keep its own error
               setSendErrno(wsaGetLastError())
               if idx == 0:
                 return -1
@@ -544,8 +537,7 @@ when defined(windows):
           inc g
           continue
         if wsaErr == WSAEINVAL or wsaErr == WSAEOPNOTSUPP or wsaErr == WSAENOPROTOOPT:
-          # the stack rejected the segmented send: disable USO on this socket
-          # for good and finish the batch unsegmented
+          # the stack refused the segmented send
           quicCtx.gso.disable()
           let plainSent = sendPlain(quicCtx, specsArr, p, nspecs)
           if plainSent < 0:
