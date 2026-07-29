@@ -9,7 +9,7 @@ when defined(windows):
 else:
   from posix import SOL_SOCKET, SO_RCVBUF
 import lsquic
-import ./helpers/[address, clientserver]
+import ./helpers/[address, clientserver, trackers]
 
 proc socketReceiveBufferBytes(
     udp: DatagramTransport
@@ -20,6 +20,9 @@ proc socketReceiveBufferBytes(
   int(res.get())
 
 suite "runtime":
+  teardown:
+    checkTrackers()
+
   asyncTest "init and cleanup are repeatable and leave a usable global":
     # start from a known-clean global regardless of prior state
     cleanupLsquic()

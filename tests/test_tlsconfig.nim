@@ -10,7 +10,7 @@ import boringssl
 import lsquic
 import lsquic/certificates
 import lsquic/lsquic_ffi
-import ./helpers/certificate
+import ./helpers/[certificate, trackers]
 
 proc decodeAlpnWire(wire: string): HashSet[string] =
   ## Reverses the ALPN encoding that TLSConfig.new applies, so a test can check
@@ -40,6 +40,9 @@ proc makeAlpnSet(protocols: varargs[string]): HashSet[string] =
   alpn
 
 suite "tls config":
+  teardown:
+    checkTrackers()
+
   test "certificate requires key":
     expect QuicConfigError:
       discard TLSConfig.new(certificate = testCertificate())

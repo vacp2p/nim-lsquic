@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
-import ./helpers/[address, certificate, clientserver]
+import ./helpers/[address, certificate, clientserver, trackers]
 
 initializeLsquic(true, true)
 
@@ -64,6 +64,9 @@ proc makeClientWithoutVerifier(): QuicClient {.raises: [QuicConfigError].} =
   )
 
 suite "certificate verifier":
+  teardown:
+    checkTrackers()
+
   test "base verifier requires an override":
     # Guard for a subtype that forgets to implement verify: it must raise
     # rather than silently accept or reject a peer.

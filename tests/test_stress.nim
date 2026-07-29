@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
-import ./helpers/[address, clientserver, param, stream]
+import ./helpers/[address, clientserver, param, stream, trackers]
 
 initializeLsquic(true, true)
 
@@ -60,6 +60,9 @@ proc runSequentialRound(round: int) {.async.} =
   check (await incoming.closedFuture().withTimeout(timeout))
 
 suite "stress":
+  teardown:
+    checkTrackers()
+
   asyncTest "repeated connect and transfer":
     for round in 0 ..< SequentialRounds:
       await runSequentialRound(round)
