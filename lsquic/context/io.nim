@@ -58,6 +58,7 @@ when defined(windows):
     WSAEINVAL = 10022
     WSAEWOULDBLOCK = 10035
     WSAEMSGSIZE = 10040
+    WSAENOPROTOOPT = 10042
     WSAEOPNOTSUPP = 10045
 
   proc WSASendMsg(
@@ -341,37 +342,33 @@ when defined(linux):
       nspecs: int,
   ): cint =
     ## Sends the batch grouped by destination, each multi-packet group as one
-    ## GSO super-datagram. Returns a prefix count of sent specs: groups are
-    ## ordered by ascending firstSpec (see groupSpecs), so when group k is the
-    ## first not fully sent, every spec below groups[k].firstSpec is out.
+    ## GSO super-datagram. Returns a prefix count of sent specs: a group holds
+    ## adjacent specs (see groupSpecs), so when group k is the first not fully
+    ## sent, groups[k].firstSpec is exactly what came before it.
     var
       groups {.noinit.}: array[MaxBatch, GsoGroup]
-      specOrder {.noinit.}: array[MaxBatch, uint16]
       iovPool {.noinit.}: array[MaxBatch, IOVec]
       destStorages {.noinit.}: array[SendmmsgBatchSize, Sockaddr_storage]
       msgs {.noinit.}: array[SendmmsgBatchSize, MMsgHdr]
       cmsgBufs {.noinit.}: array[SendmmsgBatchSize, GsoCmsgBuf]
 
-    let ngroups = groupSpecs(specsArr, nspecs, groups, specOrder)
+    let ngroups = groupSpecs(specsArr, nspecs, groups)
 
-    var
-      g = 0
-      orderPos = 0 # specOrder index of group g's first member
+    var g = 0
     while g < ngroups:
       let nmsgs = min(ngroups - g, SendmmsgBatchSize)
-      var
-        iovUsed = 0
-        pos = orderPos
+      var iovUsed = 0
       for m in 0 ..< nmsgs:
         let
           grp = addr groups[g + m]
-          head = addr specsArr[grp.firstSpec.int]
+          first = grp.firstSpec.int
+          head = addr specsArr[first]
         var destAddrLen: SockLen
         prepareDestAddr(head.local_sa, head.dest_sa, destStorages[m], destAddrLen)
         if grp.useGso:
           let iovStart = iovUsed
           for j in 0 ..< grp.count.int:
-            let s = addr specsArr[specOrder[pos + j].int]
+            let s = addr specsArr[first + j]
             iovPool[iovUsed] =
               IOVec(iov_base: s.iov[].iov_base, iov_len: s.iov[].iov_len)
             inc iovUsed
@@ -395,7 +392,6 @@ when defined(linux):
           msgs[m] = MMsgHdr(
             msg_hdr: makeMsgHdr(head[], destStorages[m], destAddrLen), msg_len: 0
           )
-        pos += grp.count.int
 
       let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nmsgs.cuint, 0)
       if res < 0:
@@ -407,29 +403,24 @@ when defined(linux):
         if savedErrno == EMSGSIZE and groups[g].useGso:
           # a segmented datagram was oversized (path MTU shrank); resend its
           # members individually so lsquic can attribute EMSGSIZE per packet
-          var allSent = true
           for j in 0 ..< groups[g].count.int:
-            let idx = specOrder[orderPos + j].int
+            let idx = p + j
             if sendOneSpec(quicCtx, specsArr[idx]) < 0:
+              # members are adjacent, so the failing one is the first unsent
+              # spec of the whole batch and takes the errno verbatim
               let memberErrno = errno
-              var minUnsent = idx
-              if g + 1 < ngroups:
-                minUnsent = min(minUnsent, groups[g + 1].firstSpec.int)
-              trace "gso member resend failed", idx, minUnsent, nspecs
-              # exact attribution only when the failed spec is the first unsent
-              # one; otherwise defer via EAGAIN so it resurfaces later
-              errno = if idx == minUnsent: memberErrno else: EAGAIN
-              if minUnsent == 0:
+              trace "gso member resend failed", idx, nspecs
+              errno = memberErrno
+              if idx == 0:
                 return -1
-              return minUnsent.cint
-          orderPos += groups[g].count.int
+              return idx.cint
           inc g
           continue
         if savedErrno == EIO or savedErrno == EINVAL or savedErrno == ENOTSUP or
             savedErrno == EOPNOTSUPP:
           # kernel/driver rejected the segmented send: disable GSO on this
           # socket for good and finish the batch unsegmented
-          quicCtx.gsoEnabled = false
+          quicCtx.gso.disable()
           info "UDP GSO disabled after send error", errorCode = savedErrno
           let plainSent = sendPlain(quicCtx, specsArr, p, nspecs)
           if plainSent < 0:
@@ -443,8 +434,6 @@ when defined(linux):
           return -1
         return p.cint
 
-      for m in 0 ..< res:
-        orderPos += groups[g + m].count.int
       g += res
       if res < nmsgs.cint:
         # sendmmsg does not report the error that stopped it; back off and let
@@ -457,7 +446,9 @@ when defined(linux):
 
 when defined(windows):
   proc sendOneSpec(quicCtx: QuicContext, spec: struct_lsquic_out_spec): cint =
-    ## single unsegmented WSASendMsg; caller reads wsaGetLastError on failure
+    ## single unsegmented WSASendMsg; caller reads wsaGetLastError on failure.
+    ## Only ever called on GSO group members, which carry one iovec each.
+    doAssert spec.iovlen == 1
     var
       destStorage: Sockaddr_storage
       destAddrLen: SockLen
@@ -482,24 +473,21 @@ when defined(windows):
   ): cint =
     ## Sends the batch grouped by destination, each multi-packet group as one
     ## USO super-datagram (one WSASendMsg per group; Windows has no sendmmsg).
-    ## Same prefix-count accounting as the Linux path: groups are ordered by
-    ## ascending firstSpec, so when group g fails, groups[g].firstSpec specs
-    ## are known sent.
+    ## Same prefix-count accounting as the Linux path: a group holds adjacent
+    ## specs, so when group g fails, groups[g].firstSpec specs are known sent.
     var
       groups {.noinit.}: array[MaxBatch, GsoGroup]
-      specOrder {.noinit.}: array[MaxBatch, uint16]
       bufPool {.noinit.}: array[MaxBatch, WSABUF]
       cmsgBuf {.align(8).}: array[32, byte]
 
-    let ngroups = groupSpecs(specsArr, nspecs, groups, specOrder)
+    let ngroups = groupSpecs(specsArr, nspecs, groups)
 
-    var
-      g = 0
-      orderPos = 0 # specOrder index of group g's first member
+    var g = 0
     while g < ngroups:
       let
         grp = addr groups[g]
-        head = addr specsArr[grp.firstSpec.int]
+        first = grp.firstSpec.int
+        head = addr specsArr[first]
       var
         destStorage: Sockaddr_storage
         destAddrLen: SockLen
@@ -513,7 +501,7 @@ when defined(windows):
       )
       if grp.useGso:
         for j in 0 ..< grp.count.int:
-          let s = addr specsArr[specOrder[orderPos + j].int]
+          let s = addr specsArr[first + j]
           bufPool[j] =
             WSABUF(len: culong(s.iov[].iov_len), buf: cast[ptr char](s.iov[].iov_base))
         msg.lpBuffers = addr bufPool[0]
@@ -545,28 +533,20 @@ when defined(windows):
           # a segmented datagram was oversized (path MTU shrank); resend its
           # members individually so lsquic can attribute the error per packet
           for j in 0 ..< grp.count.int:
-            let idx = specOrder[orderPos + j].int
+            let idx = p + j
             if sendOneSpec(quicCtx, specsArr[idx]) != 0:
-              let memberWsaErr = wsaGetLastError()
-              var minUnsent = idx
-              if g + 1 < ngroups:
-                minUnsent = min(minUnsent, groups[g + 1].firstSpec.int)
-              # exact attribution only when the failed spec is the first
-              # unsent one; otherwise defer via EAGAIN so it resurfaces later
-              if idx == minUnsent:
-                setSendErrno(memberWsaErr)
-              else:
-                cErrno = cEAGAIN
-              if minUnsent == 0:
+              # members are adjacent, so the failing one is the first unsent
+              # spec of the whole batch and takes the error verbatim
+              setSendErrno(wsaGetLastError())
+              if idx == 0:
                 return -1
-              return minUnsent.cint
-          orderPos += grp.count.int
+              return idx.cint
           inc g
           continue
-        if wsaErr == WSAEINVAL or wsaErr == WSAEOPNOTSUPP:
+        if wsaErr == WSAEINVAL or wsaErr == WSAEOPNOTSUPP or wsaErr == WSAENOPROTOOPT:
           # the stack rejected the segmented send: disable USO on this socket
           # for good and finish the batch unsegmented
-          quicCtx.gsoEnabled = false
+          quicCtx.gso.disable()
           let plainSent = sendPlain(quicCtx, specsArr, p, nspecs)
           if plainSent < 0:
             if p == 0:
@@ -578,7 +558,6 @@ when defined(windows):
           return -1
         return p.cint
 
-      orderPos += grp.count.int
       inc g
 
     nspecs.cint
@@ -592,6 +571,6 @@ proc sendPacketsOut*(
 
   let specsArr = cast[ptr UncheckedArray[struct_lsquic_out_spec]](specs)
   when defined(linux) or defined(windows):
-    if quicCtx.gsoEnabled and nspecs.int <= MaxBatch:
+    if quicCtx.gso.isEnabled() and nspecs.int <= MaxBatch:
       return sendSegmented(quicCtx, specsArr, nspecs.int)
   sendPlain(quicCtx, specsArr, 0, nspecs.int)
