@@ -41,3 +41,8 @@ proc addConnection*(connman: ConnectionManager, conn: Connection) =
       proc(_: pointer) {.gcsafe, raises: [].} =
         connman.removeConnection(conn)
     )
+
+when defined(lsquic_testing):
+  proc len*(connman: ConnectionManager): int {.raises: [].} =
+    ## Test-only: number of connections currently tracked.
+    connman.connections.len

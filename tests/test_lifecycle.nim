@@ -8,7 +8,7 @@ import chronos, chronos/unittest2/asynctests, results
 import lsquic
 import lsquic/[datagram]
 import lsquic/context/[client, context, io, stream]
-import ./helpers/[address, certificate, clientserver, stream]
+import ./helpers/[address, certificate, clientserver, stream, trackers]
 from lsquic/lsquic_ffi import lsquic_stream_ctx_t, lsquic_conn_t
 
 initializeLsquic(true, true)
@@ -16,6 +16,9 @@ initializeLsquic(true, true)
 const timeout = 2.seconds
 
 suite "lifecycle":
+  teardown:
+    checkTrackers()
+
   asyncTest "listener stop makes accept fail":
     let server = makeServer()
     let listener = server.listen(AutoAddressIP4)
@@ -350,6 +353,8 @@ suite "lifecycle":
 
   asyncTest "zero length reads return zero":
     let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
     var empty: seq[byte] = @[]
 
     check (await stream.readOnce(empty)) == 0
@@ -425,8 +430,37 @@ suite "lifecycle":
     # second stop is a safe no-op: the socket is not closed twice.
     await endpoint.stop()
 
+  asyncTest "connection is auto-removed from manager after close":
+    let server = makeEndpoint(AutoAddressIP4)
+    let client = makeDialEndpoint(AddressFamily.IPv4)
+    defer:
+      await allFutures(client.stop(), server.stop())
+
+    let accepting = server.accept()
+    let outgoing = await client.dial(server.localAddress())
+    let incoming = await accepting
+
+    check:
+      client.connectionCount == 1
+      server.connectionCount == 1
+
+    outgoing.close()
+    check:
+      await outgoing.closedFuture().withTimeout(timeout)
+      await incoming.closedFuture().withTimeout(timeout)
+
+    # Removal from the manager is scheduled on close; yield one tick so it runs
+    # before we count.
+    await sleepAsync(0.milliseconds)
+
+    check:
+      client.connectionCount == 0
+      server.connectionCount == 0
+
   asyncTest "peer reset in both directions merges to read-write":
     let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
 
     onReset(nil, cast[ptr lsquic_stream_ctx_t](stream), 0.cint)
     check:
@@ -444,6 +478,8 @@ suite "lifecycle":
 
   asyncTest "peer read reset fails a parked read":
     let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
     var buf = newSeq[byte](8)
     let doneFut =
       Future[int].Raising([CancelledError, StreamError]).init("test parked read")
@@ -461,6 +497,8 @@ suite "lifecycle":
 
   asyncTest "read after read reset raises":
     let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
     stream.markResetByPeer(ResetRead)
     check stream.resetHow == ResetRead
 

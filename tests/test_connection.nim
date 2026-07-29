@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results, sequtils
 import lsquic
-import ./helpers/[address, clientserver, futures, stream]
+import ./helpers/[address, clientserver, futures, stream, trackers]
 
 initializeLsquic(true, true)
 
@@ -296,6 +296,9 @@ proc runChunkedReadTest(peers: ConnectedPeers, bufSize, payloadSize: int) {.asyn
   await allFuturesRaising(sender(), receiver())
 
 suite "connection":
+  teardown:
+    checkTrackers()
+
   asyncTest "ipv4":
     await runConnectionTest(AutoAddressIP4)
 

@@ -376,3 +376,8 @@ proc stop*(endpoint: QuicEndpoint) {.async: (raises: [CancelledError]).} =
   if not endpoint.serverContext.isNil:
     endpoint.serverContext.destroy()
     endpoint.serverContext = nil
+
+when defined(lsquic_testing):
+  proc connectionCount*(endpoint: QuicEndpoint): int {.raises: [].} =
+    ## Test-only: number of connections tracked by this endpoint's manager.
+    endpoint.connman.len

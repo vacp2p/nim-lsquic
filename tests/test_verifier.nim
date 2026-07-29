@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
-import ./helpers/[address, certificate, clientserver]
+import ./helpers/[address, certificate, clientserver, trackers]
 
 initializeLsquic(true, true)
 
@@ -64,6 +64,9 @@ proc makeClientWithoutVerifier(): QuicClient {.raises: [QuicConfigError].} =
   )
 
 suite "certificate verifier":
+  teardown:
+    checkTrackers()
+
   asyncTest "accepting custom verifier allows handshake":
     let client = makeClient(CustomCertificateVerifier.init(acceptingCertificateCb))
     let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))

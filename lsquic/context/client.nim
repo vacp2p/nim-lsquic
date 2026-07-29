@@ -8,7 +8,10 @@ import chronos
 import chronos/osdefs
 import ./[context, io, stream]
 import
-  ../[lsquic_ffi, errors, tlsconfig, timeout, stream, certificates, certificateverifier]
+  ../[
+    lsquic_ffi, errors, tlsconfig, timeout, stream, certificates, certificateverifier,
+    tracking,
+  ]
 import ../helpers/sequninit
 
 proc onNewConn(
@@ -64,7 +67,7 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
     quicClientConn.onClose = nil
     quicClientConn.lsquicConn = nil
     quicClientConn.connectedFut = nil
-    GC_unref(quicClientConn)
+    unpin(quicClientConn)
   lsquic_conn_set_ctx(conn, nil)
 
 method dial*(
@@ -94,7 +97,7 @@ method dial*(
     onClose: onClose,
     certVerifier: certVerifier,
   )
-  GC_ref(quicClientConn) # Keep it pinned until on_conn_closed is called
+  pin(quicClientConn) # Keep it pinned until on_conn_closed is called
   let conn = lsquic_engine_connect(
     ctx.engine,
     N_LSQVER,
@@ -110,7 +113,7 @@ method dial*(
     0,
   )
   if conn.isNil:
-    GC_unref(quicClientConn)
+    unpin(quicClientConn)
     return err("could not dial: " & $remote)
 
   quicClientConn.lsquicConn = conn
