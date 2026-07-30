@@ -42,8 +42,9 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   streamCtx.closedByEngine = true
 
-  if not streamCtx.closeWrite:
-    streamCtx.abortPendingWrites("stream closed")
+  # Unconditionally: a write still pending when the engine closes can never
+  # complete, and nothing else will settle its future.
+  streamCtx.abortPendingWrites("stream closed")
 
   if not streamCtx.readResetByPeer():
     streamCtx.isEof = true
@@ -55,11 +56,10 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   if streamCtx.readResetByPeer():
     streamCtx.failPendingRead(streamCtx.newStreamResetError("stream read"))
-  elif streamCtx.toRead.isSome:
-    let doneFut = streamCtx.toRead.unsafeGet().doneFut
-    if not doneFut.finished:
-      doneFut.fail(newException(StreamError, "stream closed"))
-    streamCtx.toRead = Opt.none(ReadTask)
+  else:
+    # A clean close is end of stream, so a pending read reports 0 rather than
+    # failing. readOnce used to derive this by racing the closed event.
+    streamCtx.completePendingRead()
 
   unpin(streamCtx)
 
@@ -103,9 +103,10 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
 
   if lsquic_stream_wantread(stream, 0) == -1:
     trace "could not set stream wantread", streamId = lsquic_stream_id(stream)
-    streamCtx.abort()
+    streamCtx.abort() # settles the pending read, so it may already be finished
 
-  task.doneFut.complete(int(n))
+  if not task.doneFut.finished:
+    task.doneFut.complete(int(n))
 
   streamCtx.toRead = Opt.none(ReadTask)
 

@@ -84,6 +84,15 @@ proc failPendingRead*(stream: Stream, error: ref StreamError) {.raises: [].} =
     task.doneFut.fail(error)
   stream.toRead = Opt.none(ReadTask)
 
+proc completePendingRead*(stream: Stream) {.raises: [].} =
+  ## Ends a pending read at end of stream. Reporting 0 rather than failing is
+  ## what readOnce did when the closed event won its race.
+  let task = stream.toRead.valueOr:
+    return
+  if not task.doneFut.finished:
+    task.doneFut.complete(0)
+  stream.toRead = Opt.none(ReadTask)
+
 proc abortPendingWrites*(stream: Stream, error: ref StreamError) {.raises: [].} =
   let task = stream.toWrite.valueOr:
     return
@@ -170,6 +179,7 @@ proc abort*(stream: Stream) =
   stream.closeWrite = true
   stream.isEof = true
   stream.abortPendingWrites("stream aborted")
+  stream.completePendingRead()
   discard stream.requestClose()
   if not stream.closed.isSet():
     stream.closed.fire()
@@ -249,17 +259,8 @@ proc readOnce*(
 
   try:
     stream.doProcess(false)
-
-    let raceFut = await race(stream.closedWaiter, doneFut)
-    if raceFut == stream.closedWaiter:
-      if not doneFut.finished:
-        await doneFut.cancelAndWait()
-      raiseIfReadReset(stream)
-      stream.isEof = true
-      stream.closeWrite = true
-      discard stream.closeIfDone()
-      return 0
-
+    # onClose completes this with 0 on a clean close and fails it on a reset,
+    # and abort completes it too, so there is nothing to race against.
     return await doneFut
   finally:
     stream.clearPendingRead(doneFut)
@@ -333,14 +334,7 @@ proc write*(
 
   try:
     stream.doProcess(srcLen >= WriteFlushBytes)
-
-    let raceFut = await race(stream.closedWaiter, doneFut)
-    if raceFut == stream.closedWaiter:
-      raiseIfWriteReset(stream)
-      if not doneFut.finished:
-        doneFut.fail(newException(StreamError, "stream closed"))
-      stream.closeWrite = true
-
+    # abortPendingWrites on the close and reset paths settles this future.
     await doneFut
   finally:
     stream.clearPendingWrite(doneFut)
