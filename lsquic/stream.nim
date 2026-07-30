@@ -6,6 +6,15 @@ import chronos
 import chronicles
 import ./[lsquic_ffi, errors, tracking]
 
+const WriteFlushBytes = 16384
+  ## A write at or above this size is flushed immediately so that its packets
+  ## stay adjacent in the batch and segmentation offload can group them.
+  ## Smaller writes defer, so writes across connections coalesce into one tick.
+  ##
+  ## Measured, 8 connections, request/response at a range of message sizes:
+  ## deferring wins up to 8 KB (-25% wall at 1 KB, -8% at 8 KB) and loses from
+  ## 16 KB up (+5% at 16 KB, +14% at 64 KB).
+
 type WriteTask* = object
   data*: ptr byte
   dataLen*: int
@@ -34,7 +43,7 @@ type Stream* = ref object
   readLock*: AsyncLock
   isEof*: bool # Received a FIN from remote
   toRead*: Opt[ReadTask]
-  doProcess*: proc() {.gcsafe, raises: [].}
+  doProcess*: proc(urgent: bool) {.gcsafe, raises: [].}
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let closed = newAsyncEvent()
@@ -135,7 +144,7 @@ template raiseIfWriteReset(stream: Stream) =
 
 template processWhenAvailable(stream: Stream) =
   if not isNil(stream.doProcess):
-    stream.doProcess()
+    stream.doProcess(true)
 
 proc requestClose(stream: Stream): bool {.raises: [].} =
   if stream.closedByEngine or stream.quicStream.isNil or stream.closeRequested:
@@ -184,7 +193,7 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
       stream.abort()
       raise newException(StreamError, "could not close the stream")
     if not stream.isEof:
-      stream.doProcess()
+      stream.doProcess(true)
   else:
     raise newException(StreamError, "could not close the stream")
 
@@ -245,7 +254,9 @@ proc readOnce*(
   stream.toRead = Opt.some(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
 
   try:
-    stream.doProcess()
+    # Deferred: this only asks lsquic to hand over data it has already buffered,
+    # and coalescing it is what lets several connections share a tick.
+    stream.doProcess(false)
 
     let raceFut = await race(stream.closedWaiter, doneFut)
     if raceFut == stream.closedWaiter:
@@ -297,7 +308,7 @@ proc write*(
     if lsquic_stream_flush(stream.quicStream) != 0:
       stream.abort()
       raise newException(StreamError, "could not flush stream")
-    stream.doProcess()
+    stream.doProcess(data.len >= WriteFlushBytes)
     return
   elif n < 0:
     if errno == ECONNRESET:
@@ -318,7 +329,7 @@ proc write*(
   )
 
   try:
-    stream.doProcess()
+    stream.doProcess(data.len >= WriteFlushBytes)
 
     let raceFut = await race(stream.closedWaiter, doneFut)
     if raceFut == stream.closedWaiter:

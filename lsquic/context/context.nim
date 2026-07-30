@@ -39,6 +39,7 @@ type
     fd*: cint
     gso*: SegmentationOffload = SegmentationOffload()
     processing: bool
+    flushScheduled: bool
     running*: bool
     ownedCids: HashSet[CidKey]
 
@@ -192,6 +193,29 @@ proc processWhenReady*(quicContext: QuicContext) =
   if quicContext.isNil or quicContext.engine.isNil:
     return
   quicContext.engine_process()
+
+proc flushDeferred(udata: pointer) {.gcsafe, raises: [].} =
+  let ctx = cast[QuicContext](udata)
+  ctx.flushScheduled = false
+  ctx.processWhenReady()
+  # Unpin last: `udata` is a raw pointer, so releasing the pin before the call
+  # could free the context out from under it.
+  unpin(ctx)
+
+proc processSoon*(quicContext: QuicContext) {.raises: [].} =
+  ## Asks for an engine tick at the end of the current event loop iteration
+  ## instead of right now. lsquic decides what to send once per tick, so a tick
+  ## per stream operation is a send batch per stream operation; deferring lets
+  ## operations on different connections share one batch.
+  ##
+  ## `callSoon` rather than a timer: chronos forces its poll timeout to zero
+  ## while any callback is queued, so a deferred flush cannot be left pending
+  ## by an idle loop.
+  if quicContext.isNil or not quicContext.isRunning() or quicContext.flushScheduled:
+    return
+  quicContext.flushScheduled = true
+  pin(quicContext) # the dispatcher holds a raw pointer until the callback runs
+  callSoon(flushDeferred, cast[pointer](quicContext))
 
 proc incomingStream*(
     quicConn: QuicConnection
