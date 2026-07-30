@@ -232,11 +232,9 @@ proc drainDatagrams(
 proc readIncoming(
     udp: DatagramTransport, msg: var seq[byte], msgLen: var int
 ) {.raises: [TransportError].} =
-  ## `peekMessage` only avoids a copy where `shallowCopy` exists, which is refc
-  ## only - Nim does not declare it under arc/orc. There chronos falls back to
-  ## `msg = transp.buffer`, which copies `bufSize` bytes (65536 by default)
-  ## rather than the bytes received, through a byte-at-a-time loop.
-  ## `getMessage` copies `buflen` instead.
+  ## Avoid `peekMessage` under ARC/ORC: without `shallowCopy`, Chronos copies the
+  ## full receive buffer instead of only the datagram. `getMessage` copies only the
+  ## received bytes.
   when declared(shallowCopy):
     udp.peekMessage(msg, msgLen)
   else:
