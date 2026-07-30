@@ -205,8 +205,8 @@ proc drainDatagrams(
   if endpoint.drainBuf.len == 0:
     endpoint.drainBuf = newSeq[byte](DefaultDatagramBufferSize)
 
-  var count = 0
-  while count < MaxDatagramsPerWakeup:
+  var targets: set[RouteTarget]
+  for _ in 0 ..< MaxDatagramsPerWakeup:
     var
       remoteAddress: Sockaddr_storage
       remoteAddrLen = SockLen(sizeof(Sockaddr_storage))
@@ -217,15 +217,14 @@ proc drainDatagrams(
       # Empty, or an error the transport will report again on the next wakeup.
       break
 
-    inc count
     if res > 0:
-      result =
-        result +
-        endpoint.routeDatagram(
-          endpoint.drainBuf.toOpenArray(0, res - 1),
-          local,
-          toTransportAddress(cast[ptr SockAddr](addr remoteAddress)),
-        )
+      targets.incl endpoint.routeDatagram(
+        endpoint.drainBuf.toOpenArray(0, res - 1),
+        local,
+        toTransportAddress(cast[ptr SockAddr](addr remoteAddress)),
+      )
+
+  targets
 
 proc receiveFromUdp(
     endpoint: QuicEndpoint, udp: DatagramTransport, remote: TransportAddress
