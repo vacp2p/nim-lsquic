@@ -32,3 +32,9 @@ proc toTransportAddress*(sock: ptr SockAddr): TransportAddress =
   var taddr: TransportAddress
   fromSAddr(addr destAddress, destAddrLen, taddr)
   taddr
+
+proc isIPv6Family*(sock: ptr SockAddr): bool {.inline.} =
+  sock.sa_family.int == fixed_AF_INET6
+
+proc isIPv4Family*(sock: ptr SockAddr): bool {.inline.} =
+  sock.sa_family.int == AF_INET.int
