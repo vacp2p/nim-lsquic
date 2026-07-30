@@ -229,6 +229,20 @@ proc drainDatagrams(
 
   targets
 
+proc readIncoming(
+    udp: DatagramTransport, msg: var seq[byte], msgLen: var int
+) {.raises: [TransportError].} =
+  ## `peekMessage` only avoids a copy where `shallowCopy` exists, which is refc
+  ## only - Nim does not declare it under arc/orc. There chronos falls back to
+  ## `msg = transp.buffer`, which copies `bufSize` bytes (65536 by default)
+  ## rather than the bytes received, through a byte-at-a-time loop.
+  ## `getMessage` copies `buflen` instead.
+  when declared(shallowCopy):
+    udp.peekMessage(msg, msgLen)
+  else:
+    msg = udp.getMessage()
+    msgLen = msg.len
+
 proc receiveFromUdp(
     endpoint: QuicEndpoint, udp: DatagramTransport, remote: TransportAddress
 ) {.raises: [].} =
@@ -241,7 +255,7 @@ proc receiveFromUdp(
       msg: seq[byte]
       msgLen: int
     local = udp.localAddress()
-    udp.peekMessage(msg, msgLen)
+    readIncoming(udp, msg, msgLen)
     if msgLen > 0:
       targets = endpoint.routeDatagram(msg.toOpenArray(0, msgLen - 1), local, remote)
   except TransportError as e:
