@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
-import ./helpers/[address, certificate, clientserver]
+import ./helpers/[address, certificate, clientserver, trackers]
 
 initializeLsquic(true, true)
 
@@ -64,6 +64,31 @@ proc makeClientWithoutVerifier(): QuicClient {.raises: [QuicConfigError].} =
   )
 
 suite "certificate verifier":
+  teardown:
+    checkTrackers()
+
+  test "base verifier requires an override":
+    # Guard for a subtype that forgets to implement verify: it must raise
+    # rather than silently accept or reject a peer.
+    let verifier = CertificateVerifier()
+
+    expect AssertionDefect:
+      discard verifier.verify("example.com", @[])
+
+  test "custom verifier requires a callback":
+    let verifier = CustomCertificateVerifier.init(nil)
+
+    expect AssertionDefect:
+      discard verifier.verify("example.com", @[])
+
+  test "insecure verifier accepts any input":
+    let verifier = InsecureCertificateVerifier.init()
+
+    check:
+      verifier.verify("example.com", @[testCertificate()])
+      # a server verifying a client that sent no certificate sees an empty chain
+      verifier.verify("", @[])
+
   asyncTest "accepting custom verifier allows handshake":
     let client = makeClient(CustomCertificateVerifier.init(acceptingCertificateCb))
     let server = makeServer(CustomCertificateVerifier.init(acceptingCertificateCb))
@@ -151,6 +176,15 @@ suite "certificate verifier":
 
     expect QuicError:
       discard await client.dial(AutoAddressIP4)
+
+  asyncTest "nil per-dial verifier does not fall back to the default":
+    let client = makeClient(CustomCertificateVerifier.init(acceptingCertificateCb))
+    defer:
+      await client.stop()
+
+    let noVerifier: CertificateVerifier = nil
+    expect QuicError:
+      discard await client.dial(AutoAddressIP4, noVerifier)
 
   asyncTest "concurrent per-dial verifiers stay isolated":
     let client = makeClientWithoutVerifier()

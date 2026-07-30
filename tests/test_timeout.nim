@@ -5,10 +5,14 @@
 
 import chronos, chronos/unittest2/asynctests
 import lsquic/timeout
+import ./helpers/trackers
 
 const fireTimeout = 2.seconds
 
 suite "timeout":
+  teardown:
+    checkTrackers()
+
   asyncTest "earlier deadline replaces later deadline":
     let fired = newAsyncEvent()
     var fireCount = 0

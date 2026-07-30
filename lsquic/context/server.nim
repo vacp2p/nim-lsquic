@@ -7,7 +7,7 @@ import chronicles
 import chronos
 import chronos/osdefs
 import ./[context, io, stream]
-import ../[lsquic_ffi, tlsconfig, timeout, stream, certificates]
+import ../[lsquic_ffi, tlsconfig, timeout, stream, certificates, tracking]
 import ../helpers/[sequninit, transportaddr]
 
 proc onNewConn(
@@ -35,7 +35,7 @@ proc onNewConn(
   )
   let serverCtx = cast[ServerContext](stream_if_ctx)
   serverCtx.trackConnectionCid(conn)
-  GC_ref(quicConn) # Keep it pinned until on_conn_closed is called
+  pin(quicConn) # Keep it pinned until on_conn_closed is called
   serverCtx.incoming.putNoWait(quicConn)
   cast[ptr lsquic_conn_ctx_t](quicConn)
 
@@ -48,7 +48,7 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
     quicConn.onClose()
     quicConn.onClose = nil
     quicConn.lsquicConn = nil
-    GC_unref(quicConn)
+    unpin(quicConn)
   lsquic_conn_set_ctx(conn, nil)
 
 const Cubic = 1

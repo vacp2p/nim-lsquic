@@ -133,6 +133,7 @@ The snippet expects `cert.pem` and `key.pem` in PEM format and embeds them at co
 - Server-side `TLSConfig` must include both a certificate and a private key.
 - Client and server ALPN values must match or the handshake will fail.
 - `Connection.close()` and `Stream.close()` perform a graceful shutdown. `abort()` is the hard-stop path.
+- UDP sockets request an 8 MiB receive buffer by default. Pass `QuicSocketConfig(receiveBufferBytes: 0)` to keep the OS default, or set another byte value; Linux may cap the effective size at `net.core.rmem_max`.
 
 For more complete usage patterns, see:
 
