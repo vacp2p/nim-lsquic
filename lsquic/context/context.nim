@@ -24,9 +24,9 @@ type
 
   SegmentationOffload* = ref object
     ## UDP segmentation offload state for one socket. The server context and
-    ## the client context of an endpoint share one cell. A send error thus
-    ## disables offload for the socket, not for one context only.
-    enabled: bool
+    ## the client context of an endpoint share one cell, which is why this is a
+    ## ref: a send error disables offload for the socket, not for one context.
+    enabled*: bool
 
   QuicContext* = ref object of RootObj
     settings*: struct_lsquic_engine_settings
@@ -37,20 +37,10 @@ type
     tickTimeout*: Timeout
     sslCtx*: ptr SSL_CTX
     fd*: cint
-    gso*: SegmentationOffload
+    gso*: SegmentationOffload = SegmentationOffload()
     processing: bool
     running*: bool
     ownedCids: HashSet[CidKey]
-
-proc newSegmentationOffload*(enabled: bool): SegmentationOffload {.raises: [].} =
-  SegmentationOffload(enabled: enabled)
-
-proc isEnabled*(gso: SegmentationOffload): bool {.raises: [].} =
-  not gso.isNil and gso.enabled
-
-proc disable*(gso: SegmentationOffload) {.raises: [].} =
-  if not gso.isNil:
-    gso.enabled = false
 
 func hash*(cid: CidKey): Hash =
   var h = hash(cid.len)

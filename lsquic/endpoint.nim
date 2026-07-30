@@ -273,8 +273,8 @@ proc createUdp(
       raise newException(QuicError, "only IPv4/IPv6 address is supported")
 
   udp.configureReceiveBuffer(socketConfig)
-  endpoint.gso = newSegmentationOffload(
-    socketConfig.segmentationOffload and probeSegmentationOffload(udp.fd)
+  endpoint.gso = SegmentationOffload(
+    enabled: socketConfig.segmentationOffload and probeSegmentationOffload(udp.fd)
   )
   udp
 
@@ -296,8 +296,8 @@ proc createUdp(
       raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
 
   udp.configureReceiveBuffer(socketConfig)
-  endpoint.gso = newSegmentationOffload(
-    socketConfig.segmentationOffload and probeSegmentationOffload(udp.fd)
+  endpoint.gso = SegmentationOffload(
+    enabled: socketConfig.segmentationOffload and probeSegmentationOffload(udp.fd)
   )
   udp
 
@@ -450,7 +450,7 @@ proc segmentationOffloadActive*(endpoint: QuicEndpoint): bool {.raises: [].} =
   ## True while the endpoint socket uses UDP segmentation offload. The config
   ## must ask for it, the probe must find support, and no send error must
   ## disable it.
-  endpoint.gso.isEnabled()
+  endpoint.gso.enabled
 
 proc stop*(endpoint: QuicEndpoint) {.async: (raises: [CancelledError]).} =
   if endpoint.stopped:

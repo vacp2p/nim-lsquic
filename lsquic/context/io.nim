@@ -416,7 +416,7 @@ when defined(linux):
         if savedErrno == EIO or savedErrno == EINVAL or savedErrno == ENOTSUP or
             savedErrno == EOPNOTSUPP:
           # the kernel refused the segmented send
-          quicCtx.gso.disable()
+          quicCtx.gso.enabled = false
           info "UDP GSO disabled after send error", errorCode = savedErrno
           let plainSent = sendPlain(quicCtx, specsArr, p, nspecs)
           if plainSent < 0:
@@ -538,7 +538,7 @@ when defined(windows):
           continue
         if wsaErr == WSAEINVAL or wsaErr == WSAEOPNOTSUPP or wsaErr == WSAENOPROTOOPT:
           # the stack refused the segmented send
-          quicCtx.gso.disable()
+          quicCtx.gso.enabled = false
           let plainSent = sendPlain(quicCtx, specsArr, p, nspecs)
           if plainSent < 0:
             if p == 0:
@@ -563,6 +563,6 @@ proc sendPacketsOut*(
 
   let specsArr = cast[ptr UncheckedArray[struct_lsquic_out_spec]](specs)
   when defined(linux) or defined(windows):
-    if quicCtx.gso.isEnabled() and nspecs.int <= MaxBatch:
+    if quicCtx.gso.enabled and nspecs.int <= MaxBatch:
       return sendSegmented(quicCtx, specsArr, nspecs.int)
   sendPlain(quicCtx, specsArr, 0, nspecs.int)
