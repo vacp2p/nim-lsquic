@@ -7,13 +7,7 @@ import chronicles
 import ./[lsquic_ffi, errors, tracking]
 
 const WriteFlushBytes = 16384
-  ## A write at or above this size is flushed immediately so that its packets
-  ## stay adjacent in the batch and segmentation offload can group them.
-  ## Smaller writes defer, so writes across connections coalesce into one tick.
-  ##
-  ## Measured, 8 connections, request/response at a range of message sizes:
-  ## deferring wins up to 8 KB (-25% wall at 1 KB, -8% at 8 KB) and loses from
-  ## 16 KB up (+5% at 16 KB, +14% at 64 KB).
+  ## Large writes flush immediately; smaller writes defer to coalesce ticks.
 
 type WriteTask* = object
   data*: ptr byte
@@ -254,8 +248,6 @@ proc readOnce*(
   stream.toRead = Opt.some(ReadTask(data: dst, dataLen: dstLen, doneFut: doneFut))
 
   try:
-    # Deferred: this only asks lsquic to hand over data it has already buffered,
-    # and coalescing it is what lets several connections share a tick.
     stream.doProcess(false)
 
     let raceFut = await race(stream.closedWaiter, doneFut)
