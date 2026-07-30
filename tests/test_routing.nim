@@ -16,6 +16,100 @@ import lsquic/[endpoint, lsquic_ffi]
 import lsquic/context/context
 
 const
+  ClientCid = @[0xC1'u8, 1, 2, 3, 4, 5, 6, 7]
+  ServerCid = @[0x5E'u8, 1, 2, 3, 4, 5, 6, 7]
+  UnknownCid = @[0xFF'u8, 1, 2, 3, 4, 5, 6, 7]
+
+func filledCid(cidLen: int, fill: byte = 0xAB): seq[byte] =
+  newSeqWith(cidLen, fill)
+
+func toCidKey(bytes: openArray[byte]): CidKey =
+  var key = CidKey(len: bytes.len.uint8)
+  for i, b in bytes:
+    key.bytes[i] = b
+  key
+
+func toCidKey(cid: string): CidKey =
+  toCidKey(cid.toOpenArrayByte(0, cid.high))
+
+func nativeCids(cids: openArray[seq[byte]]): seq[lsquic_cid_t] =
+  var native = newSeq[lsquic_cid_t](cids.len)
+  for i, cid in cids:
+    native[i].len = cid.len.uint8
+    for j, b in cid:
+      native[i].buf[j] = b
+  native
+
+proc own(ctx: QuicContext, cids: varargs[seq[byte]]) =
+  ## Register CIDs the way lsquic's `ea_new_scids` callback does.
+  var native = nativeCids(cids)
+  addCids(cast[pointer](ctx), nil, addr native[0], native.len.cuint)
+
+proc disown(ctx: QuicContext, cids: varargs[seq[byte]]) =
+  ## Retire CIDs the way lsquic's `ea_old_scids` callback does.
+  var native = nativeCids(cids)
+  removeCids(cast[pointer](ctx), nil, addr native[0], native.len.cuint)
+
+proc newTrackingContext(T: typedesc): T =
+  let ctx = T()
+  ctx.initCidTracking()
+  ctx
+
+suite "cid ownership":
+  test "registered cids are owned, unknown ones are not":
+    let ctx = newTrackingContext(ClientContext)
+
+    check not ctx.ownsCid(toCidKey(ClientCid))
+
+    ctx.own(ClientCid, ServerCid)
+
+    check:
+      ctx.ownsCid(toCidKey(ClientCid))
+      ctx.ownsCid(toCidKey(ServerCid))
+      not ctx.ownsCid(toCidKey(UnknownCid))
+
+  test "retired cids are dropped, the rest are kept":
+    let ctx = newTrackingContext(ClientContext)
+    ctx.own(ClientCid, ServerCid)
+
+    ctx.disown(ClientCid)
+
+    check:
+      not ctx.ownsCid(toCidKey(ClientCid))
+      ctx.ownsCid(toCidKey(ServerCid))
+
+  test "cid identity ignores the bytes past the cid length":
+    # lsquic hands us a fixed-size buffer and a length, only the first `len`
+    # bytes identify the connection. A key that carried the buffer tail would
+    # never match the key `packetDcid` builds from the wire.
+    const
+      Cid = "peer"
+      Buffer = Cid & "-leftover-buffer" # the whole fixed buffer, tail included
+      LongerCid = Cid & "-two"
+
+    let ctx = newTrackingContext(ClientContext)
+    var native = lsquic_cid_t(len: Cid.len.uint8)
+    for i in 0 ..< MAX_CID_LEN:
+      native.buf[i] = Buffer[i].byte
+
+    addCids(cast[pointer](ctx), nil, addr native, 1)
+
+    check:
+      ctx.ownsCid(toCidKey(Cid))
+      # a longer cid sharing that prefix is a different connection
+      not ctx.ownsCid(toCidKey(LongerCid))
+
+  test "cids at both ends of the length range are tracked":
+    for cidLen in [1, MAX_CID_LEN]:
+      checkpoint("cidLen=" & $cidLen)
+      let
+        ctx = newTrackingContext(ClientContext)
+        cid = filledCid(cidLen)
+      ctx.own(cid)
+
+      check ctx.ownsCid(toCidKey(cid))
+
+const
   ## The first byte of a QUIC packet, bit by bit (RFC 9000 17.2/17.3):
   ##
   ##   long header:  1 F T T  R R P P
@@ -46,47 +140,16 @@ const
   ShortFirstByte = FixedBit # header form bit clear
 
 const
-  ClientCid = @[0xC1'u8, 1, 2, 3, 4, 5, 6, 7]
-  ServerCid = @[0x5E'u8, 1, 2, 3, 4, 5, 6, 7]
-  UnknownCid = @[0xFF'u8, 1, 2, 3, 4, 5, 6, 7]
-
-func filledCid(cidLen: int, fill: byte = 0xAB): seq[byte] =
-  newSeqWith(cidLen, fill)
-
-func toCidKey(bytes: openArray[byte]): CidKey =
-  var key = CidKey(len: bytes.len.uint8)
-  for i, b in bytes:
-    key.bytes[i] = b
-  key
-
-func nativeCids(cids: openArray[seq[byte]]): seq[lsquic_cid_t] =
-  var native = newSeq[lsquic_cid_t](cids.len)
-  for i, cid in cids:
-    native[i].len = cid.len.uint8
-    for j, b in cid:
-      native[i].buf[j] = b
-  native
-
-proc own(ctx: QuicContext, cids: varargs[seq[byte]]) =
-  ## Register CIDs the way lsquic's `ea_new_scids` callback does.
-  var native = nativeCids(cids)
-  addCids(cast[pointer](ctx), nil, addr native[0], native.len.cuint)
-
-proc disown(ctx: QuicContext, cids: varargs[seq[byte]]) =
-  ## Retire CIDs the way lsquic's `ea_old_scids` callback does.
-  var native = nativeCids(cids)
-  removeCids(cast[pointer](ctx), nil, addr native[0], native.len.cuint)
-
-proc newTrackingContext(T: typedesc): T =
-  let ctx = T()
-  ctx.initCidTracking()
-  ctx
+  QuicVersion1 = [0x00'u8, 0x00, 0x00, 0x01]
+  LongHeaderPrefixLen = 1 + QuicVersion1.len + 1 # first byte, version, dcid length
+  ShortHeaderPrefixLen = 1 # first byte
 
 func longHeaderPacket(
     dcid: openArray[byte], firstByte: byte = InitialFirstByte
 ): seq[byte] =
   ## first byte, 4-byte version, DCID length, DCID, SCID length, then payload.
-  var packet = @[firstByte, 0x00'u8, 0x00, 0x00, 0x01] # QUIC v1
+  var packet = @[firstByte]
+  packet.add(QuicVersion1)
   packet.add(dcid.len.byte)
   packet.add(dcid)
   packet.add(0'u8) # zero-length SCID
@@ -101,55 +164,6 @@ func shortHeaderPacket(
   packet.add(dcid)
   packet.add(newSeq[byte](8))
   packet
-
-suite "cid ownership":
-  test "registered cids are owned, unknown ones are not":
-    let ctx = newTrackingContext(ClientContext)
-
-    check not ctx.ownsCid(toCidKey(ClientCid))
-
-    ctx.own(ClientCid, ServerCid)
-
-    check:
-      ctx.ownsCid(toCidKey(ClientCid))
-      ctx.ownsCid(toCidKey(ServerCid))
-      not ctx.ownsCid(toCidKey(UnknownCid))
-
-  test "retired cids are dropped, the rest are kept":
-    let ctx = newTrackingContext(ClientContext)
-    ctx.own(ClientCid, ServerCid)
-
-    ctx.disown(ClientCid)
-
-    check:
-      not ctx.ownsCid(toCidKey(ClientCid))
-      ctx.ownsCid(toCidKey(ServerCid))
-
-  test "cid identity ignores the bytes past the cid length":
-    # lsquic hands us a fixed-size buffer and a length, only the first `len`
-    # bytes identify the connection. A key that carried the buffer tail would
-    # never match the key `packetDcid` builds from the wire.
-    let ctx = newTrackingContext(ClientContext)
-    var native = lsquic_cid_t(len: 4)
-    for i in 0 ..< MAX_CID_LEN:
-      native.buf[i] = byte(0xA0 + i)
-
-    addCids(cast[pointer](ctx), nil, addr native, 1)
-
-    check:
-      ctx.ownsCid(toCidKey([0xA0'u8, 0xA1, 0xA2, 0xA3]))
-      # a longer cid sharing that prefix is a different connection
-      not ctx.ownsCid(toCidKey([0xA0'u8, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7]))
-
-  test "cids at both ends of the length range are tracked":
-    for cidLen in [1, MAX_CID_LEN]:
-      checkpoint("cidLen=" & $cidLen)
-      let
-        ctx = newTrackingContext(ClientContext)
-        cid = filledCid(cidLen)
-      ctx.own(cid)
-
-      check ctx.ownsCid(toCidKey(cid))
 
 suite "datagram header parsing":
   test "the short header cid is read at the engine's cid width":
@@ -177,8 +191,10 @@ suite "datagram header parsing":
       "empty datagram": newSeq[byte](),
       "zero length dcid": longHeaderPacket(newSeq[byte]()),
       "dcid longer than the maximum": longHeaderPacket(filledCid(MAX_CID_LEN + 1)),
-      "long header cut inside the dcid": longHeaderPacket(ClientCid)[0 ..< 8],
-      "short header cut inside the dcid": @[ShortFirstByte, 1, 2, 3],
+      "long header cut inside the dcid":
+        longHeaderPacket(ClientCid)[0 ..< LongHeaderPrefixLen + 2],
+      "short header cut inside the dcid":
+        shortHeaderPacket(ClientCid)[0 ..< ShortHeaderPrefixLen + 3],
     }
 
     for (name, packet) in cases:
