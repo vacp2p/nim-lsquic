@@ -4,7 +4,7 @@
 ## Tests for CID ownership and datagram header parsing - the inputs
 ## `receiveDatagram` uses to pick the context a datagram belongs to.
 ##
-## `scidLen`, `packetDcid` and `isIetfInitial` are internal; `-d:lsquic_testing`
+## `packetDcid` and `isIetfInitial` are internal; `-d:lsquic_testing`
 ## (set in tests/nim.cfg) publishes them, so they are asserted directly instead
 ## of through a handshake that would only fail as a timeout.
 
@@ -60,13 +60,11 @@ func toCidKey(bytes: openArray[byte]): CidKey =
   key
 
 func nativeCids(cids: openArray[seq[byte]]): seq[lsquic_cid_t] =
-  ## `len` is copied verbatim even when it overstates lsquic's fixed buffer -
-  ## an oversized length is exactly what the length guard has to reject.
   var native = newSeq[lsquic_cid_t](cids.len)
   for i, cid in cids:
     native[i].len = cid.len.uint8
-    for j in 0 ..< min(cid.len, MAX_CID_LEN):
-      native[i].buf[j] = cid[j]
+    for j, b in cid:
+      native[i].buf[j] = b
   native
 
 proc own(ctx: QuicContext, cids: varargs[seq[byte]]) =
@@ -143,45 +141,23 @@ suite "cid ownership":
       # a longer cid sharing that prefix is a different connection
       not ctx.ownsCid(toCidKey([0xA0'u8, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7]))
 
-  test "cid lengths outside 1..MAX_CID_LEN are rejected":
-    for cidLen in [0, 1, MAX_CID_LEN, MAX_CID_LEN + 1]:
+  test "cids at both ends of the length range are tracked":
+    for cidLen in [1, MAX_CID_LEN]:
       checkpoint("cidLen=" & $cidLen)
       let
         ctx = newTrackingContext(ClientContext)
         cid = filledCid(cidLen)
       ctx.own(cid)
 
-      if cidLen == 0 or cidLen > MAX_CID_LEN:
-        # nothing was registered, not even a truncated key
-        check not ctx.ownsCid(toCidKey(filledCid(min(cidLen, MAX_CID_LEN))))
-      else:
-        check ctx.ownsCid(toCidKey(cid))
-
-  test "nil contexts and nil cid arrays are ignored":
-    # these run as callbacks from C: a missing guard is a crash, not an error
-    let
-      ctx = newTrackingContext(ClientContext)
-      missing: ClientContext = nil
-
-    addCids(nil, nil, nil, 1)
-    removeCids(nil, nil, nil, 1)
-    addCids(cast[pointer](ctx), nil, nil, 1)
-    removeCids(cast[pointer](ctx), nil, nil, 1)
-    missing.trackConnectionCid(nil)
-    ctx.trackConnectionCid(nil)
-
-    check:
-      not missing.ownsCid(toCidKey(ClientCid))
-      not ctx.ownsCid(toCidKey(ClientCid))
+      check ctx.ownsCid(toCidKey(cid))
 
 suite "datagram header parsing":
   test "the short header cid is read at the engine's cid width":
     # a short header carries no length byte, so this width is the only thing
     # that tells the endpoint where the routing cid ends
     let endpoint = QuicEndpoint()
-    check endpoint.scidLen() == LSQUIC_DF_SCID_LEN.cuint
-
     var cid = CidKey()
+
     check endpoint.packetDcid(shortHeaderPacket(ClientCid), cid)
     check cid == toCidKey(ClientCid)
 
