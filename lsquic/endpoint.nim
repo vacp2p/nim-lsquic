@@ -145,6 +145,15 @@ proc routeDatagram(
     hasClientContext = not endpoint.clientContext.isNil
     hasServerContext = not endpoint.serverContext.isNil
 
+  # Only one engine on this socket, so there is nothing to disambiguate: skip
+  # parsing the connection id out of every datagram and probing the CID set.
+  if hasClientContext != hasServerContext:
+    if hasClientContext:
+      endpoint.clientContext.packetIn(data, local, remote)
+      return {rtClient}
+    endpoint.serverContext.packetIn(data, local, remote)
+    return {rtServer}
+
   var cid: CidKey
   if endpoint.packetDcid(data, cid):
     if hasClientContext and endpoint.clientContext.ownsCid(cid):
@@ -156,14 +165,6 @@ proc routeDatagram(
       trace "Routing datagram to server context", cid
       endpoint.serverContext.packetIn(data, local, remote)
       return {rtServer}
-
-  if hasClientContext and not hasServerContext:
-    endpoint.clientContext.packetIn(data, local, remote)
-    return {rtClient}
-
-  if hasServerContext and not hasClientContext:
-    endpoint.serverContext.packetIn(data, local, remote)
-    return {rtServer}
 
   if hasServerContext and data.isIetfInitial():
     trace "Routing initial datagram with unknown CID to server context",
