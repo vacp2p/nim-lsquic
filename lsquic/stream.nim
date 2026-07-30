@@ -267,8 +267,11 @@ template readOnce*(stream: Stream, dst: var openArray[byte]): untyped =
   else: stream.readOnce(dst[0].addr, dst.len))
 
 proc write*(
-    stream: Stream, data: seq[byte]
+    stream: Stream, data: sink seq[byte]
 ) {.async: (raises: [CancelledError, StreamError]).} =
+  ## `sink` so that handing over a temporary - `write(@[header])`, or a freshly
+  ## built buffer - moves into the async environment instead of being copied
+  ## into it. A caller that keeps its own buffer still pays one copy.
   if data.len == 0:
     return
 
