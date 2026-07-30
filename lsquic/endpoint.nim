@@ -5,14 +5,14 @@ import chronos, chronicles, results
 when defined(windows):
   from chronos/osdefs import SOL_SOCKET, SO_RCVBUF
 else:
-  from posix import SOL_SOCKET, SO_RCVBUF
+  from posix import SOL_SOCKET, SO_RCVBUF, EINTR, errno
 import
   ./[
     errors, connection, tlsconfig, connectionmanager, lsquic_ffi, certificateverifier,
     socketconfig,
   ]
 import ./context/[server, client, context, io]
-import ./helpers/transportaddr
+import ./helpers/[transportaddr, sequninit]
 from chronos/osdefs import Sockaddr_storage, SockAddr, SockLen, SocketHandle
 when defined(windows):
   from std/winlean import recvfrom
@@ -203,7 +203,7 @@ proc drainDatagrams(
   ## whatever else has already arrived is read here rather than one wakeup, and
   ## one engine tick, at a time.
   if endpoint.drainBuf.len == 0:
-    endpoint.drainBuf = newSeq[byte](DefaultDatagramBufferSize)
+    endpoint.drainBuf = newSeqUninit[byte](DefaultDatagramBufferSize)
 
   var targets: set[RouteTarget]
   for _ in 0 ..< MaxDatagramsPerWakeup:
@@ -214,14 +214,17 @@ proc drainDatagrams(
       SocketHandle(udp.fd), endpoint.drainBuf, remoteAddress, remoteAddrLen
     )
     if res < 0:
+      when not defined(windows):
+        # A signal is not "socket empty"; chronos' own read loop retries too.
+        if errno == EINTR:
+          continue
       # Empty, or an error the transport will report again on the next wakeup.
       break
 
-    if res > 0:
+    let remoteSa = cast[ptr SockAddr](addr remoteAddress)
+    if res > 0 and remoteSa.hasKnownFamily():
       targets.incl endpoint.routeDatagram(
-        endpoint.drainBuf.toOpenArray(0, res - 1),
-        local,
-        toTransportAddress(cast[ptr SockAddr](addr remoteAddress)),
+        endpoint.drainBuf.toOpenArray(0, res - 1), local, remoteSa.toTransportAddress()
       )
 
   targets
@@ -241,6 +244,11 @@ proc readIncoming(
 proc receiveFromUdp(
     endpoint: QuicEndpoint, udp: DatagramTransport, remote: TransportAddress
 ) {.raises: [].} =
+  if endpoint.isNil or endpoint.stopped:
+    # routeDatagram would drop everything anyway, so do not spend a drain loop
+    # of recvfrom calls per wakeup on it.
+    return
+
   var
     targets: set[RouteTarget]
     local: TransportAddress

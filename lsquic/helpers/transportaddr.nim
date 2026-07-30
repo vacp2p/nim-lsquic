@@ -25,6 +25,11 @@ proc sockAddrLen*(family: int): SockLen {.inline.} =
   else:
     raiseAssert "invalid socket address family"
 
+proc hasKnownFamily*(sock: ptr SockAddr): bool {.inline.} =
+  ## `sockAddrLen` raises a Defect on anything else, which would abort the
+  ## process if it ever reached a `{.raises: [].}` receive callback.
+  sock.sa_family.int in [AF_INET.int, fixed_AF_INET6]
+
 proc toTransportAddress*(sock: ptr SockAddr): TransportAddress =
   var destAddress: Sockaddr_storage
   let destAddrLen: SockLen = sockAddrLen(sock.sa_family.int)
