@@ -10,42 +10,39 @@
 
 {.used.}
 
-import std/sequtils
 import chronos, chronos/unittest2/asynctests
 import lsquic/[endpoint, lsquic_ffi]
 import lsquic/context/context
 
-const
-  ClientCid = @[0xC1'u8, 1, 2, 3, 4, 5, 6, 7]
-  ServerCid = @[0x5E'u8, 1, 2, 3, 4, 5, 6, 7]
-  UnknownCid = @[0xFF'u8, 1, 2, 3, 4, 5, 6, 7]
-
-func filledCid(cidLen: int, fill: byte = 0xAB): seq[byte] =
-  newSeqWith(cidLen, fill)
-
-func toCidKey(bytes: openArray[byte]): CidKey =
-  var key = CidKey(len: bytes.len.uint8)
+func makeCid(bytes: openArray[byte]): CidKey =
+  var cid = CidKey(len: bytes.len.uint8)
   for i, b in bytes:
-    key.bytes[i] = b
-  key
+    cid.bytes[i] = b
+  cid
 
-func toCidKey(cid: string): CidKey =
-  toCidKey(cid.toOpenArrayByte(0, cid.high))
+func makeCid(cidLen: int, fill: byte = 0xAB): CidKey =
+  var cid = CidKey(len: cidLen.uint8)
+  for i in 0 ..< cidLen:
+    cid.bytes[i] = fill
+  cid
 
-func nativeCids(cids: openArray[seq[byte]]): seq[lsquic_cid_t] =
+const
+  ClientCid = makeCid([0xC1'u8, 1, 2, 3, 4, 5, 6, 7])
+  ServerCid = makeCid([0x5E'u8, 1, 2, 3, 4, 5, 6, 7])
+  UnknownCid = makeCid([0xFF'u8, 1, 2, 3, 4, 5, 6, 7])
+
+func nativeCids(cids: openArray[CidKey]): seq[lsquic_cid_t] =
   var native = newSeq[lsquic_cid_t](cids.len)
   for i, cid in cids:
-    native[i].len = cid.len.uint8
-    for j, b in cid:
-      native[i].buf[j] = b
+    native[i] = lsquic_cid_t(len: cid.len, buf: cid.bytes)
   native
 
-proc own(ctx: QuicContext, cids: varargs[seq[byte]]) =
+proc own(ctx: QuicContext, cids: varargs[CidKey]) =
   ## Register CIDs the way lsquic's `ea_new_scids` callback does.
   var native = nativeCids(cids)
   addCids(cast[pointer](ctx), nil, addr native[0], native.len.cuint)
 
-proc disown(ctx: QuicContext, cids: varargs[seq[byte]]) =
+proc disown(ctx: QuicContext, cids: varargs[CidKey]) =
   ## Retire CIDs the way lsquic's `ea_old_scids` callback does.
   var native = nativeCids(cids)
   removeCids(cast[pointer](ctx), nil, addr native[0], native.len.cuint)
@@ -59,14 +56,14 @@ suite "cid ownership":
   test "registered cids are owned, unknown ones are not":
     let ctx = newTrackingContext(ClientContext)
 
-    check not ctx.ownsCid(toCidKey(ClientCid))
+    check not ctx.ownsCid(ClientCid)
 
     ctx.own(ClientCid, ServerCid)
 
     check:
-      ctx.ownsCid(toCidKey(ClientCid))
-      ctx.ownsCid(toCidKey(ServerCid))
-      not ctx.ownsCid(toCidKey(UnknownCid))
+      ctx.ownsCid(ClientCid)
+      ctx.ownsCid(ServerCid)
+      not ctx.ownsCid(UnknownCid)
 
   test "retired cids are dropped, the rest are kept":
     let ctx = newTrackingContext(ClientContext)
@@ -75,39 +72,37 @@ suite "cid ownership":
     ctx.disown(ClientCid)
 
     check:
-      not ctx.ownsCid(toCidKey(ClientCid))
-      ctx.ownsCid(toCidKey(ServerCid))
+      not ctx.ownsCid(ClientCid)
+      ctx.ownsCid(ServerCid)
 
   test "cid identity ignores the bytes past the cid length":
     # lsquic hands us a fixed-size buffer and a length, only the first `len`
     # bytes identify the connection. A key that carried the buffer tail would
     # never match the key `packetDcid` builds from the wire.
     const
-      Cid = "peer"
-      Buffer = Cid & "-leftover-buffer" # the whole fixed buffer, tail included
-      LongerCid = Cid & "-two"
+      Cid = makeCid(4)
+      LongerCid = makeCid(6)
+      Buffer = makeCid(MAX_CID_LEN) # the whole fixed buffer, tail included
 
     let ctx = newTrackingContext(ClientContext)
-    var native = lsquic_cid_t(len: Cid.len.uint8)
-    for i in 0 ..< MAX_CID_LEN:
-      native.buf[i] = Buffer[i].byte
+    var native = lsquic_cid_t(len: Cid.len, buf: Buffer.bytes)
 
     addCids(cast[pointer](ctx), nil, addr native, 1)
 
     check:
-      ctx.ownsCid(toCidKey(Cid))
+      ctx.ownsCid(Cid)
       # a longer cid sharing that prefix is a different connection
-      not ctx.ownsCid(toCidKey(LongerCid))
+      not ctx.ownsCid(LongerCid)
 
   test "cids at both ends of the length range are tracked":
     for cidLen in [1, MAX_CID_LEN]:
       checkpoint("cidLen=" & $cidLen)
       let
         ctx = newTrackingContext(ClientContext)
-        cid = filledCid(cidLen)
+        cid = makeCid(cidLen)
       ctx.own(cid)
 
-      check ctx.ownsCid(toCidKey(cid))
+      check ctx.ownsCid(cid)
 
 const
   ## The first byte of a QUIC packet, bit by bit (RFC 9000 17.2/17.3):
@@ -145,23 +140,24 @@ const
   ShortHeaderPrefixLen = 1 # first byte
 
 func longHeaderPacket(
-    dcid: openArray[byte], firstByte: byte = InitialFirstByte
+    dcid: CidKey, firstByte: byte = InitialFirstByte, declaredLen: uint8 = dcid.len
 ): seq[byte] =
   ## first byte, 4-byte version, DCID length, DCID, SCID length, then payload.
+  ## `declaredLen` overrides the DCID length byte to build a malformed header.
   var packet = @[firstByte]
   packet.add(QuicVersion1)
-  packet.add(dcid.len.byte)
-  packet.add(dcid)
+  packet.add(declaredLen)
+  for i in 0 ..< dcid.len.int:
+    packet.add(dcid.bytes[i])
   packet.add(0'u8) # zero-length SCID
   packet.add(newSeq[byte](8))
   packet
 
-func shortHeaderPacket(
-    dcid: openArray[byte], firstByte: byte = ShortFirstByte
-): seq[byte] =
+func shortHeaderPacket(dcid: CidKey, firstByte: byte = ShortFirstByte): seq[byte] =
   ## A short header has no length byte: the DCID is `scidLen()` bytes wide.
   var packet = @[firstByte]
-  packet.add(dcid)
+  for i in 0 ..< dcid.len.int:
+    packet.add(dcid.bytes[i])
   packet.add(newSeq[byte](8))
   packet
 
@@ -173,7 +169,7 @@ suite "datagram header parsing":
     var cid = CidKey()
 
     check endpoint.packetDcid(shortHeaderPacket(ClientCid), cid)
-    check cid == toCidKey(ClientCid)
+    check cid == ClientCid
 
   test "the long header cid is read at its declared length":
     let endpoint = QuicEndpoint()
@@ -181,16 +177,17 @@ suite "datagram header parsing":
 
     for cidLen in [1, 4, 8, MAX_CID_LEN]:
       checkpoint("long header dcid length=" & $cidLen)
-      let dcid = filledCid(cidLen, byte(cidLen))
+      let dcid = makeCid(cidLen, byte(cidLen))
       check endpoint.packetDcid(longHeaderPacket(dcid), cid)
-      check cid == toCidKey(dcid)
+      check cid == dcid
 
   test "malformed datagrams carry no routing cid":
     let endpoint = QuicEndpoint()
     let cases = {
       "empty datagram": newSeq[byte](),
-      "zero length dcid": longHeaderPacket(newSeq[byte]()),
-      "dcid longer than the maximum": longHeaderPacket(filledCid(MAX_CID_LEN + 1)),
+      "zero length dcid": longHeaderPacket(makeCid(0)),
+      "dcid longer than the maximum":
+        longHeaderPacket(makeCid(MAX_CID_LEN), declaredLen = uint8(MAX_CID_LEN + 1)),
       "long header cut inside the dcid":
         longHeaderPacket(ClientCid)[0 ..< LongHeaderPrefixLen + 2],
       "short header cut inside the dcid":
