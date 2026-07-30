@@ -26,11 +26,10 @@ proc sockAddrLen*(family: int): SockLen {.inline.} =
     raiseAssert "invalid socket address family"
 
 proc toTransportAddress*(sock: ptr SockAddr): TransportAddress =
-  var destAddress: Sockaddr_storage
-  let destAddrLen: SockLen = sockAddrLen(sock.sa_family.int)
-  copyMem(addr destAddress, sock, destAddrLen)
+  # `fromSAddr` only reads through the pointer, so the sockaddr does not need
+  # to be copied into a Sockaddr_storage first.
   var taddr: TransportAddress
-  fromSAddr(addr destAddress, destAddrLen, taddr)
+  fromSAddr(cast[ptr Sockaddr_storage](sock), sockAddrLen(sock.sa_family.int), taddr)
   taddr
 
 proc isIPv6Family*(sock: ptr SockAddr): bool {.inline.} =
