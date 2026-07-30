@@ -94,15 +94,17 @@ when not defined(windows):
         msg_flags: 0,
       )
 
-proc receive*(
+proc packetIn*(
     ctx: QuicContext,
     data: openArray[byte],
     local: TransportAddress,
     remote: TransportAddress,
     ecn: cint = 0,
-) =
+): bool {.discardable.} =
+  ## Returns false when the engine did not take the datagram, so that a caller
+  ## draining a burst knows whether it has to tick at all.
   if data.len == 0 or not ctx.isRunning():
-    return
+    return false
 
   var
     localAddress: Sockaddr_storage
@@ -123,7 +125,20 @@ proc receive*(
     ecn,
   )
 
-  ctx.processWhenReady()
+  true
+
+proc receive*(
+    ctx: QuicContext,
+    data: openArray[byte],
+    local: TransportAddress,
+    remote: TransportAddress,
+    ecn: cint = 0,
+) =
+  ## With several datagrams in hand, prefer `packetIn` and one
+  ## `processWhenReady`: lsquic picks what to send once per tick, so a tick per
+  ## datagram is a send batch per datagram.
+  if ctx.packetIn(data, local, remote, ecn):
+    ctx.processWhenReady()
 
 proc receive*(
     ctx: QuicContext,
