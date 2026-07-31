@@ -196,6 +196,46 @@ suite "lifecycle":
 
     check outgoingStream.toWrite.isNone()
 
+  asyncTest "pointer write drains the queued path from the caller's buffer":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    # The buffer is owned by this test, not by the write. 16 MB exceeds the send
+    # window, so the write parks and the engine drains the remainder straight
+    # out of `sent` through on_write - never through a copy of it.
+    var sent = makeData(16 * 1024 * 1024)
+    let writing = outgoingStream.write(sent[0].addr, sent.len)
+
+    check outgoingStream.toWrite.isSome
+
+    let incomingStream = await peers.incoming.incomingStream()
+    let reading = incomingStream.readAllChunked(64 * 1024)
+
+    await writing
+    await outgoingStream.close()
+
+    checkEqual((await reading).data, sent)
+    await incomingStream.close()
+
+  asyncTest "cancel pending pointer write clears stream write task":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    var sent = makeData(16 * 1024 * 1024)
+    let writing = outgoingStream.write(sent[0].addr, sent.len)
+
+    check outgoingStream.toWrite.isSome
+
+    # cancelAndWait, not cancel: the engine may still be reading `sent` until
+    # the future actually finishes, which is when the borrow ends.
+    await writing.cancelAndWait()
+
+    check outgoingStream.toWrite.isNone()
+
   asyncTest "read once returns zero repeatedly after eof":
     let peers = await connectPeers()
     defer:
