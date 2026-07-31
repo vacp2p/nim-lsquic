@@ -270,7 +270,7 @@ template readOnce*(stream: Stream, dst: var openArray[byte]): untyped =
   else: stream.readOnce(dst[0].addr, dst.len))
 
 proc write*(
-    stream: Stream, data: seq[byte]
+    stream: Stream, data: sink seq[byte]
 ) {.async: (raises: [CancelledError, StreamError]).} =
   if data.len == 0:
     return
