@@ -12,6 +12,12 @@ import
     socketconfig,
   ]
 import ./context/[server, client, context, io]
+import ./helpers/transportaddr
+from chronos/osdefs import Sockaddr_storage, SockAddr, SockLen, SocketHandle
+when defined(windows):
+  from std/winlean import recvfrom
+else:
+  from chronos/osdefs import recvfrom
 
 type
   QuicEndpointCapability* = enum
@@ -20,6 +26,10 @@ type
 
   QuicEndpointCapabilities* = set[QuicEndpointCapability]
 
+  RouteTarget = enum
+    rtClient
+    rtServer
+
   QuicEndpoint* = ref object of RootObj
     tlsConfig: TLSConfig
     capabilities: QuicEndpointCapabilities
@@ -27,9 +37,15 @@ type
     clientContext: ClientContext
     connman: ConnectionManager
     udp: DatagramTransport
+    gso: SegmentationOffload
     stopped: bool
+    drainBuf: seq[byte]
 
-const CloseWait: Duration = 300.milliseconds
+const
+  CloseWait: Duration = 300.milliseconds
+
+  MaxDatagramsPerWakeup = 64
+    ## Capped so that a busy socket cannot starve the rest of the event loop.
 
 proc socketReceiveBufferBytes(
     udp: DatagramTransport
@@ -66,19 +82,21 @@ proc configureReceiveBuffer(
       requestedBytes = requested, effectiveBytes = effective
 
 proc createServerContext(
-    tlsConfig: TLSConfig, fd: cint
+    tlsConfig: TLSConfig, fd: cint, gso: SegmentationOffload
 ): ServerContext {.raises: [QuicError].} =
   var context = ServerContext.new(tlsConfig).valueOr:
     raise newException(QuicError, error)
   context.fd = fd
+  context.gso = gso
   context
 
 proc createClientContext(
-    tlsConfig: TLSConfig, fd: cint
+    tlsConfig: TLSConfig, fd: cint, gso: SegmentationOffload
 ): ClientContext {.raises: [QuicError].} =
   var context = ClientContext.new(tlsConfig).valueOr:
     raise newException(QuicError, error)
   context.fd = fd
+  context.gso = gso
   context
 
 proc scidLen(endpoint: QuicEndpoint): cuint {.raises: [].} =
@@ -117,11 +135,11 @@ func isIetfInitial(packet: openArray[byte]): bool {.raises: [].} =
     return false
   (packet[0] and 0xC0'u8) == 0xC0'u8 and (packet[0] and 0x30'u8) == 0
 
-proc receiveDatagram(
+proc routeDatagram(
     endpoint: QuicEndpoint, data: openArray[byte], local, remote: TransportAddress
-) {.raises: [].} =
+): set[RouteTarget] {.raises: [].} =
   if endpoint.isNil or endpoint.stopped:
-    return
+    return {}
 
   let
     hasClientContext = not endpoint.clientContext.isNil
@@ -131,44 +149,111 @@ proc receiveDatagram(
   if endpoint.packetDcid(data, cid):
     if hasClientContext and endpoint.clientContext.ownsCid(cid):
       trace "Routing datagram to client context", cid
-      endpoint.clientContext.receive(data, local, remote)
-      return
+      endpoint.clientContext.packetIn(data, local, remote)
+      return {rtClient}
 
     if hasServerContext and endpoint.serverContext.ownsCid(cid):
       trace "Routing datagram to server context", cid
-      endpoint.serverContext.receive(data, local, remote)
-      return
+      endpoint.serverContext.packetIn(data, local, remote)
+      return {rtServer}
 
   if hasClientContext and not hasServerContext:
-    endpoint.clientContext.receive(data, local, remote)
-    return
+    endpoint.clientContext.packetIn(data, local, remote)
+    return {rtClient}
 
   if hasServerContext and not hasClientContext:
-    endpoint.serverContext.receive(data, local, remote)
-    return
+    endpoint.serverContext.packetIn(data, local, remote)
+    return {rtServer}
 
   if hasServerContext and data.isIetfInitial():
     trace "Routing initial datagram with unknown CID to server context",
       bytes = data.len, local, remote
-    endpoint.serverContext.receive(data, local, remote)
-    return
+    endpoint.serverContext.packetIn(data, local, remote)
+    return {rtServer}
 
   trace "Dropping datagram with unknown CID", bytes = data.len, local, remote
+  {}
+
+proc recvDatagram(
+    fd: SocketHandle,
+    buf: var seq[byte],
+    remoteAddress: var Sockaddr_storage,
+    remoteAddrLen: var SockLen,
+): int {.raises: [].} =
+  when defined(windows):
+    recvfrom(
+      fd,
+      cast[cstring](addr buf[0]),
+      cint(buf.len),
+      cint(0),
+      cast[ptr SockAddr](addr remoteAddress),
+      addr remoteAddrLen,
+    ).int
+  else:
+    recvfrom(
+      fd,
+      addr buf[0],
+      buf.len,
+      cint(0),
+      cast[ptr SockAddr](addr remoteAddress),
+      addr remoteAddrLen,
+    ).int
+
+proc drainDatagrams(
+    endpoint: QuicEndpoint, udp: DatagramTransport, local: TransportAddress
+): set[RouteTarget] {.raises: [].} =
+  ## Chronos hands this callback a single datagram per event-loop wakeup, so
+  ## whatever else has already arrived is read here rather than one wakeup, and
+  ## one engine tick, at a time.
+  if endpoint.drainBuf.len == 0:
+    endpoint.drainBuf = newSeq[byte](DefaultDatagramBufferSize)
+
+  var targets: set[RouteTarget]
+  for _ in 0 ..< MaxDatagramsPerWakeup:
+    var
+      remoteAddress: Sockaddr_storage
+      remoteAddrLen = SockLen(sizeof(Sockaddr_storage))
+    let res = recvDatagram(
+      SocketHandle(udp.fd), endpoint.drainBuf, remoteAddress, remoteAddrLen
+    )
+    if res < 0:
+      # Empty, or an error the transport will report again on the next wakeup.
+      break
+
+    if res > 0:
+      targets.incl endpoint.routeDatagram(
+        endpoint.drainBuf.toOpenArray(0, res - 1),
+        local,
+        toTransportAddress(cast[ptr SockAddr](addr remoteAddress)),
+      )
+
+  targets
 
 proc receiveFromUdp(
     endpoint: QuicEndpoint, udp: DatagramTransport, remote: TransportAddress
 ) {.raises: [].} =
+  var
+    targets: set[RouteTarget]
+    local: TransportAddress
+
   try:
     var
       msg: seq[byte]
       msgLen: int
+    local = udp.localAddress()
     udp.peekMessage(msg, msgLen)
     if msgLen > 0:
-      endpoint.receiveDatagram(
-        msg.toOpenArray(0, msgLen - 1), udp.localAddress(), remote
-      )
+      targets = endpoint.routeDatagram(msg.toOpenArray(0, msgLen - 1), local, remote)
   except TransportError as e:
     warn "Could not read received datagram", errorMsg = e.msg
+    return
+
+  targets = targets + endpoint.drainDatagrams(udp, local)
+
+  if rtClient in targets:
+    endpoint.clientContext.processWhenReady()
+  if rtServer in targets:
+    endpoint.serverContext.processWhenReady()
 
 proc createUdp(
     endpoint: QuicEndpoint, address: TransportAddress, socketConfig: QuicSocketConfig
@@ -188,6 +273,9 @@ proc createUdp(
       raise newException(QuicError, "only IPv4/IPv6 address is supported")
 
   udp.configureReceiveBuffer(socketConfig)
+  endpoint.gso = SegmentationOffload(
+    enabled: socketConfig.segmentationOffload and probeSegmentationOffload(udp.fd)
+  )
   udp
 
 proc createUdp(
@@ -208,6 +296,9 @@ proc createUdp(
       raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
 
   udp.configureReceiveBuffer(socketConfig)
+  endpoint.gso = SegmentationOffload(
+    enabled: socketConfig.segmentationOffload and probeSegmentationOffload(udp.fd)
+  )
   udp
 
 proc new*(
@@ -239,7 +330,8 @@ proc new*(
         endpoint.udp.close()
 
   if CanListen in capabilities:
-    endpoint.serverContext = createServerContext(tlsConfig, cint(endpoint.udp.fd))
+    endpoint.serverContext =
+      createServerContext(tlsConfig, cint(endpoint.udp.fd), endpoint.gso)
 
   initialized = true
   endpoint
@@ -266,7 +358,7 @@ proc ensureClientContext(
 
   if endpoint.clientContext.isNil:
     endpoint.clientContext =
-      createClientContext(endpoint.tlsConfig, cint(endpoint.udp.fd))
+      createClientContext(endpoint.tlsConfig, cint(endpoint.udp.fd), endpoint.gso)
 
   endpoint.clientContext
 
@@ -354,6 +446,12 @@ proc localAddress*(
 proc datagramTransport*(endpoint: QuicEndpoint): DatagramTransport {.raises: [].} =
   endpoint.udp
 
+proc segmentationOffloadActive*(endpoint: QuicEndpoint): bool {.raises: [].} =
+  ## True while the endpoint socket uses UDP segmentation offload. The config
+  ## must ask for it, the probe must find support, and no send error must
+  ## disable it.
+  endpoint.gso.enabled
+
 proc stop*(endpoint: QuicEndpoint) {.async: (raises: [CancelledError]).} =
   if endpoint.stopped:
     return
@@ -376,3 +474,10 @@ proc stop*(endpoint: QuicEndpoint) {.async: (raises: [CancelledError]).} =
   if not endpoint.serverContext.isNil:
     endpoint.serverContext.destroy()
     endpoint.serverContext = nil
+
+when defined(lsquic_testing):
+  proc connectionCount*(endpoint: QuicEndpoint): int {.raises: [].} =
+    ## Test-only: number of connections tracked by this endpoint's manager.
+    endpoint.connman.len
+
+  export scidLen, packetDcid, isIetfInitial

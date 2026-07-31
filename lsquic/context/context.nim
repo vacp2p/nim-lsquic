@@ -7,7 +7,10 @@ import chronos
 import chronos/osdefs
 import chronicles
 import
-  ../[lsquic_ffi, errors, tlsconfig, timeout, certificates, certificateverifier, stream]
+  ../[
+    lsquic_ffi, errors, tlsconfig, timeout, certificates, certificateverifier, stream,
+    tracking,
+  ]
 
 let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is global
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
@@ -19,6 +22,12 @@ type
 
   LsquicCidArray = UncheckedArray[lsquic_cid_t]
 
+  SegmentationOffload* = ref object
+    ## UDP segmentation offload state for one socket. The server context and
+    ## the client context of an endpoint share one cell, which is why this is a
+    ## ref: a send error disables offload for the socket, not for one context.
+    enabled*: bool
+
   QuicContext* = ref object of RootObj
     settings*: struct_lsquic_engine_settings
     api*: struct_lsquic_engine_api
@@ -28,6 +37,7 @@ type
     tickTimeout*: Timeout
     sslCtx*: ptr SSL_CTX
     fd*: cint
+    gso*: SegmentationOffload = SegmentationOffload()
     processing: bool
     running*: bool
     ownedCids: HashSet[CidKey]
@@ -220,7 +230,7 @@ proc cancelPending*(quicConn: QuicConnection) =
     pending.stream.isEof = true
     if not pending.stream.closed.isSet():
       pending.stream.closed.fire()
-    GC_unref(pending.stream)
+    unpin(pending.stream)
 
 proc alpnSelectProtoCB(
     ssl: ptr SSL,
