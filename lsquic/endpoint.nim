@@ -221,11 +221,17 @@ proc drainDatagrams(
       # Empty, or an error the transport will report again on the next wakeup.
       break
 
-    let remoteSa = cast[ptr SockAddr](addr remoteAddress)
-    if res > 0 and remoteSa.hasKnownFamily():
-      targets.incl endpoint.routeDatagram(
-        endpoint.drainBuf.toOpenArray(0, res - 1), local, remoteSa.toTransportAddress()
-      )
+    if res == 0:
+      continue
+
+    let remote = cast[ptr SockAddr](addr remoteAddress).toTransportAddress().valueOr:
+      trace "Dropping datagram from unsupported address family",
+        family = remoteAddress.ss_family.int, bytes = res
+      continue
+
+    targets.incl endpoint.routeDatagram(
+      endpoint.drainBuf.toOpenArray(0, res - 1), local, remote
+    )
 
   targets
 

@@ -5,7 +5,7 @@
 
 import
   test_connection, test_perf, test_tlsconfig, test_verifier, test_lifecycle,
-  test_timeout, test_stress, test_runtime, test_routing
+  test_timeout, test_stress, test_runtime, test_routing, test_transportaddr
 
 from ./helpers/trackers import finalCheckTrackers
 finalCheckTrackers()

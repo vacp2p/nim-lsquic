@@ -3,13 +3,13 @@
 
 import chronos
 import chronos/osdefs
+import chronicles
 import ./context
 import ../[lsquic_ffi, datagram]
 import ../helpers/[sequninit, transportaddr]
 import std/[nativesockets, net]
 
 when not defined(windows):
-  import chronicles
   import posix
 
 when defined(linux):
@@ -59,12 +59,19 @@ proc prepareDestAddr(
   let
     localAddress = localSa.toTransportAddress()
     destAddress = destSa.toTransportAddress()
-  if localAddress.family == AddressFamily.IPv6 and
-      destAddress.family == AddressFamily.IPv4:
-    let mappedDest = destAddress.toIPv6()
+  if localAddress.isSome() and destAddress.isSome() and
+      localAddress[].family == AddressFamily.IPv6 and
+      destAddress[].family == AddressFamily.IPv4:
+    let mappedDest = destAddress[].toIPv6()
     mappedDest.toSAddr(destStorage, destAddrLen)
   else:
-    destAddrLen = sockAddrLen(destSa.sa_family.int)
+    # lsquic hands back the addresses we gave it, so an unsupported family here
+    # should be unreachable; a zero-length destination fails the send rather
+    # than aborting the process from a `{.cdecl.}` callback.
+    destAddrLen = sockAddrLen(destSa.sa_family.int).valueOr:
+      trace "Unsupported destination address family; send will fail",
+        family = destSa.sa_family.int
+      SockLen(0)
     copyMem(addr destStorage, destSa, destAddrLen)
 
 when not defined(windows):

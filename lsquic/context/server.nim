@@ -16,7 +16,19 @@ proc onNewConn(
   debug "New connection established: server"
   var local: ptr SockAddr
   var remote: ptr SockAddr
-  discard lsquic_conn_get_sockaddr(conn, addr local, addr remote)
+  if lsquic_conn_get_sockaddr(conn, addr local, addr remote) != 0:
+    error "Could not read connection addresses; dropping incoming connection"
+    return nil
+
+  let
+    localAddress = local.toTransportAddress().valueOr:
+      error "Unsupported local address family; dropping incoming connection",
+        family = local.sa_family.int
+      return nil
+    remoteAddress = remote.toTransportAddress().valueOr:
+      error "Unsupported remote address family; dropping incoming connection",
+        family = remote.sa_family.int
+      return nil
 
   let x509chain = lsquic_conn_get_full_cert_chain(conn)
   let certChain = x509chain.getCertChain()
@@ -26,8 +38,8 @@ proc onNewConn(
   let quicConn = QuicConnection(
     isOutgoing: false,
     incoming: newAsyncQueue[Stream](),
-    local: local.toTransportAddress(),
-    remote: remote.toTransportAddress(),
+    local: localAddress,
+    remote: remoteAddress,
     lsquicConn: conn,
     certChain: certChain,
     onClose: proc() =
