@@ -234,6 +234,8 @@ proc cancelPending*(quicConn: QuicConnection) =
     if not pending.created.finished:
       pending.created.fail(newException(ConnectionError, "can't open new streams"))
 
+    # Nothing to settle: the stream is not handed to the caller until `created`
+    # completes, so no read or write can be in flight on it.
     pending.stream.closedByEngine = true
     pending.stream.closeWrite = true
     pending.stream.isEof = true
