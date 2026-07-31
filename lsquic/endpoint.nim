@@ -479,3 +479,5 @@ when defined(lsquic_testing):
   proc connectionCount*(endpoint: QuicEndpoint): int {.raises: [].} =
     ## Test-only: number of connections tracked by this endpoint's manager.
     endpoint.connman.len
+
+  export scidLen, packetDcid, isIetfInitial
