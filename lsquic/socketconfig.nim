@@ -3,13 +3,13 @@
 
 import ./errors
 
-type QuicSocketConfig* = object
-  receiveBufferBytes*: int
+const DefaultQuicReceiveBufferBytes* = 8 * 1024 * 1024
 
-const
-  DefaultQuicReceiveBufferBytes* = 8 * 1024 * 1024
-  DefaultQuicSocketConfig* =
-    QuicSocketConfig(receiveBufferBytes: DefaultQuicReceiveBufferBytes)
+type QuicSocketConfig* = object
+  receiveBufferBytes*: int = DefaultQuicReceiveBufferBytes
+  segmentationOffload*: bool = true
+
+const DefaultQuicSocketConfig* = QuicSocketConfig()
 
 proc validate*(config: QuicSocketConfig) {.raises: [QuicConfigError].} =
   if config.receiveBufferBytes < 0:
