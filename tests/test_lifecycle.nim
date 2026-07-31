@@ -584,8 +584,9 @@ suite "lifecycle":
     let incomingStream = await peers.incoming.incomingStream()
 
     var kickoff = newSeq[byte](1)
-    check (await incomingStream.readOnce(kickoff)) == 1
-    check kickoff[0] == 1
+    check:
+      (await incomingStream.readOnce(kickoff)) == 1
+      kickoff[0] == 1
 
     # A stream has a single pending-read slot, so `readLock` has to keep the
     # second reader out until the first one is done.
@@ -594,24 +595,31 @@ suite "lifecycle":
     let firstRead = incomingStream.readOnce(firstBuf)
     let secondRead = incomingStream.readOnce(secondBuf)
 
+    # A parked read completes nothing, so there is no event to wait on.
+    # The sleep is the window in which the second read would claim the slot
+    # if `readLock` let it through.
     await sleepAsync(100.milliseconds)
-    check not firstRead.finished
-    check not secondRead.finished
-    check incomingStream.toRead.valueOr(ReadTask()).dataLen == firstBuf.len
+    check:
+      not firstRead.finished
+      not secondRead.finished
+      incomingStream.toRead.valueOr(ReadTask()).dataLen == firstBuf.len
 
     await outgoingStream.write(@[7'u8])
-    check (await firstRead.withTimeout(timeout))
-    check (await firstRead) == 1
-    check firstBuf[0] == 7
+    check:
+      (await firstRead.withTimeout(timeout))
+      (await firstRead) == 1
+      firstBuf[0] == 7
 
     # only now does the second read take the lock and claim the pending slot
     await sleepAsync(100.milliseconds)
-    check not secondRead.finished
-    check incomingStream.toRead.valueOr(ReadTask()).dataLen == secondBuf.len
+    check:
+      not secondRead.finished
+      incomingStream.toRead.valueOr(ReadTask()).dataLen == secondBuf.len
 
     await outgoingStream.write(@[8'u8])
-    check (await secondRead.withTimeout(timeout))
-    check (await secondRead) == 1
-    check secondBuf[0] == 8
+    check:
+      (await secondRead.withTimeout(timeout))
+      (await secondRead) == 1
+      secondBuf[0] == 8
 
     await incomingStream.close()
