@@ -88,8 +88,7 @@ type
   struct_lsquic_cid* {.
     importc: "struct lsquic_cid", header: "lsquic_types.h", bycopy, completeStruct
   .} = object
-    buf* {.importc: "buf".}: array[MAX_CID_LEN, uint8]
+    buf* {.importc: "buf", align: 8.}: array[MAX_CID_LEN, uint8]
     len* {.importc: "len".}: uint_fast8_t
-    padding: array[3, uint8]
 
   lsquic_cid_t* = struct_lsquic_cid

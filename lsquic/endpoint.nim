@@ -229,6 +229,18 @@ proc drainDatagrams(
 
   targets
 
+proc readIncoming(
+    udp: DatagramTransport, msg: var seq[byte], msgLen: var int
+) {.raises: [TransportError].} =
+  ## Avoid `peekMessage` under ARC/ORC: without `shallowCopy`, Chronos copies the
+  ## full receive buffer instead of only the datagram. `getMessage` copies only the
+  ## received bytes.
+  when declared(shallowCopy):
+    udp.peekMessage(msg, msgLen)
+  else:
+    msg = udp.getMessage()
+    msgLen = msg.len
+
 proc receiveFromUdp(
     endpoint: QuicEndpoint, udp: DatagramTransport, remote: TransportAddress
 ) {.raises: [].} =
@@ -241,7 +253,7 @@ proc receiveFromUdp(
       msg: seq[byte]
       msgLen: int
     local = udp.localAddress()
-    udp.peekMessage(msg, msgLen)
+    readIncoming(udp, msg, msgLen)
     if msgLen > 0:
       targets = endpoint.routeDatagram(msg.toOpenArray(0, msgLen - 1), local, remote)
   except TransportError as e:
@@ -479,3 +491,5 @@ when defined(lsquic_testing):
   proc connectionCount*(endpoint: QuicEndpoint): int {.raises: [].} =
     ## Test-only: number of connections tracked by this endpoint's manager.
     endpoint.connman.len
+
+  export scidLen, packetDcid, isIetfInitial
