@@ -260,8 +260,6 @@ proc sendPlain(
         let
           iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
           iovlen = curr.iovlen.int
-          # lsquic coalesces within one datagram, so iovlen stays well under
-          # MaxBatch, but nothing here enforces that
           dst =
             if iovlen <= bufs.len:
               cast[ptr UncheckedArray[WSABUF]](addr bufs[0])
