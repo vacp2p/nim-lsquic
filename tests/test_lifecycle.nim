@@ -505,3 +505,121 @@ suite "lifecycle":
     var buf = newSeq[byte](8)
     expect StreamResetError:
       discard await stream.readOnce(buf)
+
+  asyncTest "nil read destination is rejected":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+
+    expect AssertionDefect:
+      discard await stream.readOnce(nil, 8)
+
+  asyncTest "read waiting for the read lock sees the stream closed by the engine":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+    # hold the lock so the read parks after its pre-lock checks have passed
+    await stream.readLock.acquire()
+
+    var buf = newSeq[byte](8)
+    let reading = stream.readOnce(buf)
+
+    stream.closedByEngine = true
+    stream.readLock.release()
+
+    # the post-lock re-check keeps the read away from the freed native stream
+    check (await reading.withTimeout(timeout))
+    check (await reading) == 0
+
+  asyncTest "read waiting for the read lock sees a peer reset":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+    await stream.readLock.acquire()
+
+    var buf = newSeq[byte](8)
+    let reading = stream.readOnce(buf)
+
+    stream.markResetByPeer(ResetRead)
+    stream.readLock.release()
+
+    expect StreamResetError:
+      discard await reading
+
+  asyncTest "write waiting for the write lock sees the stream closed by the engine":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+    await stream.writeLock.acquire()
+
+    let writing = stream.write(@[1'u8])
+
+    stream.closedByEngine = true
+    stream.writeLock.release()
+
+    expect StreamError:
+      await writing
+
+  asyncTest "write waiting for the write lock sees a peer reset":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+    await stream.writeLock.acquire()
+
+    let writing = stream.write(@[1'u8])
+
+    stream.markResetByPeer(ResetWrite)
+    stream.writeLock.release()
+
+    expect StreamResetError:
+      await writing
+
+  asyncTest "concurrent reads on one stream are serialized":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[1'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+
+    var firstByte = newSeq[byte](1)
+    check:
+      (await incomingStream.readOnce(firstByte)) == 1
+      firstByte[0] == 1
+
+    # A stream has a single pending-read slot, so `readLock` has to keep the
+    # second reader out until the first one is done.
+    var firstBuf = newSeq[byte](4)
+    var secondBuf = newSeq[byte](8)
+    let firstRead = incomingStream.readOnce(firstBuf)
+    let secondRead = incomingStream.readOnce(secondBuf)
+
+    # A parked read completes nothing, so there is no event to wait on.
+    # The sleep is the window in which the second read would claim the slot
+    # if `readLock` let it through.
+    await sleepAsync(100.milliseconds)
+    check:
+      not firstRead.finished
+      not secondRead.finished
+      incomingStream.toRead.valueOr(ReadTask()).dataLen == firstBuf.len
+
+    await outgoingStream.write(@[7'u8])
+    check:
+      (await firstRead.withTimeout(timeout))
+      (await firstRead) == 1
+      firstBuf[0] == 7
+
+    # only now does the second read take the lock and claim the pending slot
+    await sleepAsync(100.milliseconds)
+    check:
+      not secondRead.finished
+      incomingStream.toRead.valueOr(ReadTask()).dataLen == secondBuf.len
+
+    await outgoingStream.write(@[8'u8])
+    check:
+      (await secondRead.withTimeout(timeout))
+      (await secondRead) == 1
+      secondBuf[0] == 8
+
+    await incomingStream.close()

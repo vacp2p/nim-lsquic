@@ -39,6 +39,7 @@ type
     fd*: cint
     gso*: SegmentationOffload = SegmentationOffload()
     processing: bool
+    flushScheduled: bool
     running*: bool
     ownedCids: HashSet[CidKey]
 
@@ -192,6 +193,21 @@ proc processWhenReady*(quicContext: QuicContext) =
   if quicContext.isNil or quicContext.engine.isNil:
     return
   quicContext.engine_process()
+
+proc flushDeferred(udata: pointer) {.gcsafe, raises: [].} =
+  let ctx = cast[QuicContext](udata)
+  ctx.flushScheduled = false
+  ctx.processWhenReady()
+  # Unpin last: the callback holds only a raw pointer.
+  unpin(ctx)
+
+proc processSoon*(quicContext: QuicContext) {.raises: [].} =
+  ## Schedules one engine pass so nearby stream operations can share a tick.
+  if quicContext.isNil or not quicContext.isRunning() or quicContext.flushScheduled:
+    return
+  quicContext.flushScheduled = true
+  pin(quicContext) # the dispatcher holds a raw pointer until the callback runs
+  callSoon(flushDeferred, cast[pointer](quicContext))
 
 proc incomingStream*(
     quicConn: QuicConnection
