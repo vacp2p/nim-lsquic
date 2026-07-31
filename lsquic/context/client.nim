@@ -10,7 +10,7 @@ import ./[context, io, stream]
 import
   ../[
     lsquic_ffi, errors, tlsconfig, timeout, stream, certificates, certificateverifier,
-    tracking,
+    socketconfig, tracking,
   ]
 import ../helpers/sequninit
 
@@ -139,6 +139,9 @@ proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
   ctx.settings.es_base_plpmtu = 1280
   ctx.settings.es_max_plpmtu = 0
   ctx.settings.es_pace_packets = 1
+  # Left unset, no transport parameter is sent and the peer applies the RFC
+  # 9000 default of 65527, above what the receive path is sized for.
+  ctx.settings.es_max_udp_payload_size_rx = MaxReceiveDatagramSize.cushort
 
   ctx.settings.es_cfcw = 4 * 1024 * 1024
   ctx.settings.es_max_cfcw = 8 * 1024 * 1024

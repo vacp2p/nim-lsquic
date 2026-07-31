@@ -7,7 +7,7 @@ import chronicles
 import chronos
 import chronos/osdefs
 import ./[context, io, stream]
-import ../[lsquic_ffi, tlsconfig, timeout, stream, certificates, tracking]
+import ../[lsquic_ffi, tlsconfig, timeout, stream, certificates, socketconfig, tracking]
 import ../helpers/[sequninit, transportaddr]
 
 proc onNewConn(
@@ -69,6 +69,9 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
   ctx.settings.es_base_plpmtu = 1280
   ctx.settings.es_max_plpmtu = 0
   ctx.settings.es_pace_packets = 1
+  # Left unset, no transport parameter is sent and the peer applies the RFC
+  # 9000 default of 65527, above what the receive path is sized for.
+  ctx.settings.es_max_udp_payload_size_rx = MaxReceiveDatagramSize.cushort
 
   ctx.settings.es_cfcw = 1536 * 1024
   ctx.settings.es_max_cfcw = 1536 * 1024

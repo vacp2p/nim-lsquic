@@ -16,17 +16,9 @@ when defined(linux) or defined(windows):
   import ./gso
 
 when defined(linux):
-  {.passc: "-D_GNU_SOURCE".}
+  import ../helpers/mmsg
 
   const SendmmsgBatchSize = 64
-
-  type MMsgHdr {.importc: "struct mmsghdr", header: "<sys/socket.h>", bycopy.} = object
-    msg_hdr: Tmsghdr
-    msg_len: cuint
-
-  proc sendmmsg(
-    sockfd: SocketHandle, msgvec: ptr MMsgHdr, vlen: cuint, flags: cint
-  ): cint {.importc, header: "<sys/socket.h>".}
 
 when defined(windows):
   {.pragma: wsa, stdcall, dynlib: "ws2_32.dll".}

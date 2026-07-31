@@ -5,7 +5,7 @@ import chronos, chronicles, results
 when defined(windows):
   from chronos/osdefs import SOL_SOCKET, SO_RCVBUF
 else:
-  from posix import SOL_SOCKET, SO_RCVBUF, Tmsghdr, IOVec, MSG_TRUNC
+  from posix import SOL_SOCKET, SO_RCVBUF
 import
   ./[
     errors, connection, tlsconfig, connectionmanager, lsquic_ffi, certificateverifier,
@@ -20,24 +20,7 @@ else:
   from chronos/osdefs import recvfrom
 
 when defined(linux):
-  const DrainSlotBytes = 2048
-    ## Per-datagram slot in the batch buffer. recvmmsg needs the space reserved
-    ## up front, so this trades a fixed 128 KB per endpoint against being able
-    ## to read a whole burst in one syscall. Comfortably above the largest
-    ## datagram the engine negotiates, and anything longer is reported by
-    ## MSG_TRUNC rather than silently cut.
-
-  type MMsgHdr {.importc: "struct mmsghdr", header: "<sys/socket.h>", bycopy.} = object
-    msg_hdr: Tmsghdr
-    msg_len: cuint
-
-  proc recvmmsg(
-    sockfd: SocketHandle,
-    msgvec: ptr MMsgHdr,
-    vlen: cuint,
-    flags: cint,
-    timeout: pointer,
-  ): cint {.importc, header: "<sys/socket.h>".}
+  import ./helpers/recvbatch
 
 type
   QuicEndpointCapability* = enum
@@ -59,19 +42,12 @@ type
     udp: DatagramTransport
     gso: SegmentationOffload
     stopped: bool
-    drainBuf: seq[byte]
     when defined(linux):
-      # Preallocated once: one slot, address and message header per datagram of
-      # a batch, so a drain is a single recvmmsg rather than a recvfrom each.
-      drainAddrs: seq[Sockaddr_storage]
-      drainIovs: seq[IOVec]
-      drainMsgs: seq[MMsgHdr]
+      drain: RecvBatch
+    else:
+      drainBuf: seq[byte]
 
-const
-  CloseWait: Duration = 300.milliseconds
-
-  MaxDatagramsPerWakeup = 64
-    ## Capped so that a busy socket cannot starve the rest of the event loop.
+const CloseWait: Duration = 300.milliseconds
 
 proc socketReceiveBufferBytes(
     udp: DatagramTransport
@@ -226,22 +202,6 @@ proc recvDatagram(
     ).int
 
 when defined(linux):
-  proc initDrainBatch(endpoint: QuicEndpoint) {.raises: [].} =
-    endpoint.drainBuf = newSeq[byte](MaxDatagramsPerWakeup * DrainSlotBytes)
-    endpoint.drainAddrs = newSeq[Sockaddr_storage](MaxDatagramsPerWakeup)
-    endpoint.drainIovs = newSeq[IOVec](MaxDatagramsPerWakeup)
-    endpoint.drainMsgs = newSeq[MMsgHdr](MaxDatagramsPerWakeup)
-    for i in 0 ..< MaxDatagramsPerWakeup:
-      endpoint.drainIovs[i] = IOVec(
-        iov_base: addr endpoint.drainBuf[i * DrainSlotBytes], iov_len: DrainSlotBytes
-      )
-      endpoint.drainMsgs[i].msg_hdr.msg_name = addr endpoint.drainAddrs[i]
-      endpoint.drainMsgs[i].msg_hdr.msg_iov = addr endpoint.drainIovs[i]
-      when defined(x86_64) and not defined(android):
-        endpoint.drainMsgs[i].msg_hdr.msg_iovlen = 1.csize_t
-      else:
-        endpoint.drainMsgs[i].msg_hdr.msg_iovlen = 1.cint
-
   proc drainDatagrams(
       endpoint: QuicEndpoint, udp: DatagramTransport, local: TransportAddress
   ): set[RouteTarget] {.raises: [].} =
@@ -249,41 +209,27 @@ when defined(linux):
     ## whatever else has already arrived is read here. recvmmsg takes the whole
     ## burst in one syscall instead of one recvfrom per datagram plus a final
     ## one to discover the socket is empty.
-    if endpoint.drainMsgs.len == 0:
-      endpoint.initDrainBatch()
+    if not endpoint.drain.initialized:
+      endpoint.drain.init()
 
-    # the kernel writes these back, so they are reset for every call
-    for i in 0 ..< MaxDatagramsPerWakeup:
-      endpoint.drainMsgs[i].msg_hdr.msg_namelen = SockLen(sizeof(Sockaddr_storage))
-      endpoint.drainMsgs[i].msg_hdr.msg_flags = 0
-
-    let received = recvmmsg(
-      SocketHandle(udp.fd),
-      addr endpoint.drainMsgs[0],
-      MaxDatagramsPerWakeup.cuint,
-      0,
-      nil,
-    )
+    let received = endpoint.drain.receive(SocketHandle(udp.fd))
     if received <= 0:
       # Empty, or an error the transport will report again on the next wakeup.
       return {}
 
     var targets: set[RouteTarget]
     for i in 0 ..< received:
-      let
-        hdr = addr endpoint.drainMsgs[i]
-        length = hdr.msg_len.int
+      let length = endpoint.drain.datagramLen(i)
       if length <= 0:
         continue
-      if (hdr.msg_hdr.msg_flags and MSG_TRUNC) != 0:
-        warn "Dropping oversized datagram", bytes = length, slot = DrainSlotBytes
+      if endpoint.drain.truncated(i):
+        warn "Dropping datagram larger than the advertised receive maximum",
+          bytes = length, maximum = MaxReceiveDatagramSize
         continue
       targets.incl endpoint.routeDatagram(
-        endpoint.drainBuf.toOpenArray(
-          i * DrainSlotBytes, i * DrainSlotBytes + length - 1
-        ),
+        endpoint.drain.payload(i, length),
         local,
-        toTransportAddress(cast[ptr SockAddr](addr endpoint.drainAddrs[i])),
+        toTransportAddress(endpoint.drain.sender(i)),
       )
 
     targets
