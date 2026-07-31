@@ -5,7 +5,7 @@ import chronos, chronicles, results
 when defined(windows):
   from chronos/osdefs import SOL_SOCKET, SO_RCVBUF
 else:
-  from posix import SOL_SOCKET, SO_RCVBUF
+  from posix import SOL_SOCKET, SO_RCVBUF, Tmsghdr, IOVec, MSG_TRUNC
 import
   ./[
     errors, connection, tlsconfig, connectionmanager, lsquic_ffi, certificateverifier,
@@ -18,6 +18,26 @@ when defined(windows):
   from std/winlean import recvfrom
 else:
   from chronos/osdefs import recvfrom
+
+when defined(linux):
+  const DrainSlotBytes = 2048
+    ## Per-datagram slot in the batch buffer. recvmmsg needs the space reserved
+    ## up front, so this trades a fixed 128 KB per endpoint against being able
+    ## to read a whole burst in one syscall. Comfortably above the largest
+    ## datagram the engine negotiates, and anything longer is reported by
+    ## MSG_TRUNC rather than silently cut.
+
+  type MMsgHdr {.importc: "struct mmsghdr", header: "<sys/socket.h>", bycopy.} = object
+    msg_hdr: Tmsghdr
+    msg_len: cuint
+
+  proc recvmmsg(
+    sockfd: SocketHandle,
+    msgvec: ptr MMsgHdr,
+    vlen: cuint,
+    flags: cint,
+    timeout: pointer,
+  ): cint {.importc, header: "<sys/socket.h>".}
 
 type
   QuicEndpointCapability* = enum
@@ -40,6 +60,12 @@ type
     gso: SegmentationOffload
     stopped: bool
     drainBuf: seq[byte]
+    when defined(linux):
+      # Preallocated once: one slot, address and message header per datagram of
+      # a batch, so a drain is a single recvmmsg rather than a recvfrom each.
+      drainAddrs: seq[Sockaddr_storage]
+      drainIovs: seq[IOVec]
+      drainMsgs: seq[MMsgHdr]
 
 const
   CloseWait: Duration = 300.milliseconds
@@ -199,35 +225,97 @@ proc recvDatagram(
       addr remoteAddrLen,
     ).int
 
-proc drainDatagrams(
-    endpoint: QuicEndpoint, udp: DatagramTransport, local: TransportAddress
-): set[RouteTarget] {.raises: [].} =
-  ## Chronos hands this callback a single datagram per event-loop wakeup, so
-  ## whatever else has already arrived is read here rather than one wakeup, and
-  ## one engine tick, at a time.
-  if endpoint.drainBuf.len == 0:
-    endpoint.drainBuf = newSeq[byte](DefaultDatagramBufferSize)
+when defined(linux):
+  proc initDrainBatch(endpoint: QuicEndpoint) {.raises: [].} =
+    endpoint.drainBuf = newSeq[byte](MaxDatagramsPerWakeup * DrainSlotBytes)
+    endpoint.drainAddrs = newSeq[Sockaddr_storage](MaxDatagramsPerWakeup)
+    endpoint.drainIovs = newSeq[IOVec](MaxDatagramsPerWakeup)
+    endpoint.drainMsgs = newSeq[MMsgHdr](MaxDatagramsPerWakeup)
+    for i in 0 ..< MaxDatagramsPerWakeup:
+      endpoint.drainIovs[i] = IOVec(
+        iov_base: addr endpoint.drainBuf[i * DrainSlotBytes], iov_len: DrainSlotBytes
+      )
+      endpoint.drainMsgs[i].msg_hdr.msg_name = addr endpoint.drainAddrs[i]
+      endpoint.drainMsgs[i].msg_hdr.msg_iov = addr endpoint.drainIovs[i]
+      when defined(x86_64) and not defined(android):
+        endpoint.drainMsgs[i].msg_hdr.msg_iovlen = 1.csize_t
+      else:
+        endpoint.drainMsgs[i].msg_hdr.msg_iovlen = 1.cint
 
-  var targets: set[RouteTarget]
-  for _ in 0 ..< MaxDatagramsPerWakeup:
-    var
-      remoteAddress: Sockaddr_storage
-      remoteAddrLen = SockLen(sizeof(Sockaddr_storage))
-    let res = recvDatagram(
-      SocketHandle(udp.fd), endpoint.drainBuf, remoteAddress, remoteAddrLen
+  proc drainDatagrams(
+      endpoint: QuicEndpoint, udp: DatagramTransport, local: TransportAddress
+  ): set[RouteTarget] {.raises: [].} =
+    ## Chronos hands this callback a single datagram per event-loop wakeup, so
+    ## whatever else has already arrived is read here. recvmmsg takes the whole
+    ## burst in one syscall instead of one recvfrom per datagram plus a final
+    ## one to discover the socket is empty.
+    if endpoint.drainMsgs.len == 0:
+      endpoint.initDrainBatch()
+
+    # the kernel writes these back, so they are reset for every call
+    for i in 0 ..< MaxDatagramsPerWakeup:
+      endpoint.drainMsgs[i].msg_hdr.msg_namelen = SockLen(sizeof(Sockaddr_storage))
+      endpoint.drainMsgs[i].msg_hdr.msg_flags = 0
+
+    let received = recvmmsg(
+      SocketHandle(udp.fd),
+      addr endpoint.drainMsgs[0],
+      MaxDatagramsPerWakeup.cuint,
+      0,
+      nil,
     )
-    if res < 0:
+    if received <= 0:
       # Empty, or an error the transport will report again on the next wakeup.
-      break
+      return {}
 
-    if res > 0:
+    var targets: set[RouteTarget]
+    for i in 0 ..< received:
+      let
+        hdr = addr endpoint.drainMsgs[i]
+        length = hdr.msg_len.int
+      if length <= 0:
+        continue
+      if (hdr.msg_hdr.msg_flags and MSG_TRUNC) != 0:
+        warn "Dropping oversized datagram", bytes = length, slot = DrainSlotBytes
+        continue
       targets.incl endpoint.routeDatagram(
-        endpoint.drainBuf.toOpenArray(0, res - 1),
+        endpoint.drainBuf.toOpenArray(
+          i * DrainSlotBytes, i * DrainSlotBytes + length - 1
+        ),
         local,
-        toTransportAddress(cast[ptr SockAddr](addr remoteAddress)),
+        toTransportAddress(cast[ptr SockAddr](addr endpoint.drainAddrs[i])),
       )
 
-  targets
+    targets
+
+else:
+  proc drainDatagrams(
+      endpoint: QuicEndpoint, udp: DatagramTransport, local: TransportAddress
+  ): set[RouteTarget] {.raises: [].} =
+    ## One recvfrom per datagram, for platforms without recvmmsg.
+    if endpoint.drainBuf.len == 0:
+      endpoint.drainBuf = newSeq[byte](DefaultDatagramBufferSize)
+
+    var targets: set[RouteTarget]
+    for _ in 0 ..< MaxDatagramsPerWakeup:
+      var
+        remoteAddress: Sockaddr_storage
+        remoteAddrLen = SockLen(sizeof(Sockaddr_storage))
+      let res = recvDatagram(
+        SocketHandle(udp.fd), endpoint.drainBuf, remoteAddress, remoteAddrLen
+      )
+      if res < 0:
+        # Empty, or an error the transport will report again on the next wakeup.
+        break
+
+      if res > 0:
+        targets.incl endpoint.routeDatagram(
+          endpoint.drainBuf.toOpenArray(0, res - 1),
+          local,
+          toTransportAddress(cast[ptr SockAddr](addr remoteAddress)),
+        )
+
+    targets
 
 proc readIncoming(
     udp: DatagramTransport, msg: var seq[byte], msgLen: var int
