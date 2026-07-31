@@ -583,10 +583,10 @@ suite "lifecycle":
     await outgoingStream.write(@[1'u8])
     let incomingStream = await peers.incoming.incomingStream()
 
-    var kickoff = newSeq[byte](1)
+    var firstByte = newSeq[byte](1)
     check:
-      (await incomingStream.readOnce(kickoff)) == 1
-      kickoff[0] == 1
+      (await incomingStream.readOnce(firstByte)) == 1
+      firstByte[0] == 1
 
     # A stream has a single pending-read slot, so `readLock` has to keep the
     # second reader out until the first one is done.
