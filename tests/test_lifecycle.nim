@@ -508,12 +508,16 @@ suite "lifecycle":
 
   asyncTest "nil read destination is rejected":
     let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
 
     expect AssertionDefect:
       discard await stream.readOnce(nil, 8)
 
   asyncTest "read waiting for the read lock sees the stream closed by the engine":
     let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
     # hold the lock so the read parks after its pre-lock checks have passed
     await stream.readLock.acquire()
 
@@ -529,6 +533,8 @@ suite "lifecycle":
 
   asyncTest "read waiting for the read lock sees a peer reset":
     let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
     await stream.readLock.acquire()
 
     var buf = newSeq[byte](8)
@@ -539,6 +545,34 @@ suite "lifecycle":
 
     expect StreamResetError:
       discard await reading
+
+  asyncTest "write waiting for the write lock sees the stream closed by the engine":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+    await stream.writeLock.acquire()
+
+    let writing = stream.write(@[1'u8])
+
+    stream.closedByEngine = true
+    stream.writeLock.release()
+
+    expect StreamError:
+      await writing
+
+  asyncTest "write waiting for the write lock sees a peer reset":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+    await stream.writeLock.acquire()
+
+    let writing = stream.write(@[1'u8])
+
+    stream.markResetByPeer(ResetWrite)
+    stream.writeLock.release()
+
+    expect StreamResetError:
+      await writing
 
   asyncTest "concurrent reads on one stream are serialized":
     let peers = await connectPeers()
@@ -553,10 +587,8 @@ suite "lifecycle":
     check (await incomingStream.readOnce(kickoff)) == 1
     check kickoff[0] == 1
 
-    # Both reads park. A stream has a single pending-read slot, so `readLock` has
-    # to keep the second reader out until the first one is done; otherwise the
-    # second task would overwrite the first and the first read would hang.
-    # The buffer lengths differ so the pending task identifies its owner.
+    # A stream has a single pending-read slot, so `readLock` has to keep the
+    # second reader out until the first one is done.
     var firstBuf = newSeq[byte](4)
     var secondBuf = newSeq[byte](8)
     let firstRead = incomingStream.readOnce(firstBuf)
