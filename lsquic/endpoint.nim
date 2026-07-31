@@ -145,8 +145,7 @@ proc routeDatagram(
     hasClientContext = not endpoint.clientContext.isNil
     hasServerContext = not endpoint.serverContext.isNil
 
-  # Only one engine on this socket, so there is nothing to disambiguate: skip
-  # parsing the connection id out of every datagram and probing the CID set.
+  # One engine on this socket: nothing to disambiguate, so skip the CID lookup.
   if hasClientContext != hasServerContext:
     if hasClientContext:
       endpoint.clientContext.packetIn(data, local, remote)

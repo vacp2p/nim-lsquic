@@ -245,9 +245,9 @@ proc sendPlain(
     sent.cint
   else:
     when defined(windows):
-      # Reused across specs rather than allocated per packet. Bounded like the
-      # segmented path's bufPool, which makes the same assumption about iovlen.
-      var bufs {.noinit.}: array[MaxBatch, WSABUF]
+      var
+        bufs {.noinit.}: array[MaxBatch, WSABUF]
+        overflow: seq[WSABUF]
     var sent = 0
     for i in first ..< nspecs:
       let curr = specsArr[i]
@@ -257,18 +257,28 @@ proc sendPlain(
       prepareDestAddr(curr.local_sa, curr.dest_sa, destStorage, destAddrLen)
 
       when defined(windows):
-        let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
+        let
+          iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
+          iovlen = curr.iovlen.int
+          # lsquic coalesces within one datagram, so iovlen stays well under
+          # MaxBatch, but nothing here enforces that
+          dst =
+            if iovlen <= bufs.len:
+              cast[ptr UncheckedArray[WSABUF]](addr bufs[0])
+            else:
+              overflow.setLen(iovlen)
+              cast[ptr UncheckedArray[WSABUF]](addr overflow[0])
 
-        for j in 0 ..< curr.iovlen.int:
+        for j in 0 ..< iovlen:
           let src = iovArr[j]
-          bufs[j].len = culong(src.iov_len)
-          bufs[j].buf = cast[ptr char](src.iov_base)
+          dst[j].len = culong(src.iov_len)
+          dst[j].buf = cast[ptr char](src.iov_base)
 
         var msg = WSAMSG(
           name: cast[ptr SockAddr](addr destStorage),
           namelen: cint(destAddrLen),
-          lpBuffers: addr bufs[0],
-          dwBufferCount: culong(curr.iovlen),
+          lpBuffers: addr dst[0],
+          dwBufferCount: culong(iovlen),
           control: WSABUF(len: 0, buf: nil),
           dwFlags: 0,
         )
@@ -573,5 +583,4 @@ when defined(lsquic_testing):
       destStorage: var Sockaddr_storage,
       destAddrLen: var SockLen,
   ) =
-    ## Test-only accessor for the destination remapping.
     prepareDestAddr(localSa, destSa, destStorage, destAddrLen)
