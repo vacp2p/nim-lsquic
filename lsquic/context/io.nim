@@ -12,6 +12,11 @@ when not defined(windows):
   import chronicles
   import posix
 
+const MaxBatch = 1024
+  ## Upper bound on the stack WSABUF array in `sendPlain` (Windows). lsquic
+  ## coalesces within one datagram, so `iovlen` stays well under this in
+  ## practice; if it does not, `sendPlain` falls back to a heap-allocated seq.
+
 when defined(linux):
   {.passc: "-D_GNU_SOURCE".}
 
