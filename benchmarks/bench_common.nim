@@ -2,6 +2,7 @@
 # Copyright (c) Status Research & Development GmbH
 
 import std/[json, sets, sequtils, os, algorithm, math, strutils]
+from std/posix import Rusage, RUSAGE_SELF, getrusage
 import chronos, results, stew/endians2, chronicles
 import lsquic
 
@@ -50,6 +51,11 @@ type
     rampUpSamples*: seq[RampUpSample]
     timeToP90Ns*: int64 ## time to reach 90% of peak throughput (rampup only)
 
+  ResourceUsage* = object
+    cpuUserNs*: int64
+    cpuSysNs*: int64
+    maxRssBytes*: int64
+
   ConnectionResult* = object
     streamResults*: seq[StreamResult]
     durationNs*: int64
@@ -63,6 +69,28 @@ type
     chunkSize*: int
     connResults*: seq[ConnectionResult]
     durationNs*: int64
+    errors*: seq[string] ## streams that failed; the run continued without them
+    usage*: ResourceUsage ## CPU/memory consumed by this process
+
+# -- Resource usage --
+#
+# Taken from getrusage(RUSAGE_SELF) rather than sampled externally: the LAN runs
+# finish in ~100ms, far too short for `docker stats` (1s granularity) to see,
+# and the kernel's counters are exact rather than an average of samples.
+
+proc resourceUsage*(): ResourceUsage =
+  var ru: Rusage
+  if getrusage(RUSAGE_SELF, addr ru) != 0:
+    return ResourceUsage()
+
+  ResourceUsage(
+    cpuUserNs:
+      ru.ru_utime.tv_sec.int64 * 1_000_000_000 + ru.ru_utime.tv_usec.int64 * 1_000,
+    cpuSysNs:
+      ru.ru_stime.tv_sec.int64 * 1_000_000_000 + ru.ru_stime.tv_usec.int64 * 1_000,
+    # Linux reports ru_maxrss in kilobytes.
+    maxRssBytes: ru.ru_maxrss.int64 * 1024,
+  )
 
 # Certificate loading - embedded test certs
 const certDir = parentDir(parentDir(currentSourcePath())) / "tests" / "helpers"
@@ -184,5 +212,9 @@ proc toJson*(r: RunResult): JsonNode =
     "chunk_size": r.chunkSize,
     "duration_ns": r.durationNs,
     "connections_results": connArr,
+    "errors": %r.errors,
+    "client_cpu_user_ns": r.usage.cpuUserNs,
+    "client_cpu_sys_ns": r.usage.cpuSysNs,
+    "client_max_rss_bytes": r.usage.maxRssBytes,
   }
   json
