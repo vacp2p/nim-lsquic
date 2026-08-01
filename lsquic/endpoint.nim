@@ -37,7 +37,6 @@ type
     clientContext: ClientContext
     connman: ConnectionManager
     udp: DatagramTransport
-    gso: SegmentationOffload
     stopped: bool
     drainBuf: seq[byte]
 
@@ -82,21 +81,19 @@ proc configureReceiveBuffer(
       requestedBytes = requested, effectiveBytes = effective
 
 proc createServerContext(
-    tlsConfig: TLSConfig, fd: cint, gso: SegmentationOffload
+    tlsConfig: TLSConfig, fd: cint
 ): ServerContext {.raises: [QuicError].} =
   var context = ServerContext.new(tlsConfig).valueOr:
     raise newException(QuicError, error)
   context.fd = fd
-  context.gso = gso
   context
 
 proc createClientContext(
-    tlsConfig: TLSConfig, fd: cint, gso: SegmentationOffload
+    tlsConfig: TLSConfig, fd: cint
 ): ClientContext {.raises: [QuicError].} =
   var context = ClientContext.new(tlsConfig).valueOr:
     raise newException(QuicError, error)
   context.fd = fd
-  context.gso = gso
   context
 
 proc scidLen(endpoint: QuicEndpoint): cuint {.raises: [].} =
@@ -285,9 +282,6 @@ proc createUdp(
       raise newException(QuicError, "only IPv4/IPv6 address is supported")
 
   udp.configureReceiveBuffer(socketConfig)
-  endpoint.gso = SegmentationOffload(
-    enabled: socketConfig.segmentationOffload and probeSegmentationOffload(udp.fd)
-  )
   udp
 
 proc createUdp(
@@ -308,9 +302,6 @@ proc createUdp(
       raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
 
   udp.configureReceiveBuffer(socketConfig)
-  endpoint.gso = SegmentationOffload(
-    enabled: socketConfig.segmentationOffload and probeSegmentationOffload(udp.fd)
-  )
   udp
 
 proc new*(
@@ -342,8 +333,7 @@ proc new*(
         endpoint.udp.close()
 
   if CanListen in capabilities:
-    endpoint.serverContext =
-      createServerContext(tlsConfig, cint(endpoint.udp.fd), endpoint.gso)
+    endpoint.serverContext = createServerContext(tlsConfig, cint(endpoint.udp.fd))
 
   initialized = true
   endpoint
@@ -370,7 +360,7 @@ proc ensureClientContext(
 
   if endpoint.clientContext.isNil:
     endpoint.clientContext =
-      createClientContext(endpoint.tlsConfig, cint(endpoint.udp.fd), endpoint.gso)
+      createClientContext(endpoint.tlsConfig, cint(endpoint.udp.fd))
 
   endpoint.clientContext
 
@@ -457,12 +447,6 @@ proc localAddress*(
 
 proc datagramTransport*(endpoint: QuicEndpoint): DatagramTransport {.raises: [].} =
   endpoint.udp
-
-proc segmentationOffloadActive*(endpoint: QuicEndpoint): bool {.raises: [].} =
-  ## True while the endpoint socket uses UDP segmentation offload. The config
-  ## must ask for it, the probe must find support, and no send error must
-  ## disable it.
-  endpoint.gso.enabled
 
 proc stop*(endpoint: QuicEndpoint) {.async: (raises: [CancelledError]).} =
   if endpoint.stopped:

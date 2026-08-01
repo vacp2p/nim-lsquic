@@ -22,12 +22,6 @@ type
 
   LsquicCidArray = UncheckedArray[lsquic_cid_t]
 
-  SegmentationOffload* = ref object
-    ## UDP segmentation offload state for one socket. The server context and
-    ## the client context of an endpoint share one cell, which is why this is a
-    ## ref: a send error disables offload for the socket, not for one context.
-    enabled*: bool
-
   QuicContext* = ref object of RootObj
     settings*: struct_lsquic_engine_settings
     api*: struct_lsquic_engine_api
@@ -37,7 +31,6 @@ type
     tickTimeout*: Timeout
     sslCtx*: ptr SSL_CTX
     fd*: cint
-    gso*: SegmentationOffload = SegmentationOffload()
     processing: bool
     flushScheduled: bool
     running*: bool

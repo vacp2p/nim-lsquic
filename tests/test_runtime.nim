@@ -91,34 +91,6 @@ suite "runtime":
 
     check endpoint.datagramTransport().socketReceiveBufferBytes() >= requested
 
-  asyncTest "segmentation offload probe reflects platform support":
-    cleanupLsquic()
-    initializeLsquic(true, true)
-    let endpoint = QuicEndpoint.new(makeTLSConfig(), AutoAddressIP4)
-    defer:
-      await endpoint.stop()
-      cleanupLsquic()
-
-    when defined(linux) or defined(windows):
-      check endpoint.segmentationOffloadActive()
-    else:
-      check not endpoint.segmentationOffloadActive()
-
-  asyncTest "segmentation offload can be disabled":
-    cleanupLsquic()
-    initializeLsquic(true, true)
-    let endpoint = QuicEndpoint.new(
-      makeTLSConfig(),
-      AutoAddressIP4,
-      {CanListen, CanDial},
-      QuicSocketConfig(segmentationOffload: false),
-    )
-    defer:
-      await endpoint.stop()
-      cleanupLsquic()
-
-    check not endpoint.segmentationOffloadActive()
-
   test "negative socket receive buffer is rejected":
     expect QuicConfigError:
       discard QuicEndpoint.new(
