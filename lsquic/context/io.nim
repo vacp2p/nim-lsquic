@@ -194,6 +194,10 @@ proc sendPacketsOut*(
 
     sent.cint
   else:
+    when defined(windows):
+      # Reused across specs rather than allocated per packet. Bounded like the
+      # segmented path's bufPool, which makes the same assumption about iovlen.
+      var bufs {.noinit.}: array[MaxBatch, WSABUF]
     var sent = 0
     for i in 0 ..< nspecs.int:
       let curr = specsArr[i]
@@ -205,7 +209,6 @@ proc sendPacketsOut*(
       when defined(windows):
         let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
 
-        var bufs = newSeq[WSABUF](curr.iovlen.int)
         for j in 0 ..< curr.iovlen.int:
           let src = iovArr[j]
           bufs[j].len = culong(src.iov_len)
