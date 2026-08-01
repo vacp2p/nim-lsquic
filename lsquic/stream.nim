@@ -270,10 +270,23 @@ template readOnce*(stream: Stream, dst: var openArray[byte]): untyped =
   else: stream.readOnce(dst[0].addr, dst.len))
 
 proc write*(
-    stream: Stream, data: sink seq[byte]
+    stream: Stream, src: ptr byte, srcLen: int
 ) {.async: (raises: [CancelledError, StreamError]).} =
-  if data.len == 0:
+  ## Writes from a caller-owned buffer. Counterpart of `readOnce`, and the only
+  ## overload that never copies - `WriteTask` holds a pointer to the buffer, not
+  ## a copy of it.
+  ##
+  ## The buffer must stay alive and unmodified until the returned future is
+  ## *finished*. Cancelling is not enough on its own: `on_write` reads the
+  ## buffer from the engine callback, while the pending write is only cleared
+  ## when this proc resumes on a later poll tick. Freeing the buffer between
+  ## `cancel()` and that tick is a use-after-free - use `await fut.cancelAndWait()`
+  ## or otherwise wait for the future to finish before releasing it.
+  if srcLen == 0:
     return
+
+  if src.isNil:
+    raiseAssert "src cannot be nil"
 
   raiseIfWriteReset(stream)
 
@@ -294,13 +307,12 @@ proc write*(
     raise newException(StreamError, "stream closed")
 
   # Try to write immediately
-  let p = data[0].addr
-  let n = lsquic_stream_write(stream.quicStream, p, data.len.csize_t)
-  if n >= data.len:
+  let n = lsquic_stream_write(stream.quicStream, src, srcLen.csize_t)
+  if n >= srcLen:
     if lsquic_stream_flush(stream.quicStream) != 0:
       stream.abort()
       raise newException(StreamError, "could not flush stream")
-    stream.doProcess(data.len >= WriteFlushBytes)
+    stream.doProcess(srcLen >= WriteFlushBytes)
     return
   elif n < 0:
     if errno == ECONNRESET:
@@ -316,12 +328,11 @@ proc write*(
     raise newException(StreamError, "could not set wantwrite")
 
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init("Stream.write")
-  stream.toWrite = Opt.some(
-    WriteTask(data: data[0].addr, dataLen: data.len, doneFut: doneFut, offset: n)
-  )
+  stream.toWrite =
+    Opt.some(WriteTask(data: src, dataLen: srcLen, doneFut: doneFut, offset: n))
 
   try:
-    stream.doProcess(data.len >= WriteFlushBytes)
+    stream.doProcess(srcLen >= WriteFlushBytes)
 
     let raceFut = await race(stream.closedWaiter, doneFut)
     if raceFut == stream.closedWaiter:
@@ -333,3 +344,17 @@ proc write*(
     await doneFut
   finally:
     stream.clearPendingWrite(doneFut)
+
+proc write*(
+    stream: Stream, data: sink seq[byte]
+) {.async: (raises: [CancelledError, StreamError]).} =
+  ## `sink` so that handing over a temporary - `write(@[header])`, or a freshly
+  ## built buffer - moves into the async environment instead of being copied
+  ## into it. `data` then lives in that environment for the whole call, which is
+  ## what keeps the buffer alive for the pointer overload above.
+  ##
+  ## A caller that keeps its own buffer still pays one copy here, and should use
+  ## the pointer overload instead if it can honour that overload's contract.
+  if data.len == 0:
+    return
+  await stream.write(data[0].addr, data.len)
