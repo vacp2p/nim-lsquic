@@ -61,12 +61,8 @@ proc prepareDestAddr(
   ## When lsquic later asks us to send on that IPv6 socket, sending directly to
   ## an AF_INET destination can fail with EINVAL. Re-map the destination to an
   ## IPv6-mapped address when the local path is IPv6.
-  let
-    localAddress = localSa.toTransportAddress()
-    destAddress = destSa.toTransportAddress()
-  if localAddress.family == AddressFamily.IPv6 and
-      destAddress.family == AddressFamily.IPv4:
-    let mappedDest = destAddress.toIPv6()
+  if localSa.isIPv6Family() and destSa.isIPv4Family():
+    let mappedDest = destSa.toTransportAddress().toIPv6()
     mappedDest.toSAddr(destStorage, destAddrLen)
   else:
     destAddrLen = sockAddrLen(destSa.sa_family.int)
@@ -251,3 +247,13 @@ proc sendPacketsOut*(
       sent.inc
 
     sent.cint
+
+when defined(lsquic_testing):
+  proc prepareDestAddrForTest*(
+      localSa: ptr SockAddr,
+      destSa: ptr SockAddr,
+      destStorage: var Sockaddr_storage,
+      destAddrLen: var SockLen,
+  ) =
+    ## Test-only accessor for the destination remapping.
+    prepareDestAddr(localSa, destSa, destStorage, destAddrLen)
