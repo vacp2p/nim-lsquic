@@ -129,10 +129,10 @@ SUMMARY_FILE="$RESULTS_DIR/summary_${TIMESTAMP}.txt"
 JSON_DIR="$RESULTS_DIR/json_${TIMESTAMP}"
 mkdir -p "$JSON_DIR"
 
-printf "\n%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-11s %-11s %-9s\n" \
-  "Scenario" "Mode" "Conns" "Strms" "Upload" "Download" "Lat p50" "Lat p95" "Duration" \
-  "CPU cli" "CPU srv" "Peak RSS" | tee "$SUMMARY_FILE"
-printf "%s\n" "$(printf '=%.0s' {1..155})" | tee -a "$SUMMARY_FILE"
+printf "\n%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s %-11s %-11s %-9s\n" \
+  "Scenario" "Mode" "Conns" "Strms" "Upload" "Download" "Lat p50" "Lat p95" "Stalls" \
+  "Duration" "CPU cli" "CPU srv" "Peak RSS" | tee "$SUMMARY_FILE"
+printf "%s\n" "$(printf '=%.0s' {1..168})" | tee -a "$SUMMARY_FILE"
 
 run_bench() {
   local scenario_str="$1"
@@ -185,8 +185,8 @@ run_bench() {
       --wait-timeout "$WAIT_TIMEOUT" \
       bench-server >/dev/null 2>&1; then
     echo "FAILED (server startup)"
-    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s\n" \
-      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" \
+    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s\n" \
+      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" "-" \
       | tee -a "$SUMMARY_FILE"
     env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans \
       >/dev/null 2>&1 || true
@@ -243,8 +243,8 @@ run_bench() {
     else
       echo "FAILED (no JSON output, see $log_file)"
     fi
-    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s\n" \
-      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" \
+    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s\n" \
+      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" "-" \
       | tee -a "$SUMMARY_FILE"
     return
   fi
@@ -350,15 +350,21 @@ def fmt_mib(b):
 cli_cpu_str = fmt_dur(cli_cpu) if cli_cpu > 0 else '-'
 srv_cpu_str = fmt_dur(srv_cpu) if srv_cpu > 0 else '-'
 
-print(f'{up_str}|{down_str}|{lat_p50_str}|{lat_p95_str}|{dur_str}'
+# Stall counts (>100ms / >1s / >10s). Unlike p95/p99 these are stable across
+# repeated runs of identical code, so they are what a regression check should
+# read on shaped scenarios. See README, 'Reading the tail'.
+stalls = d.get('stall_counts', [])
+stalls_str = '/'.join(str(c) for c in stalls) if stalls else '-'
+
+print(f'{up_str}|{down_str}|{lat_p50_str}|{lat_p95_str}|{stalls_str}|{dur_str}'
       f'|{cli_cpu_str}|{srv_cpu_str}|{fmt_mib(peak_rss)}')
 " < "$JSON_DIR/${run_name}.json" 2>/dev/null | {
-    IFS='|' read -r upload_str download_str lat_p50_str lat_p95_str dur_str \
-      cli_cpu_str srv_cpu_str peak_rss_str
+    IFS='|' read -r upload_str download_str lat_p50_str lat_p95_str stalls_str \
+      dur_str cli_cpu_str srv_cpu_str peak_rss_str
     echo "done"
-    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-11s %-11s %-9s\n" \
+    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s %-11s %-11s %-9s\n" \
       "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "$upload_str" "$download_str" \
-      "$lat_p50_str" "$lat_p95_str" "$dur_str" \
+      "$lat_p50_str" "$lat_p95_str" "$stalls_str" "$dur_str" \
       "$cli_cpu_str" "$srv_cpu_str" "$peak_rss_str" \
       | tee -a "$SUMMARY_FILE"
   }

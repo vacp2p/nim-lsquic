@@ -267,45 +267,50 @@ networking. Absolute numbers are host-dependent — especially the LAN row, whic
 measures loopback-class bandwidth rather than a real network — so compare
 relative movements between modes rather than treating these as targets.
 
+The `Lat p95` values below are a **single draw from a wide distribution**, not
+repeatable figures: re-running an unchanged build moves them by up to 3x. See
+[Reading the tail](#reading-the-tail) before comparing any of them against a run
+of your own.
+
 ```
-Scenario        Mode           Conns  Strms  Upload          Download        Lat p50      Lat p95      Duration     CPU cli     CPU srv     Peak RSS
-===========================================================================================================================================================
-lan             throughput     1      1      22.49 Mbit/s    2.25 Gbit/s     -            -            177.895ms    144.961ms   289.813ms   11.8 MiB
-lan             latency        1      1      -               -               55.313us     87.729us     6.566ms      33.146ms    111.565ms   11.7 MiB
-lan             multistream    1      4      18.82 Mbit/s    1.88 Gbit/s     40.992us     17.191ms     255.111ms    189.392ms   380.229ms   21.7 MiB
-lan             multiconn      4      1      20.15 Mbit/s    2.01 Gbit/s     39.526us     16.246ms     238.226ms    186.240ms   384.302ms   21.4 MiB
-lan             stress         4      4      21.47 Mbit/s    2.15 Gbit/s     51.891us     53.027ms     447.053ms    309.429ms   613.795ms   59.3 MiB
-lan             rampup         1      1      -               2.40 Gbit/s     150.000ms    p90          333.699ms    252.956ms   461.795ms   11.8 MiB
-wan             throughput     1      1      902.85 Kbit/s   90.28 Mbit/s    -            -            4.430s       746.879ms   4.393s      12.3 MiB
-wan             latency        1      1      -               -               25.352ms     25.475ms     2.535s       49.213ms    203.719ms   11.9 MiB
-wan             multistream    1      4      637.13 Kbit/s   63.71 Mbit/s    25.376ms     220.711ms    7.534s       818.990ms   5.326s      15.5 MiB
-wan             multiconn      4      1      919.43 Kbit/s   91.94 Mbit/s    36.339ms     36.378ms     5.221s       828.930ms   5.299s      16.0 MiB
-wan             stress         4      4      591.71 Kbit/s   59.17 Mbit/s    25.770ms     1.172s       16.224s      1.401s      10.593s     30.5 MiB
-wan             rampup         1      1      -               83.57 Mbit/s    150.000ms    p90          9.573s       1.137s      8.688s      16.5 MiB
-constrained     throughput     1      1      93.39 Kbit/s    9.34 Mbit/s     -            -            42.833s      1.077s      1.987s      11.8 MiB
-constrained     latency        1      1      -               -               50.466ms     50.669ms     5.050s       60.147ms    274.517ms   11.7 MiB
-constrained     multistream    1      4      94.29 Kbit/s    9.43 Mbit/s     96.614ms     428.695ms    50.905s      1.718s      2.646s      11.7 MiB
-constrained     multiconn      4      1      93.59 Kbit/s    9.36 Mbit/s     95.801ms     100.843ms    51.288s      1.722s      2.911s      11.8 MiB
-constrained     stress         4      4      92.38 Kbit/s    9.24 Mbit/s     50.383ms     109.086ms    103.914s     3.364s      5.666s      12.3 MiB
-constrained     rampup         1      1      -               9.49 Mbit/s     700.000ms    p90          84.307s      2.549s      3.914s      11.6 MiB
-lossy           throughput     1      1      406.78 Kbit/s   40.68 Mbit/s    -            -            9.833s       718.467ms   8.570s      11.7 MiB
-lossy           latency        1      1      -               -               25.364ms     25.630ms     2.672s       57.357ms    174.575ms   11.6 MiB
-lossy           multistream    1      4      361.71 Kbit/s   36.17 Mbit/s    25.374ms     565.669ms    13.270s      804.105ms   10.357s     13.4 MiB
-lossy           multiconn      4      1      343.65 Kbit/s   34.36 Mbit/s    47.499ms     47.627ms     13.968s      862.115ms   10.488s     15.8 MiB
-lossy           stress         4      4      301.73 Kbit/s   30.17 Mbit/s    25.336ms     1.648s       31.816s      1.405s      21.058s     26.4 MiB
-lossy           rampup         1      1      -               38.98 Mbit/s    150.000ms    p90          20.523s      1.198s      17.174s     12.9 MiB
-mobile          throughput     1      1      45.32 Kbit/s    4.53 Mbit/s     -            -            88.264s      1.361s      3.604s      11.9 MiB
-mobile          latency        1      1      -               -               75.613ms     75.801ms     7.567s       56.898ms    316.761ms   11.6 MiB
-mobile          multistream    1      4      46.86 Kbit/s    4.69 Mbit/s     121.086ms    770.688ms    102.422s     1.757s      4.297s      11.7 MiB
-mobile          multiconn      4      1      46.53 Kbit/s    4.65 Mbit/s     118.931ms    126.222ms    103.161s     1.800s      4.324s      11.9 MiB
-mobile          stress         4      4      46.34 Kbit/s    4.63 Mbit/s     75.551ms     239.780ms    207.150s     3.922s      8.926s      13.0 MiB
-mobile          rampup         1      1      -               4.75 Mbit/s     8.250s       p90          168.595s     2.640s      6.899s      11.7 MiB
-reorder         throughput     1      1      782.97 Kbit/s   78.30 Mbit/s    -            -            5.109s       610.448ms   4.411s      13.0 MiB
-reorder         latency        1      1      -               -               25.332ms     25.439ms     2.057s       47.919ms    209.847ms   11.5 MiB
-reorder         multistream    1      4      617.32 Kbit/s   61.73 Mbit/s    25.360ms     620.952ms    7.776s       622.010ms   5.293s      15.1 MiB
-reorder         multiconn      4      1      677.75 Kbit/s   67.77 Mbit/s    36.279ms     36.373ms     7.082s       660.459ms   5.290s      14.8 MiB
-reorder         stress         4      4      573.57 Kbit/s   57.36 Mbit/s    31.518ms     727.092ms    16.737s      1.284s      10.614s     24.6 MiB
-reorder         rampup         1      1      -               94.26 Mbit/s    150.000ms    p90          8.487s       971.235ms   8.753s      12.0 MiB
+Scenario        Mode           Conns  Strms  Upload          Download        Lat p50      Lat p95      Stalls       Duration     CPU cli     CPU srv     Peak RSS
+========================================================================================================================================================================
+lan             throughput     1      1      22.49 Mbit/s    2.25 Gbit/s     -            -            -            177.895ms    144.961ms   289.813ms   11.8 MiB
+lan             latency        1      1      -               -               55.313us     87.729us     0/0/0        6.566ms      33.146ms    111.565ms   11.7 MiB
+lan             multistream    1      4      18.82 Mbit/s    1.88 Gbit/s     40.992us     17.191ms     0/0/0        255.111ms    189.392ms   380.229ms   21.7 MiB
+lan             multiconn      4      1      20.15 Mbit/s    2.01 Gbit/s     39.526us     16.246ms     0/0/0        238.226ms    186.240ms   384.302ms   21.4 MiB
+lan             stress         4      4      21.47 Mbit/s    2.15 Gbit/s     51.891us     53.027ms     0/0/0        447.053ms    309.429ms   613.795ms   59.3 MiB
+lan             rampup         1      1      -               2.40 Gbit/s     150.000ms    p90          -            333.699ms    252.956ms   461.795ms   11.8 MiB
+wan             throughput     1      1      902.85 Kbit/s   90.28 Mbit/s    -            -            -            4.430s       746.879ms   4.393s      12.3 MiB
+wan             latency        1      1      -               -               25.352ms     25.475ms     0/0/0        2.535s       49.213ms    203.719ms   11.9 MiB
+wan             multistream    1      4      637.13 Kbit/s   63.71 Mbit/s    25.376ms     220.711ms    20/0/0       7.534s       818.990ms   5.326s      15.5 MiB
+wan             multiconn      4      1      919.43 Kbit/s   91.94 Mbit/s    36.339ms     36.378ms     0/0/0        5.221s       828.930ms   5.299s      16.0 MiB
+wan             stress         4      4      591.71 Kbit/s   59.17 Mbit/s    25.770ms     1.172s       40/11/0      16.224s      1.401s      10.593s     30.5 MiB
+wan             rampup         1      1      -               83.57 Mbit/s    150.000ms    p90          -            9.573s       1.137s      8.688s      16.5 MiB
+constrained     throughput     1      1      93.39 Kbit/s    9.34 Mbit/s     -            -            -            42.833s      1.077s      1.987s      11.8 MiB
+constrained     latency        1      1      -               -               50.466ms     50.669ms     0/0/0        5.050s       60.147ms    274.517ms   11.7 MiB
+constrained     multistream    1      4      94.29 Kbit/s    9.43 Mbit/s     96.614ms     428.695ms    34/2/2       50.905s      1.718s      2.646s      11.7 MiB
+constrained     multiconn      4      1      93.59 Kbit/s    9.36 Mbit/s     95.801ms     100.843ms    15/0/0       51.288s      1.722s      2.911s      11.8 MiB
+constrained     stress         4      4      92.38 Kbit/s    9.24 Mbit/s     50.383ms     109.086ms    11/5/4       103.914s     3.364s      5.666s      12.3 MiB
+constrained     rampup         1      1      -               9.49 Mbit/s     700.000ms    p90          -            84.307s      2.549s      3.914s      11.6 MiB
+lossy           throughput     1      1      406.78 Kbit/s   40.68 Mbit/s    -            -            -            9.833s       718.467ms   8.570s      11.7 MiB
+lossy           latency        1      1      -               -               25.364ms     25.630ms     1/0/0        2.672s       57.357ms    174.575ms   11.6 MiB
+lossy           multistream    1      4      361.71 Kbit/s   36.17 Mbit/s    25.374ms     565.669ms    17/3/0       13.270s      804.105ms   10.357s     13.4 MiB
+lossy           multiconn      4      1      343.65 Kbit/s   34.36 Mbit/s    47.499ms     47.627ms     1/0/0        13.968s      862.115ms   10.488s     15.8 MiB
+lossy           stress         4      4      301.73 Kbit/s   30.17 Mbit/s    25.336ms     1.648s       34/11/3      31.816s      1.405s      21.058s     26.4 MiB
+lossy           rampup         1      1      -               38.98 Mbit/s    150.000ms    p90          -            20.523s      1.198s      17.174s     12.9 MiB
+mobile          throughput     1      1      45.32 Kbit/s    4.53 Mbit/s     -            -            -            88.264s      1.361s      3.604s      11.9 MiB
+mobile          latency        1      1      -               -               75.613ms     75.801ms     0/0/0        7.567s       56.898ms    316.761ms   11.6 MiB
+mobile          multistream    1      4      46.86 Kbit/s    4.69 Mbit/s     121.086ms    770.688ms    95/3/2       102.422s     1.757s      4.297s      11.7 MiB
+mobile          multiconn      4      1      46.53 Kbit/s    4.65 Mbit/s     118.931ms    126.222ms    88/0/0       103.161s     1.800s      4.324s      11.9 MiB
+mobile          stress         4      4      46.34 Kbit/s    4.63 Mbit/s     75.551ms     239.780ms    21/6/4       207.150s     3.922s      8.926s      13.0 MiB
+mobile          rampup         1      1      -               4.75 Mbit/s     8.250s       p90          -            168.595s     2.640s      6.899s      11.7 MiB
+reorder         throughput     1      1      782.97 Kbit/s   78.30 Mbit/s    -            -            -            5.109s       610.448ms   4.411s      13.0 MiB
+reorder         latency        1      1      -               -               25.332ms     25.439ms     0/0/0        2.057s       47.919ms    209.847ms   11.5 MiB
+reorder         multistream    1      4      617.32 Kbit/s   61.73 Mbit/s    25.360ms     620.952ms    13/2/0       7.776s       622.010ms   5.293s      15.1 MiB
+reorder         multiconn      4      1      677.75 Kbit/s   67.77 Mbit/s    36.279ms     36.373ms     0/0/0        7.082s       660.459ms   5.290s      14.8 MiB
+reorder         stress         4      4      573.57 Kbit/s   57.36 Mbit/s    31.518ms     727.092ms    37/6/1       16.737s      1.284s      10.614s     24.6 MiB
+reorder         rampup         1      1      -               94.26 Mbit/s    150.000ms    p90          -            8.487s       971.235ms   8.753s      12.0 MiB
 ```
 
 The three trailing columns are:
@@ -347,11 +352,73 @@ send-path cost.
   transfers. Shows `-` for pure throughput mode which has no latency probe.
   For `rampup` mode, this column shows the **time to 90% of peak throughput**
   instead (labeled `p90` in the Lat p95 column).
-- **Lat p95** — 95th percentile RTT. Useful for spotting tail latency spikes
-  caused by contention or packet loss. Shows `p90` for `rampup` mode to indicate
-  the Lat p50 column contains the time-to-90%-peak metric.
+- **Lat p95** — 95th percentile RTT. Shows `p90` for `rampup` mode to indicate
+  the Lat p50 column contains the time-to-90%-peak metric. **Not stable enough to
+  compare between runs on shaped scenarios** — see [Reading the
+  tail](#reading-the-tail) below, and use the Stalls column instead.
+- **Stalls** — how many latency samples exceeded 100 ms / 1 s / 10 s, e.g.
+  `34/11/3`. This is the tail metric to compare across runs. Shows `-` for modes
+  with no latency probe.
 - **Duration** — total wall-clock time for the entire benchmark run (all
   iterations, all streams)
+
+#### Reading the tail
+
+**Do not compare p95 or p99 between runs on shaped scenarios.** They are not
+stable enough to carry a regression signal, and reading them as if they were has
+produced wrong verdicts on real PRs.
+
+The numbers below are 8 consecutive runs of the *same cell* on *unchanged code*,
+back to back on an idle machine:
+
+| cell | metric | 8 runs on identical code | spread |
+|---|---|---|---|
+| `wan_multistream` | p50 | 25.20 – 25.33 ms | 1.01x |
+| `wan_multistream` | p95 | 220.8 – 649.7 ms | **2.94x** |
+| `wan_multistream` | p99 | 764 – 4263 ms | **5.58x** |
+| `lossy_stress` | p95 | 896 – 1972 ms | **2.20x** |
+| `lossy_stress` | p99 | 10.1 – 25.0 s | **2.46x** |
+
+Two things cause this:
+
+1. **Sample count.** `multistream` and `multiconn` collect 100 latency samples
+   per cell, `stress` 200. At n=100, p95 is the 5th-worst observation and p99 is
+   essentially the single worst.
+2. **The tail is quantized.** Under loss, samples pile up on the rungs of
+   lsquic's exponential retransmission backoff — roughly 1 s, 6 s, 12 s, 25 s,
+   50 s. A percentile reports *which rung one sample happened to land on*, so it
+   jumps between discrete values rather than moving smoothly. Raising the sample
+   count does not fix this; it only changes which sample gets indexed.
+
+The **Stalls** column exists because of this. Counting samples above fixed
+thresholds aggregates the whole tail instead of indexing into it, and it is
+stable across the same runs at no extra wall time:
+
+| cell | metric | 8 runs on identical code | stdev |
+|---|---|---|---|
+| `lossy_stress` | stalls > 1 s | 9, 10, 9, 10, 11, 10, 11, 13 | **1.3** |
+| `lossy_stress` | stalls > 10 s | 3, 3, 2, 2, 3, 2, 4, 2 | **0.7** |
+| `wan_multistream` | stalls > 100 ms | 17, 14, 16, 16, 16, 14, 15, 13 | **1.4** |
+
+Which threshold carries the signal depends on the shaping: `wan_multistream`
+never stalls past 1 s, so only the first bucket is informative there, while
+`lossy_stress` routinely stalls past 10 s and its first bucket is the noisy one.
+Read the bucket that is non-zero and not saturated for the cell in question.
+
+**What to trust when comparing two builds:**
+
+- **Reliable** — `errors` (categorical, and the signal that caught the GSO/USO
+  regression in #115), Lat p50, Stalls, CPU, Peak RSS.
+- **Use with care** — Download/Upload. Stable on LAN and bandwidth-capped
+  scenarios, but on `lossy_stress` throughput itself has a 25% coefficient of
+  variation, so a sub-30% throughput move there means nothing on its own.
+- **Do not use** — Lat p95, and p99 computed from the JSON. Also `rampup`
+  entirely: it is `runs=1`, a single sub-second transfer with no repetition, and
+  it has been observed to span 1546 – 2832 Mbit/s on the same commit.
+
+If a percentile move is the only evidence you have for a regression, it is not
+evidence. Re-run the cell 8 times on the unmodified base commit and compare the
+distributions before drawing a conclusion.
 
 #### Analysis by scenario
 

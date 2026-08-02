@@ -144,6 +144,29 @@ proc percentile*(samples: seq[int64], p: float): int64 =
   let idx = min(int(float(sorted.len - 1) * p), sorted.len - 1)
   sorted[idx]
 
+# -- Stall counts --
+#
+# On shaped links the latency tail is not continuous: samples pile up on the
+# rungs of lsquic's exponential retransmission backoff (observed around 6s, 12s,
+# 25s and 50s under 2% loss). A percentile over a few hundred samples therefore
+# reports *which rung one particular sample landed on*, which moves by 2-3x
+# between runs of identical code. Counting how many samples cleared a fixed
+# threshold is stable to about +/-1 over the same runs, because it aggregates
+# the whole tail instead of indexing into it.
+#
+# Three thresholds rather than one: a cell's meaningful rung depends on its
+# shaping. wan_multistream never stalls past 1s (so only the 100ms bucket
+# carries information there), while lossy_stress routinely stalls past 10s.
+
+const StallThresholdsNs* = [100_000_000'i64, 1_000_000_000'i64, 10_000_000_000'i64]
+
+proc stallCounts*(samples: seq[int64]): seq[int] =
+  result = newSeq[int](StallThresholdsNs.len)
+  for s in samples:
+    for i, threshold in StallThresholdsNs:
+      if s > threshold:
+        result[i].inc
+
 proc mean*(samples: seq[int64]): float =
   if samples.len == 0:
     return 0.0
@@ -177,12 +200,14 @@ proc formatDuration*(ns: int64): string =
 
 proc toJson*(r: RunResult): JsonNode =
   var connArr = newJArray()
+  var allLatencies: seq[int64]
   for cr in r.connResults:
     var streamArr = newJArray()
     for sr in cr.streamResults:
       var latArr = newJArray()
       for l in sr.latencySamples:
         latArr.add(%l.rttNs)
+        allLatencies.add(l.rttNs)
       var rampArr = newJArray()
       for s in sr.rampUpSamples:
         rampArr.add(
@@ -213,6 +238,9 @@ proc toJson*(r: RunResult): JsonNode =
     "duration_ns": r.durationNs,
     "connections_results": connArr,
     "errors": %r.errors,
+    "latency_sample_count": allLatencies.len,
+    "stall_thresholds_ns": %(@StallThresholdsNs),
+    "stall_counts": %stallCounts(allLatencies),
     "client_cpu_user_ns": r.usage.cpuUserNs,
     "client_cpu_sys_ns": r.usage.cpuSysNs,
     "client_max_rss_bytes": r.usage.maxRssBytes,
