@@ -27,25 +27,22 @@ type Stream* = ref object
   closeRequested: bool
   # This is called when on_close callback is executed
   closed*: AsyncEvent
-  # Reuse a single closed-event waiter to minimize allocations on hot paths.
-  # (no per call allocation)
-  closedWaiter*: Future[void].Raising([CancelledError])
   resetByPeer*: bool
   resetHow*: StreamResetHow
   writeLock*: AsyncLock
   toWrite*: Opt[WriteTask]
   readLock*: AsyncLock
   isEof*: bool # Received a FIN from remote
+  # Every path that sets closedByEngine or fires `closed` must settle these;
+  # missing one hangs the parked operation instead of failing it.
   toRead*: Opt[ReadTask]
   doProcess*: proc(urgent: bool) {.gcsafe, raises: [].}
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let closed = newAsyncEvent()
-  let closedWaiter = closed.wait()
   let s = Stream(
     quicStream: quicStream,
     closed: closed,
-    closedWaiter: closedWaiter,
     readLock: newAsyncLock(),
     writeLock: newAsyncLock(),
   )
@@ -82,6 +79,14 @@ proc failPendingRead*(stream: Stream, error: ref StreamError) {.raises: [].} =
     return
   if not task.doneFut.finished:
     task.doneFut.fail(error)
+  stream.toRead = Opt.none(ReadTask)
+
+proc completePendingRead*(stream: Stream) {.raises: [].} =
+  ## Ends a pending read at end of stream, reporting 0 rather than failing.
+  let task = stream.toRead.valueOr:
+    return
+  if not task.doneFut.finished:
+    task.doneFut.complete(0)
   stream.toRead = Opt.none(ReadTask)
 
 proc abortPendingWrites*(stream: Stream, error: ref StreamError) {.raises: [].} =
@@ -170,6 +175,7 @@ proc abort*(stream: Stream) =
   stream.closeWrite = true
   stream.isEof = true
   stream.abortPendingWrites("stream aborted")
+  stream.completePendingRead()
   discard stream.requestClose()
   if not stream.closed.isSet():
     stream.closed.fire()
@@ -249,17 +255,6 @@ proc readOnce*(
 
   try:
     stream.doProcess(false)
-
-    let raceFut = await race(stream.closedWaiter, doneFut)
-    if raceFut == stream.closedWaiter:
-      if not doneFut.finished:
-        await doneFut.cancelAndWait()
-      raiseIfReadReset(stream)
-      stream.isEof = true
-      stream.closeWrite = true
-      discard stream.closeIfDone()
-      return 0
-
     return await doneFut
   finally:
     stream.clearPendingRead(doneFut)
@@ -333,14 +328,6 @@ proc write*(
 
   try:
     stream.doProcess(srcLen >= WriteFlushBytes)
-
-    let raceFut = await race(stream.closedWaiter, doneFut)
-    if raceFut == stream.closedWaiter:
-      raiseIfWriteReset(stream)
-      if not doneFut.finished:
-        doneFut.fail(newException(StreamError, "stream closed"))
-      stream.closeWrite = true
-
     await doneFut
   finally:
     stream.clearPendingWrite(doneFut)

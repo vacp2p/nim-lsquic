@@ -614,6 +614,89 @@ suite "lifecycle":
     expect StreamResetError:
       await writing
 
+  # One test per close path, pinning the rule that each settles the parked
+  # operation itself.
+
+  asyncTest "engine close completes a parked read with eof":
+    let stream = Stream.new()
+    var buf = newSeq[byte](8)
+    let doneFut =
+      Future[int].Raising([CancelledError, StreamError]).init("test parked read")
+    stream.toRead =
+      Opt.some(ReadTask(data: buf[0].addr, dataLen: buf.len, doneFut: doneFut))
+
+    onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # also releases the pin
+
+    check stream.toRead.isNone()
+    # guarded so a regression fails this test instead of parking the suite
+    check doneFut.finished
+    if doneFut.finished:
+      check (await doneFut) == 0
+
+  asyncTest "engine close fails a parked read after a peer read reset":
+    let stream = Stream.new()
+    stream.markResetByPeer(ResetRead)
+
+    var buf = newSeq[byte](8)
+    let doneFut =
+      Future[int].Raising([CancelledError, StreamError]).init("test parked read")
+    stream.toRead =
+      Opt.some(ReadTask(data: buf[0].addr, dataLen: buf.len, doneFut: doneFut))
+
+    onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # also releases the pin
+
+    check stream.toRead.isNone()
+    check doneFut.finished
+    if doneFut.finished:
+      expect StreamResetError:
+        discard await doneFut
+
+  asyncTest "engine close fails a parked write after a local write shutdown":
+    let stream = Stream.new()
+    var data = @[1'u8, 2, 3]
+    let doneFut =
+      Future[void].Raising([CancelledError, StreamError]).init("test parked write")
+    stream.toWrite =
+      Opt.some(WriteTask(data: data[0].addr, dataLen: data.len, doneFut: doneFut))
+    stream.closeWrite = true # pins the removed `if not closeWrite` guard
+
+    onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # also releases the pin
+
+    check stream.toWrite.isNone()
+    check doneFut.finished
+    if doneFut.finished:
+      expect StreamError:
+        await doneFut
+
+  asyncTest "abort settles a parked read and a parked write":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+
+    var buf = newSeq[byte](8)
+    let readFut =
+      Future[int].Raising([CancelledError, StreamError]).init("test parked read")
+    stream.toRead =
+      Opt.some(ReadTask(data: buf[0].addr, dataLen: buf.len, doneFut: readFut))
+
+    var data = @[1'u8, 2, 3]
+    let writeFut =
+      Future[void].Raising([CancelledError, StreamError]).init("test parked write")
+    stream.toWrite =
+      Opt.some(WriteTask(data: data[0].addr, dataLen: data.len, doneFut: writeFut))
+
+    stream.abort()
+
+    check stream.toRead.isNone()
+    check stream.toWrite.isNone()
+    check readFut.finished
+    check writeFut.finished
+    if readFut.finished:
+      check (await readFut) == 0
+    if writeFut.finished:
+      expect StreamError:
+        await writeFut
+
   asyncTest "concurrent reads on one stream are serialized":
     let peers = await connectPeers()
     defer:
