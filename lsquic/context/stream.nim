@@ -42,8 +42,7 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   streamCtx.closedByEngine = true
 
-  if not streamCtx.closeWrite:
-    streamCtx.abortPendingWrites("stream closed")
+  streamCtx.abortPendingWrites("stream closed")
 
   if not streamCtx.readResetByPeer():
     streamCtx.isEof = true
@@ -55,11 +54,9 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   if streamCtx.readResetByPeer():
     streamCtx.failPendingRead(streamCtx.newStreamResetError("stream read"))
-  elif streamCtx.toRead.isSome:
-    let doneFut = streamCtx.toRead.unsafeGet().doneFut
-    if not doneFut.finished:
-      doneFut.fail(newException(StreamError, "stream closed"))
-    streamCtx.toRead = Opt.none(ReadTask)
+  else:
+    # A clean close is end of stream: report 0 rather than failing.
+    streamCtx.completePendingRead()
 
   unpin(streamCtx)
 
@@ -101,13 +98,16 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       streamCtx.abort()
       return
 
+  # abort settles a pending read with 0, so report the bytes first or they are
+  # lost. The guard covers closeIfDone above having re-entered onClose.
+  if not task.doneFut.finished:
+    task.doneFut.complete(int(n))
+
+  streamCtx.toRead = Opt.none(ReadTask)
+
   if lsquic_stream_wantread(stream, 0) == -1:
     trace "could not set stream wantread", streamId = lsquic_stream_id(stream)
     streamCtx.abort()
-
-  task.doneFut.complete(int(n))
-
-  streamCtx.toRead = Opt.none(ReadTask)
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "onWrite"
