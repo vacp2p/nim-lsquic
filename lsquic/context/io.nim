@@ -195,9 +195,9 @@ proc sendPacketsOut*(
     sent.cint
   else:
     when defined(windows):
-      # Reused across specs rather than allocated per packet. Bounded like the
-      # segmented path's bufPool, which makes the same assumption about iovlen.
-      var bufs {.noinit.}: array[MaxBatch, WSABUF]
+      var
+        bufs {.noinit.}: array[MaxBatch, WSABUF]
+        overflow: seq[WSABUF]
     var sent = 0
     for i in 0 ..< nspecs.int:
       let curr = specsArr[i]
@@ -207,18 +207,26 @@ proc sendPacketsOut*(
       prepareDestAddr(curr.local_sa, curr.dest_sa, destStorage, destAddrLen)
 
       when defined(windows):
-        let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
+        let
+          iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
+          iovlen = curr.iovlen.int
+          dst =
+            if iovlen <= bufs.len:
+              cast[ptr UncheckedArray[WSABUF]](addr bufs[0])
+            else:
+              overflow.setLen(iovlen)
+              cast[ptr UncheckedArray[WSABUF]](addr overflow[0])
 
-        for j in 0 ..< curr.iovlen.int:
+        for j in 0 ..< iovlen:
           let src = iovArr[j]
-          bufs[j].len = culong(src.iov_len)
-          bufs[j].buf = cast[ptr char](src.iov_base)
+          dst[j].len = culong(src.iov_len)
+          dst[j].buf = cast[ptr char](src.iov_base)
 
         var bytesSent: culong = 0
         let res = WSASendTo(
           SocketHandle(quicCtx.fd),
-          addr bufs[0],
-          culong(curr.iovlen),
+          addr dst[0],
+          culong(iovlen),
           addr bytesSent,
           0, # flags
           cast[ptr SockAddr](addr destStorage),
