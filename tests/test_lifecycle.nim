@@ -535,6 +535,25 @@ suite "lifecycle":
     expect StreamResetError:
       discard await doneFut
 
+  asyncTest "peer write reset fails a parked write":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+    var data = @[1'u8, 2, 3]
+    let doneFut =
+      Future[void].Raising([CancelledError, StreamError]).init("test parked write")
+    stream.toWrite =
+      Opt.some(WriteTask(data: data[0].addr, dataLen: data.len, doneFut: doneFut))
+
+    onReset(nil, cast[ptr lsquic_stream_ctx_t](stream), 1.cint)
+
+    check:
+      stream.resetHow == ResetWrite
+      stream.toWrite.isNone()
+
+    expect StreamResetError:
+      await doneFut.wait(timeout)
+
   asyncTest "read after read reset raises":
     let stream = Stream.new()
     defer:
@@ -696,6 +715,22 @@ suite "lifecycle":
     if writeFut.finished:
       expect StreamError:
         await writeFut
+
+  asyncTest "connection close settles a parked write":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    # 16 MB exceeds the send window, so the write parks with a pending write task
+    let writing = outgoingStream.write(makeData(16 * 1024 * 1024))
+
+    check outgoingStream.toWrite.isSome
+
+    peers.outgoing.close()
+
+    expect StreamError:
+      await writing.wait(timeout)
 
   asyncTest "concurrent reads on one stream are serialized":
     let peers = await connectPeers()
