@@ -6,15 +6,12 @@
 import unittest2
 import chronos, chronos/osdefs
 import ../lsquic/context/io
-
-proc sa(address: string): Sockaddr_storage =
-  var length: SockLen
-  initTAddress(address).toSAddr(result, length)
+import ./helpers/address
 
 proc prepared(local, dest: string): TransportAddress =
   var
-    localStorage = sa(local)
-    destStorage = sa(dest)
+    localStorage = toSockaddrStorage(initTAddress(local))
+    destStorage = toSockaddrStorage(initTAddress(dest))
     outStorage: Sockaddr_storage
     outLen: SockLen
   prepareDestAddrForTest(
