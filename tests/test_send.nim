@@ -67,8 +67,8 @@ suite "packets out":
     check res == 1
 
   test "a batch larger than one sendmmsg call sends every packet":
-    # SendmmsgBatchSize is 64, so 65 specs take two sendmmsg calls.
-    const SpecCount = 65
+    # SendmmsgBatchSize is 64, so +1 specs take two sendmmsg calls.
+    const SpecCount = 64 + 1 # const is not exported
 
     let fd = createNativeSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
     defer:
