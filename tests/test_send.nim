@@ -34,12 +34,11 @@ suite "packets out":
       spec = makeOutSpec(addr iov, addr localStorage, addr destStorage)
 
     let res = sendPacketsOut(cast[pointer](ctx), addr spec, 1)
-    let savedErrno = errno
-
-    check res == -1
     # The engine reads errno to decide whether to retry or close the connection.
     when not defined(windows):
-      check savedErrno == EBADF
+      check errno == EBADF
+
+    check res == -1
 
   test "a send with some packets sent out reports the count":
     # Returning -1 would make the engine resend a datagram that already went out.
@@ -60,13 +59,12 @@ suite "packets out":
       ]
 
     let res = sendPacketsOut(cast[pointer](ctx), addr specs[0], 2)
-    let savedErrno = errno
-
-    check res == 1
     # Linux overwrites errno with EAGAIN here, the other platforms leave alone
     # whatever the failed send set.
     when defined(linux):
-      check savedErrno == EAGAIN
+      check errno == EAGAIN
+
+    check res == 1
 
   test "a batch larger than one sendmmsg call sends every packet":
     # SendmmsgBatchSize is 64, so 65 specs take two sendmmsg calls.
