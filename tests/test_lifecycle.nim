@@ -573,6 +573,21 @@ suite "lifecycle":
     expect AssertionDefect:
       discard await stream.readOnce(nil, 8)
 
+  asyncTest "nil write source is rejected":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+
+    expect AssertionDefect:
+      await stream.write(nil, 8)
+
+  asyncTest "zero length writes ignore a nil source":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+
+    await stream.write(nil, 0)
+
   asyncTest "read waiting for the read lock sees the stream closed by the engine":
     let stream = Stream.new()
     defer:
@@ -647,10 +662,8 @@ suite "lifecycle":
     onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # also releases the pin
 
     check stream.toRead.isNone()
-    # guarded so a regression fails this test instead of parking the suite
     check doneFut.finished
-    if doneFut.finished:
-      check (await doneFut) == 0
+    check (await doneFut.wait(timeout)) == 0
 
   asyncTest "engine close fails a parked read after a peer read reset":
     let stream = Stream.new()
@@ -666,9 +679,9 @@ suite "lifecycle":
 
     check stream.toRead.isNone()
     check doneFut.finished
-    if doneFut.finished:
-      expect StreamResetError:
-        discard await doneFut
+
+    expect StreamResetError:
+      discard await doneFut.wait(timeout)
 
   asyncTest "engine close fails a parked write after a local write shutdown":
     let stream = Stream.new()
@@ -683,9 +696,9 @@ suite "lifecycle":
 
     check stream.toWrite.isNone()
     check doneFut.finished
-    if doneFut.finished:
-      expect StreamError:
-        await doneFut
+
+    expect StreamError:
+      await doneFut.wait(timeout)
 
   asyncTest "abort settles a parked read and a parked write":
     let stream = Stream.new()
@@ -710,11 +723,10 @@ suite "lifecycle":
     check stream.toWrite.isNone()
     check readFut.finished
     check writeFut.finished
-    if readFut.finished:
-      check (await readFut) == 0
-    if writeFut.finished:
-      expect StreamError:
-        await writeFut
+    check (await readFut.wait(timeout)) == 0
+
+    expect StreamError:
+      await writeFut.wait(timeout)
 
   asyncTest "connection close settles a parked write":
     let peers = await connectPeers()
