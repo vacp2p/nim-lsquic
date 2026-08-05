@@ -462,6 +462,33 @@ suite "lifecycle":
     expect QuicConfigError:
       discard QuicEndpoint.new(TLSConfig.new(), AutoAddressIP4, {CanListen})
 
+  asyncTest "dial-only endpoint rejects accept":
+    let endpoint = makeDialEndpoint(AddressFamily.IPv4)
+    defer:
+      await endpoint.stop()
+
+    var rejected = false
+    var message = ""
+    try:
+      discard await endpoint.accept()
+    except TransportError as exc:
+      rejected = true
+      message = exc.msg
+
+    # The stopped endpoint raises TransportError too, so the message is all
+    # that separates it from a capability rejection.
+    check:
+      rejected
+      message == "endpoint is not listen-capable"
+
+  asyncTest "listen-only endpoint rejects dial":
+    let endpoint = makeEndpoint(AutoAddressIP4, {CanListen})
+    defer:
+      await endpoint.stop()
+
+    expect QuicError:
+      discard await endpoint.dial(endpoint.localAddress()).wait(timeout)
+
   asyncTest "endpoint stop is idempotent":
     let endpoint = makeEndpoint(AutoAddressIP4)
 
