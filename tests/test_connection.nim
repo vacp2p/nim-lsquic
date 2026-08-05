@@ -9,7 +9,9 @@ import ./helpers/[address, clientserver, futures, stream, trackers]
 
 initializeLsquic(true, true)
 
-const dialTimeout = 5.seconds
+const
+  dialTimeout = 5.seconds
+  streamTimeout = 5.seconds
 
 proc runConnectionTest(
     listenAddress: TransportAddress, dialAddress: TransportAddress
@@ -106,6 +108,22 @@ proc runEndpointSharedSocketDialTest(address: TransportAddress) {.async.} =
     outgoingConn.localAddress().port == boundAddress.port
     incomingConn.localAddress().port == boundAddress.port
     incomingConn.remoteAddress().port == boundAddress.port
+
+  # The handshake completes without the cid lookup that later packets need.
+  let outgoingBehaviour = proc() {.async.} =
+    let stream = await outgoingConn.openStream()
+
+    await stream.write(@[1'u8, 2, 3, 4, 5])
+    await stream.close()
+
+  let incomingBehaviour = proc() {.async.} =
+    let stream = await incomingConn.incomingStream()
+
+    check (await readStreamTillEOF(stream)) == @[1'u8, 2, 3, 4, 5]
+
+    await stream.close()
+
+  await allFuturesRaising(outgoingBehaviour(), incomingBehaviour()).wait(streamTimeout)
 
   outgoingConn.close()
   incomingConn.close()
