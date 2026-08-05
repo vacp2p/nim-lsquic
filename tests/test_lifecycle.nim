@@ -6,7 +6,6 @@
 import std/sets
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
-import lsquic/[datagram]
 import lsquic/context/[client, context, io, stream]
 import ./helpers/[address, certificate, clientserver, stream, trackers]
 from lsquic/lsquic_ffi import lsquic_stream_ctx_t, lsquic_conn_t
@@ -414,11 +413,11 @@ suite "lifecycle":
     let remote = initTAddress("127.0.0.1:54321")
 
     ctx.stop()
-    ctx.receive(Datagram(data: @[1'u8, 2, 3]), local, remote)
+    check not ctx.packetIn([1'u8, 2, 3], local, remote)
     ctx.processWhenReady()
 
     ctx.destroy()
-    ctx.receive(Datagram(data: @[4'u8, 5, 6]), local, remote)
+    check not ctx.packetIn([4'u8, 5, 6], local, remote)
     ctx.processWhenReady()
 
   asyncTest "connection operations are guarded after context stops":
