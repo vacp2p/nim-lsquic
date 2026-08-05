@@ -1,13 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH
 
-## Tests for CID ownership, datagram header parsing and `routeDatagram`, which
-## uses both to pick the context a datagram belongs to.
-##
-## These are internal; `-d:lsquic_testing` (set in tests/nim.cfg) publishes them,
-## so they are asserted directly instead of through a handshake that would only
-## fail as a timeout.
-
 {.used.}
 
 import chronos, chronos/unittest2/asynctests
