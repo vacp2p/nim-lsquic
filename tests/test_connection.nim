@@ -74,6 +74,53 @@ proc runConnectionTest(
 proc runConnectionTest(address: TransportAddress) {.async.} =
   await runConnectionTest(address, address)
 
+proc runLostInitialDialTest(address: TransportAddress) {.async.} =
+  let server = makeServer()
+  let listener = server.listen(address)
+  let serverAddress = listener.localAddress()
+
+  var
+    clientAddress: TransportAddress
+    dropped = 0
+    proxyError: string
+
+  # Drops the client's first datagram: the Initial that opens the handshake.
+  proc onReceive(
+      proxy: DatagramTransport, remote: TransportAddress
+  ) {.async: (raises: []).} =
+    try:
+      let msg = proxy.getMessage()
+      if remote != serverAddress:
+        clientAddress = remote
+        if dropped == 0:
+          dropped.inc
+          return
+        await proxy.sendTo(serverAddress, msg)
+      else:
+        await proxy.sendTo(clientAddress, msg)
+    except CatchableError as exc:
+      proxyError = exc.msg
+
+  let proxy = newDatagramTransport(onReceive, local = address)
+  let client = makeClient()
+  defer:
+    await allFutures(client.stop(), listener.stop())
+    await proxy.closeWait()
+
+  let accepting = listener.accept()
+
+  # The handshake gets through only if the engine retransmits the dropped Initial.
+  let outgoingConn = await client.dial(proxy.localAddress()).wait(dialTimeout)
+  let incomingConn = await accepting.wait(dialTimeout)
+
+  check:
+    dropped == 1
+    proxyError.len == 0
+
+  outgoingConn.close()
+  incomingConn.close()
+  await allFutures(outgoingConn.closedFuture(), incomingConn.closedFuture())
+
 proc runEndpointAcceptTest(address: TransportAddress) {.async.} =
   let client = makeClient()
   let endpoint = makeEndpoint(address, {CanListen})
@@ -325,6 +372,9 @@ suite "connection":
 
   asyncTest "ipv6 dual-stack listener accepts ipv4 dial":
     await runConnectionTest(WildcardIP6, AutoAddressIP4)
+
+  asyncTest "dial completes when the initial packet is dropped":
+    await runLostInitialDialTest(AutoAddressIP4)
 
   asyncTest "multiple concurrent stream opens":
     await runConcurrentStreamOpenTest(AutoAddressIP4)
