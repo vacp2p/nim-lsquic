@@ -27,7 +27,7 @@ suite "lifecycle":
     await listener.stop()
 
     expect TransportError:
-      discard await accepting
+      discard await accepting.wait(timeout)
 
   asyncTest "listener stop fails all pending accepts":
     let server = makeServer()
@@ -39,11 +39,11 @@ suite "lifecycle":
     await listener.stop()
 
     expect TransportError:
-      discard await accepting1
+      discard await accepting1.wait(timeout)
     expect TransportError:
-      discard await accepting2
+      discard await accepting2.wait(timeout)
     expect TransportError:
-      discard await accepting3
+      discard await accepting3.wait(timeout)
 
   asyncTest "connection close propagates to peer":
     let peers = await connectPeers()
@@ -129,7 +129,7 @@ suite "lifecycle":
     peers.outgoing.abort()
 
     expect ConnectionClosedError:
-      discard await incomingWaiting
+      discard await incomingWaiting.wait(timeout)
 
   asyncTest "cancel pending outgoing streams clears queue":
     let quicConn = QuicConnection(incoming: newAsyncQueue[Stream]())
@@ -141,9 +141,9 @@ suite "lifecycle":
     quicConn.cancelPending()
 
     expect ConnectionError:
-      await pending1
+      await pending1.wait(timeout)
     expect ConnectionError:
-      await pending2
+      await pending2.wait(timeout)
     check quicConn.popPendingStream(nil).isNone()
 
   asyncTest "abort after open stream still closes connection":
@@ -533,7 +533,7 @@ suite "lifecycle":
       stream.toRead.isNone()
 
     expect StreamResetError:
-      discard await doneFut
+      discard await doneFut.wait(timeout)
 
   asyncTest "peer write reset fails a parked write":
     let stream = Stream.new()
@@ -618,7 +618,7 @@ suite "lifecycle":
     stream.readLock.release()
 
     expect StreamResetError:
-      discard await reading
+      discard await reading.wait(timeout)
 
   asyncTest "write waiting for the write lock sees the stream closed by the engine":
     let stream = Stream.new()
@@ -632,7 +632,7 @@ suite "lifecycle":
     stream.writeLock.release()
 
     expect StreamError:
-      await writing
+      await writing.wait(timeout)
 
   asyncTest "write waiting for the write lock sees a peer reset":
     let stream = Stream.new()
@@ -646,7 +646,7 @@ suite "lifecycle":
     stream.writeLock.release()
 
     expect StreamResetError:
-      await writing
+      await writing.wait(timeout)
 
   # One test per close path, pinning the rule that each settles the parked
   # operation itself.
