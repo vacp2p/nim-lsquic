@@ -9,6 +9,8 @@ import ./helpers/[address, certificate, clientserver, trackers]
 
 initializeLsquic(true, true)
 
+const dialTimeout = 5.seconds
+
 type RejectVerifierRecorder = ref object
   rejectCount: int
   fired: AsyncEvent
@@ -242,7 +244,7 @@ suite "certificate verifier":
       await allFutures(client.stop(), listener.stop())
 
     expect DialError:
-      discard await client.dial(listener.localAddress())
+      discard await client.dial(listener.localAddress()).wait(dialTimeout)
 
   asyncTest "server-side verifier callback does not fail handshake without client auth":
     let recorder = RejectVerifierRecorder(fired: newAsyncEvent())

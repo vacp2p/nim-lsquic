@@ -55,6 +55,44 @@ suite "lifecycle":
     check (await peers.incoming.closedFuture().withTimeout(timeout))
     check peers.incoming.isClosed
 
+  asyncTest "connection close resets the peer's stream":
+    # TODO: vacp2p/nim-lsquic#136
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[1'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+    var firstByte = newSeq[byte](1)
+    check (await incomingStream.readOnce(firstByte)) == 1
+
+    peers.outgoing.close()
+    check (await peers.incoming.closedFuture().withTimeout(timeout))
+
+    var buf = newSeq[byte](8)
+
+    expect StreamResetError:
+      discard await incomingStream.readOnce(buf).wait(timeout)
+
+  asyncTest "connection abort ends the peer's stream at eof":
+    # TODO: vacp2p/nim-lsquic#136
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[1'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+    var firstByte = newSeq[byte](1)
+    check (await incomingStream.readOnce(firstByte)) == 1
+
+    peers.outgoing.abort()
+    check (await peers.incoming.closedFuture().withTimeout(timeout))
+
+    var buf = newSeq[byte](8)
+    check (await incomingStream.readOnce(buf).wait(timeout)) == 0
+
   asyncTest "accept skips closed connection and client redials":
     let server = makeServer()
     let listener = server.listen(AutoAddressIP4)
@@ -745,6 +783,8 @@ suite "lifecycle":
 
     stream.abort()
 
+    # Unlike close, abort takes the read side down too, so later reads end at eof.
+    check stream.isEof
     check stream.toRead.isNone()
     check stream.toWrite.isNone()
     check readFut.finished
