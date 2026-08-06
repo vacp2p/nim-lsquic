@@ -6,7 +6,7 @@
 import unittest2
 import chronos, chronos/osdefs
 import ../lsquic/context/io
-import ./helpers/address
+import ./helpers/[address, trackers]
 
 proc prepared(local, dest: string): TransportAddress =
   var
@@ -23,6 +23,9 @@ proc prepared(local, dest: string): TransportAddress =
   fromSAddr(addr outStorage, outLen, result)
 
 suite "destination address preparation":
+  teardown:
+    checkTrackers()
+
   test "IPv4 local keeps an IPv4 destination":
     check prepared("192.168.1.10:1000", "192.168.1.20:4433") ==
       initTAddress("192.168.1.20:4433")

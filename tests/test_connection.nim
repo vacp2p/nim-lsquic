@@ -9,7 +9,9 @@ import ./helpers/[address, clientserver, futures, stream, trackers]
 
 initializeLsquic(true, true)
 
-const dialTimeout = 5.seconds
+const
+  dialTimeout = 5.seconds
+  streamTimeout = 5.seconds
 
 proc runConnectionTest(
     listenAddress: TransportAddress, dialAddress: TransportAddress
@@ -59,7 +61,7 @@ proc runConnectionTest(
 
     await stream.close()
 
-  await allFuturesRaising(outgoingBehaviour(), incomingBehaviour())
+  await allFuturesRaising(outgoingBehaviour(), incomingBehaviour()).wait(streamTimeout)
 
   outgoingConn.close()
   incomingConn.close()
@@ -218,7 +220,7 @@ proc runConcurrentStreamOpenTest(address: TransportAddress) {.async.} =
       )(i)
     )
 
-  await allFutures(receiveAll(), allFutures(sendAll))
+  await allFutures(receiveAll(), allFutures(sendAll)).wait(streamTimeout)
 
   for seen in received:
     check seen
@@ -260,7 +262,7 @@ proc runServerInitiatedStreamTest(address: TransportAddress) {.async.} =
 
     await stream.close()
 
-  await allFuturesRaising(serverBehaviour(), clientBehaviour())
+  await allFuturesRaising(serverBehaviour(), clientBehaviour()).wait(streamTimeout)
 
   outgoingConn.close()
   incomingConn.close()
@@ -293,7 +295,7 @@ proc runChunkedReadTest(peers: ConnectedPeers, bufSize, payloadSize: int) {.asyn
 
     await stream.close()
 
-  await allFuturesRaising(sender(), receiver())
+  await allFuturesRaising(sender(), receiver()).wait(streamTimeout)
 
 suite "connection":
   teardown:

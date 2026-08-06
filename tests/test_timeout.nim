@@ -7,7 +7,10 @@ import chronos, chronos/unittest2/asynctests
 import lsquic/timeout
 import ./helpers/trackers
 
-const fireTimeout = 2.seconds
+const
+  earlyDeadline = 50.milliseconds
+  lateDeadline = 2.seconds
+  fireTimeout = 1.seconds
 
 suite "timeout":
   teardown:
@@ -22,8 +25,8 @@ suite "timeout":
         fired.fire()
     )
 
-    timeout.set(400.milliseconds)
-    timeout.set(50.milliseconds)
+    timeout.set(lateDeadline)
+    timeout.set(earlyDeadline)
 
     check (await fired.wait().withTimeout(fireTimeout))
     check fireCount == 1
@@ -37,8 +40,8 @@ suite "timeout":
         fired.fire()
     )
 
-    timeout.set(50.milliseconds)
-    timeout.set(400.milliseconds)
+    timeout.set(earlyDeadline)
+    timeout.set(lateDeadline)
 
     check (await fired.wait().withTimeout(fireTimeout))
     check fireCount == 1

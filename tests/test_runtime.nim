@@ -19,6 +19,11 @@ proc socketReceiveBufferBytes(
     raiseTransportOsError(res.error())
   int(res.get())
 
+proc ignoreDatagram(
+    udp: DatagramTransport, remote: TransportAddress
+) {.async: (raises: []).} =
+  discard
+
 suite "runtime":
   teardown:
     checkTrackers()
@@ -60,9 +65,10 @@ suite "runtime":
 
     check endpoint.datagramTransport().socketReceiveBufferBytes() > 0
 
-  asyncTest "socket receive buffer can be disabled":
+  asyncTest "zero receive buffer keeps the OS default":
     cleanupLsquic()
     initializeLsquic(true, true)
+    let unconfigured = newDatagramTransport(ignoreDatagram, local = AutoAddressIP4)
     let endpoint = QuicEndpoint.new(
       makeTLSConfig(),
       AutoAddressIP4,
@@ -71,9 +77,11 @@ suite "runtime":
     )
     defer:
       await endpoint.stop()
+      await unconfigured.closeWait()
       cleanupLsquic()
 
-    check endpoint.datagramTransport().socketReceiveBufferBytes() > 0
+    check endpoint.datagramTransport().socketReceiveBufferBytes() ==
+      unconfigured.socketReceiveBufferBytes()
 
   asyncTest "socket receive buffer setting is readable":
     cleanupLsquic()
