@@ -226,12 +226,15 @@ suite "datagram routing":
     let outgoing = await dialOnly.dial(listenOnly.localAddress()).wait(dialTimeout)
     let incoming = await accepting.wait(dialTimeout)
 
-    let address = listenOnly.localAddress()
+    let
+      listenAddress = listenOnly.localAddress()
+      dialAddress = dialOnly.localAddress()
     check:
       # one engine on the socket, so the cid is never read
-      listenOnly.routeDatagram(shortHeaderPacket(UnknownCid), address, address) ==
-        {rtServer}
-      dialOnly.routeDatagram(shortHeaderPacket(UnknownCid), address, address) ==
+      listenOnly.routeDatagram(
+        shortHeaderPacket(UnknownCid), listenAddress, dialAddress
+      ) == {rtServer}
+      dialOnly.routeDatagram(shortHeaderPacket(UnknownCid), dialAddress, listenAddress) ==
         {rtClient}
 
     outgoing.close()
