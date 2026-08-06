@@ -17,6 +17,11 @@ type VerifierRecorder = ref object
   count: int
   fired: AsyncEvent
 
+type ServerNameRecorder = ref object
+  serverName: string
+  count: int
+  fired: AsyncEvent
+
 proc acceptingCertificateCb(
     serverName: string, derCertificates: seq[seq[byte]]
 ): bool {.gcsafe.} =
@@ -55,6 +60,13 @@ proc makeCertificateCb(
       derCertificates.len > 0
     else:
       false
+
+proc makeRecordingCertificateCb(recorder: ServerNameRecorder): certificateVerifierCB =
+  return proc(serverName: string, _: seq[seq[byte]]): bool {.gcsafe.} =
+    recorder.serverName = serverName
+    inc recorder.count
+    recorder.fired.fire()
+    true
 
 proc makeClientWithoutVerifier(): QuicClient {.raises: [QuicConfigError].} =
   QuicClient.new(
@@ -103,6 +115,34 @@ suite "certificate verifier":
     check:
       outgoing.certificates().len == 1
       incoming.certificates().len == 1
+
+    outgoing.close()
+    incoming.close()
+
+  asyncTest "verifier receives an empty server name":
+    # TODO: vacp2p/nim-lsquic#138
+    let clientRecorder = ServerNameRecorder(fired: newAsyncEvent())
+    let serverRecorder = ServerNameRecorder(fired: newAsyncEvent())
+    let client = makeClient(
+      CustomCertificateVerifier.init(clientRecorder.makeRecordingCertificateCb())
+    )
+    let server = makeServer(
+      CustomCertificateVerifier.init(serverRecorder.makeRecordingCertificateCb())
+    )
+    let listener = server.listen(AutoAddressIP4)
+    defer:
+      await allFutures(client.stop(), listener.stop())
+
+    let accepting = listener.accept()
+    let outgoing = await client.dial(listener.localAddress())
+    let incoming = await accepting
+    check (await serverRecorder.fired.wait().withTimeout(2.seconds))
+
+    check:
+      clientRecorder.count == 1
+      clientRecorder.serverName == ""
+      serverRecorder.count == 1
+      serverRecorder.serverName == ""
 
     outgoing.close()
     incoming.close()
