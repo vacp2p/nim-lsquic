@@ -477,4 +477,4 @@ when defined(lsquic_testing):
     ## Test-only: number of connections tracked by this endpoint's manager.
     endpoint.connman.len
 
-  export scidLen, packetDcid, isIetfInitial
+  export scidLen, packetDcid, isIetfInitial, routeDatagram, RouteTarget
