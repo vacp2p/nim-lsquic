@@ -52,6 +52,9 @@ proc newTrackingContext(T: typedesc): T =
   ctx
 
 suite "cid ownership":
+  teardown:
+    checkTrackers()
+
   test "registered cids are owned, unknown ones are not":
     let ctx = newTrackingContext(ClientContext)
 
@@ -161,6 +164,9 @@ func shortHeaderPacket(dcid: CidKey, firstByte: byte = ShortFirstByte): seq[byte
   packet
 
 suite "datagram header parsing":
+  teardown:
+    checkTrackers()
+
   test "the short header cid is read at the engine's cid width":
     # a short header carries no length byte, so this width is the only thing
     # that tells the endpoint where the routing cid ends

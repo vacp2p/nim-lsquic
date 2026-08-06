@@ -6,7 +6,6 @@
 import std/sets
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
-import lsquic/[datagram]
 import lsquic/context/[client, context, io, stream]
 import ./helpers/[address, certificate, clientserver, stream, trackers]
 from lsquic/lsquic_ffi import lsquic_stream_ctx_t, lsquic_conn_t
@@ -27,7 +26,7 @@ suite "lifecycle":
     await listener.stop()
 
     expect TransportError:
-      discard await accepting
+      discard await accepting.wait(timeout)
 
   asyncTest "listener stop fails all pending accepts":
     let server = makeServer()
@@ -39,11 +38,11 @@ suite "lifecycle":
     await listener.stop()
 
     expect TransportError:
-      discard await accepting1
+      discard await accepting1.wait(timeout)
     expect TransportError:
-      discard await accepting2
+      discard await accepting2.wait(timeout)
     expect TransportError:
-      discard await accepting3
+      discard await accepting3.wait(timeout)
 
   asyncTest "connection close propagates to peer":
     let peers = await connectPeers()
@@ -167,7 +166,7 @@ suite "lifecycle":
     peers.outgoing.abort()
 
     expect ConnectionClosedError:
-      discard await incomingWaiting
+      discard await incomingWaiting.wait(timeout)
 
   asyncTest "cancel pending outgoing streams clears queue":
     let quicConn = QuicConnection(incoming: newAsyncQueue[Stream]())
@@ -179,9 +178,9 @@ suite "lifecycle":
     quicConn.cancelPending()
 
     expect ConnectionError:
-      await pending1
+      await pending1.wait(timeout)
     expect ConnectionError:
-      await pending2
+      await pending2.wait(timeout)
     check quicConn.popPendingStream(nil).isNone()
 
   asyncTest "abort after open stream still closes connection":
@@ -452,11 +451,11 @@ suite "lifecycle":
     let remote = initTAddress("127.0.0.1:54321")
 
     ctx.stop()
-    ctx.receive(Datagram(data: @[1'u8, 2, 3]), local, remote)
+    check not ctx.packetIn([1'u8, 2, 3], local, remote)
     ctx.processWhenReady()
 
     ctx.destroy()
-    ctx.receive(Datagram(data: @[4'u8, 5, 6]), local, remote)
+    check not ctx.packetIn([4'u8, 5, 6], local, remote)
     ctx.processWhenReady()
 
   asyncTest "connection operations are guarded after context stops":
@@ -500,6 +499,33 @@ suite "lifecycle":
     # before any socket or context is created.
     expect QuicConfigError:
       discard QuicEndpoint.new(TLSConfig.new(), AutoAddressIP4, {CanListen})
+
+  asyncTest "dial-only endpoint rejects accept":
+    let endpoint = makeDialEndpoint(AddressFamily.IPv4)
+    defer:
+      await endpoint.stop()
+
+    var rejected = false
+    var message = ""
+    try:
+      discard await endpoint.accept()
+    except TransportError as exc:
+      rejected = true
+      message = exc.msg
+
+    # The stopped endpoint raises TransportError too, so the message is all
+    # that separates it from a capability rejection.
+    check:
+      rejected
+      message == "endpoint is not listen-capable"
+
+  asyncTest "listen-only endpoint rejects dial":
+    let endpoint = makeEndpoint(AutoAddressIP4, {CanListen})
+    defer:
+      await endpoint.stop()
+
+    expect QuicError:
+      discard await endpoint.dial(endpoint.localAddress()).wait(timeout)
 
   asyncTest "endpoint stop is idempotent":
     let endpoint = makeEndpoint(AutoAddressIP4)
@@ -571,7 +597,7 @@ suite "lifecycle":
       stream.toRead.isNone()
 
     expect StreamResetError:
-      discard await doneFut
+      discard await doneFut.wait(timeout)
 
   asyncTest "peer write reset fails a parked write":
     let stream = Stream.new()
@@ -611,6 +637,21 @@ suite "lifecycle":
     expect AssertionDefect:
       discard await stream.readOnce(nil, 8)
 
+  asyncTest "nil write source is rejected":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+
+    expect AssertionDefect:
+      await stream.write(nil, 8)
+
+  asyncTest "zero length writes ignore a nil source":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+
+    await stream.write(nil, 0)
+
   asyncTest "read waiting for the read lock sees the stream closed by the engine":
     let stream = Stream.new()
     defer:
@@ -641,7 +682,7 @@ suite "lifecycle":
     stream.readLock.release()
 
     expect StreamResetError:
-      discard await reading
+      discard await reading.wait(timeout)
 
   asyncTest "write waiting for the write lock sees the stream closed by the engine":
     let stream = Stream.new()
@@ -655,7 +696,7 @@ suite "lifecycle":
     stream.writeLock.release()
 
     expect StreamError:
-      await writing
+      await writing.wait(timeout)
 
   asyncTest "write waiting for the write lock sees a peer reset":
     let stream = Stream.new()
@@ -669,7 +710,7 @@ suite "lifecycle":
     stream.writeLock.release()
 
     expect StreamResetError:
-      await writing
+      await writing.wait(timeout)
 
   # One test per close path, pinning the rule that each settles the parked
   # operation itself.
@@ -685,10 +726,8 @@ suite "lifecycle":
     onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # also releases the pin
 
     check stream.toRead.isNone()
-    # guarded so a regression fails this test instead of parking the suite
     check doneFut.finished
-    if doneFut.finished:
-      check (await doneFut) == 0
+    check (await doneFut.wait(timeout)) == 0
 
   asyncTest "engine close fails a parked read after a peer read reset":
     let stream = Stream.new()
@@ -704,9 +743,9 @@ suite "lifecycle":
 
     check stream.toRead.isNone()
     check doneFut.finished
-    if doneFut.finished:
-      expect StreamResetError:
-        discard await doneFut
+
+    expect StreamResetError:
+      discard await doneFut.wait(timeout)
 
   asyncTest "engine close fails a parked write after a local write shutdown":
     let stream = Stream.new()
@@ -721,9 +760,9 @@ suite "lifecycle":
 
     check stream.toWrite.isNone()
     check doneFut.finished
-    if doneFut.finished:
-      expect StreamError:
-        await doneFut
+
+    expect StreamError:
+      await doneFut.wait(timeout)
 
   asyncTest "abort settles a parked read and a parked write":
     let stream = Stream.new()
@@ -750,11 +789,10 @@ suite "lifecycle":
     check stream.toWrite.isNone()
     check readFut.finished
     check writeFut.finished
-    if readFut.finished:
-      check (await readFut) == 0
-    if writeFut.finished:
-      expect StreamError:
-        await writeFut
+    check (await readFut.wait(timeout)) == 0
+
+    expect StreamError:
+      await writeFut.wait(timeout)
 
   asyncTest "connection close settles a parked write":
     let peers = await connectPeers()
