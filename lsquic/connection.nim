@@ -105,34 +105,48 @@ proc dial*(
     nil
   retFut
 
+proc takeQueuedStream(connection: Connection): Opt[Stream] {.raises: [].} =
+  try:
+    Opt.some(connection.quicConn.incoming.getNoWait())
+  except AsyncQueueEmptyError:
+    Opt.none(Stream)
+
+proc waitForIncomingStream(
+    connection: Connection
+): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
+  let incomingFut = connection.quicConn.incomingStream()
+
+  try:
+    discard await race(incomingFut, connection.closedWaiter)
+    if incomingFut.finished:
+      return await incomingFut
+
+    await incomingFut.cancelAndWait()
+  except CancelledError as exc:
+    if not incomingFut.finished:
+      await incomingFut.cancelAndWait()
+    raise exc
+
+  let queued = connection.takeQueuedStream()
+  if queued.isSome:
+    return queued.get()
+
+  raise newException(ConnectionClosedError, "connection closed")
+
 proc incomingStream*(
     connection: Connection
 ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
   if connection.quicConn.closedLocal:
     raise newException(ConnectionClosedError, "connection closed")
 
-  var stream: Stream
-  try:
-    stream = connection.quicConn.incoming.getNoWait()
-  except AsyncQueueEmptyError:
-    if connection.isClosed:
+  let queued = connection.takeQueuedStream()
+  let stream =
+    if queued.isSome:
+      queued.get()
+    elif connection.isClosed:
       raise newException(ConnectionClosedError, "connection closed")
-
-    let incomingFut = connection.quicConn.incomingStream()
-    try:
-      let raceFut = await race(incomingFut, connection.closedWaiter)
-      if raceFut == connection.closedWaiter and not incomingFut.finished:
-        await incomingFut.cancelAndWait()
-        try:
-          stream = connection.quicConn.incoming.getNoWait()
-        except AsyncQueueEmptyError:
-          raise newException(ConnectionClosedError, "connection closed")
-      else:
-        stream = await incomingFut
-    except CancelledError as exc:
-      if not incomingFut.finished:
-        await incomingFut.cancelAndWait()
-      raise exc
+    else:
+      await connection.waitForIncomingStream()
   stream.doProcess = proc(urgent: bool) {.gcsafe, raises: [].} =
     if urgent:
       connection.quicContext.processWhenReady()
