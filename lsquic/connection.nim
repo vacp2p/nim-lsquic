@@ -129,10 +129,10 @@ proc incomingStream*(
           raise newException(ConnectionClosedError, "connection closed")
       else:
         stream = await incomingFut
-    except CancelledError:
+    except CancelledError as exc:
       if not incomingFut.finished:
         await incomingFut.cancelAndWait()
-      raise
+      raise exc
   stream.doProcess = proc(urgent: bool) {.gcsafe, raises: [].} =
     if urgent:
       connection.quicContext.processWhenReady()
