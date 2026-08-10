@@ -77,10 +77,14 @@ proc newIncomingConnection*(
     closedWaiter: closedWaiter,
     local: quicConn.local,
     remote: quicConn.remote,
+    isClosed: quicConn.lsquicConn.isNil,
   )
   conn.ensureClosedFut = conn.ensureClosed()
-  conn.quicConn.onClose = proc() {.raises: [].} =
+  if conn.isClosed:
     conn.closed.fire()
+  else:
+    conn.quicConn.onClose = proc() {.raises: [].} =
+      conn.closed.fire()
   conn
 
 proc closedFuture*(connection: Connection): Future[void] {.raises: [].} =
@@ -104,11 +108,16 @@ proc dial*(
 proc incomingStream*(
     connection: Connection
 ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
-  if connection.isClosed:
+  let hasQueuedStream = connection.quicConn.incoming.len > 0
+  if connection.isClosed and not hasQueuedStream:
     raise newException(ConnectionClosedError, "connection closed")
 
   let incomingFut = connection.quicConn.incomingStream()
-  let raceFut = await race(connection.closedWaiter, incomingFut)
+  let raceFut =
+    if hasQueuedStream:
+      incomingFut
+    else:
+      await race(connection.closedWaiter, incomingFut)
   if raceFut == connection.closedWaiter:
     await incomingFut.cancelAndWait()
     raise newException(ConnectionClosedError, "connection closed")

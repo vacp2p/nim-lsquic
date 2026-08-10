@@ -390,7 +390,7 @@ proc accept*(
       raise newException(TransportError, "endpoint is stopped")
 
     let quicConn = await incomingFut
-    if quicConn.lsquicConn.isNil:
+    if quicConn.lsquicConn.isNil and quicConn.incoming.len == 0:
       debug "Dropping already closed incoming connection"
       continue
 
