@@ -22,6 +22,8 @@ type ReadTask* = object
 
 type Stream* = ref object
   quicStream*: ptr lsquic_stream_t
+  canRead*: bool
+  canWrite*: bool
   closedByEngine*: bool
   closeWrite*: bool
   closeRequested: bool
@@ -38,10 +40,18 @@ type Stream* = ref object
   toRead*: Opt[ReadTask]
   doProcess*: proc(urgent: bool) {.gcsafe, raises: [].}
 
-proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
+proc new*(
+    T: typedesc[Stream],
+    quicStream: ptr lsquic_stream_t = nil,
+    canRead = true,
+    canWrite = true,
+): T =
   let closed = newAsyncEvent()
   let s = Stream(
     quicStream: quicStream,
+    canRead: canRead,
+    canWrite: canWrite,
+    closeWrite: not canWrite,
     closed: closed,
     readLock: newAsyncLock(),
     writeLock: newAsyncLock(),
@@ -200,6 +210,9 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
 proc readOnce*(
     stream: Stream, dst: ptr byte, dstLen: int
 ): Future[int] {.async: (raises: [CancelledError, StreamError]).} =
+  if not stream.canRead:
+    raise newException(StreamError, "stream is write-only")
+
   if dstLen == 0:
     return 0
 
@@ -277,6 +290,9 @@ proc write*(
   ## when this proc resumes on a later poll tick. Freeing the buffer between
   ## `cancel()` and that tick is a use-after-free - use `await fut.cancelAndWait()`
   ## or otherwise wait for the future to finish before releasing it.
+  if not stream.canWrite:
+    raise newException(StreamError, "stream is read-only")
+
   if srcLen == 0:
     return
 
@@ -342,6 +358,9 @@ proc write*(
   ##
   ## A caller that keeps its own buffer still pays one copy here, and should use
   ## the pointer overload instead if it can honour that overload's contract.
+  if not stream.canWrite:
+    raise newException(StreamError, "stream is read-only")
+
   if data.len == 0:
     return
   await stream.write(data[0].addr, data.len)

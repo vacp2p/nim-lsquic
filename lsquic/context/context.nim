@@ -410,6 +410,9 @@ proc makeStream*(
     raise newException(ConnectionClosedError, "connection closed")
   lsquic_conn_make_stream(quicConn.lsquicConn)
 
+func isUnidirectional*(streamId: lsquic_stream_id_t): bool {.raises: [].} =
+  (streamId and 2) != 0
+
 proc onNewStream*(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
@@ -437,7 +440,7 @@ proc onNewStream*(
       discard lsquic_stream_wantwrite(stream, 1)
       s
     else:
-      let s = Stream.new(stream)
+      let s = Stream.new(stream, canWrite = not isUnidirectional(stream_id.uint64))
       quicConn.incoming.putNoWait(s)
       # Whoever opens the stream reads first
       discard lsquic_stream_wantread(stream, 1)
