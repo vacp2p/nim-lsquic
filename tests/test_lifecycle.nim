@@ -131,6 +131,46 @@ suite "lifecycle":
     outgoing.close()
     incoming.close()
 
+  asyncTest "pending accept observes connection before immediate client close":
+    let server = makeServer()
+    let listener = server.listen(AutoAddressIP4)
+    let client = makeClient()
+    let accepted = listener.accept()
+    defer:
+      if not accepted.finished:
+        await accepted.cancelAndWait()
+      await allFutures(client.stop(), listener.stop())
+
+    let outgoing = await client.dial(listener.localAddress())
+    let outgoingStream = await outgoing.openStream()
+    await outgoingStream.close()
+    outgoing.close()
+
+    check (await accepted.withTimeout(timeout))
+    let incoming = await accepted
+    check (await incoming.closedFuture().withTimeout(timeout))
+    let incomingStream = incoming.incomingStream()
+    expect ConnectionClosedError:
+      discard await incoming.incomingStream().wait(timeout)
+
+    let stream = await incomingStream
+    var buf = newSeq[byte](1)
+    check (await stream.readOnce(buf)) == 0
+
+  asyncTest "pending incoming stream survives immediate client close":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let incomingStream = peers.incoming.incomingStream()
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.close()
+    peers.outgoing.close()
+
+    let stream = await incomingStream.wait(timeout)
+    var buf = newSeq[byte](1)
+    check (await stream.readOnce(buf)) == 0
+
   asyncTest "client stop closes active connections":
     let peers = await connectPeers()
 
