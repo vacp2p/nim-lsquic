@@ -3,8 +3,10 @@
 
 import chronicles
 import chronos, results
+import chronos/osdefs
 import ./[errors, stream, lsquic_ffi, certificateverifier]
 import ./context/context
+import ./helpers/transportaddr
 
 type
   Connection* = ref object of RootObj
@@ -179,4 +181,16 @@ proc localAddress*(connection: Connection): TransportAddress {.raises: [].} =
   connection.local
 
 proc remoteAddress*(connection: Connection): TransportAddress {.raises: [].} =
+  if not connection.quicConn.isNil and not connection.quicConn.lsquicConn.isNil:
+    var local, remote: ptr SockAddr
+    if lsquic_conn_get_sockaddr(
+      connection.quicConn.lsquicConn, addr local, addr remote
+    ) == 0 and not remote.isNil:
+      connection.remote = remote.toTransportAddress()
   connection.remote
+
+when defined(lsquic_testing):
+  proc setCachedRemoteAddressForTest*(
+      connection: Connection, remote: TransportAddress
+  ) {.raises: [].} =
+    connection.remote = remote

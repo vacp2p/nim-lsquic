@@ -31,6 +31,10 @@ proc runConnectionTest(
   let outgoingConn = await dialing
   let incomingConn = await accepting
 
+  var staleRemote = effectiveDialAddress
+  staleRemote.port = Port(1)
+  outgoingConn.setCachedRemoteAddressForTest(staleRemote)
+
   check:
     outgoingConn.certificates().len == 1
     incomingConn.certificates().len == 1
