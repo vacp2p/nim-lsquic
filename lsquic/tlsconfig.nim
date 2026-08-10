@@ -30,6 +30,12 @@ proc new*(
 
   var alpnWire = newString(0)
   for a in alpn:
+    if a.len == 0 or a.len > 255:
+      raise newException(
+        QuicConfigError, "ALPN protocol names must contain 1 to 255 bytes"
+      )
+    if alpnWire.len > high(uint16).int - (a.len + 1):
+      raise newException(QuicConfigError, "ALPN protocol list is too long")
     alpnWire.add chr(a.len)
     alpnWire.add a
 
