@@ -148,9 +148,28 @@ suite "lifecycle":
 
     check (await accepted.withTimeout(timeout))
     let incoming = await accepted
-    let incomingStream = await incoming.incomingStream()
+    check (await incoming.closedFuture().withTimeout(timeout))
+    let incomingStream = incoming.incomingStream()
+    expect ConnectionClosedError:
+      discard await incoming.incomingStream().wait(timeout)
+
+    let stream = await incomingStream
     var buf = newSeq[byte](1)
-    check (await incomingStream.readOnce(buf)) == 0
+    check (await stream.readOnce(buf)) == 0
+
+  asyncTest "pending incoming stream survives immediate client close":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let incomingStream = peers.incoming.incomingStream()
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.close()
+    peers.outgoing.close()
+
+    let stream = await incomingStream.wait(timeout)
+    var buf = newSeq[byte](1)
+    check (await stream.readOnce(buf)) == 0
 
   asyncTest "client stop closes active connections":
     let peers = await connectPeers()
