@@ -236,7 +236,7 @@ proc cancelPending*(quicConn: QuicConnection) =
 
     pending.stream.closedByEngine = true
     pending.stream.closeWrite = true
-    pending.stream.isEof = true
+    pending.stream.markReadFailed("connection closed before stream opened")
     if not pending.stream.closed.isSet():
       pending.stream.closed.fire()
     unpin(pending.stream)

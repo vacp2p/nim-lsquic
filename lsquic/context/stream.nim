@@ -44,9 +44,6 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   streamCtx.abortPendingWrites("stream closed")
 
-  if not streamCtx.readResetByPeer():
-    streamCtx.isEof = true
-
   # Always signal closure so waiters are released, even if we already shut down
   # the write side locally.
   if not streamCtx.closed.isSet():
@@ -54,9 +51,11 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   if streamCtx.readResetByPeer():
     streamCtx.failPendingRead(streamCtx.newStreamResetError("stream read"))
-  else:
-    # A clean close is end of stream: report 0 rather than failing.
+  elif streamCtx.isEof:
     streamCtx.completePendingRead()
+  else:
+    streamCtx.markReadFailed("stream closed before end of stream")
+    streamCtx.failPendingRead(newException(StreamError, streamCtx.readFailure))
 
   unpin(streamCtx)
 
@@ -74,7 +73,8 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       streamCtx.abort()
     return
 
-  let n = lsquic_stream_read(stream, task.data, task.dataLen.csize_t)
+  var receivedFin = false
+  let n = readFromStream(stream, task.data, task.dataLen, receivedFin)
 
   if n < 0:
     if errno == EWOULDBLOCK:
@@ -90,16 +90,16 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       streamCtx.abort()
       return
 
-  if n == 0:
+  if receivedFin:
     streamCtx.isEof = true
+  if n == 0 and streamCtx.isEof:
     if not streamCtx.closeIfDone():
       trace "could not close stream after EOF", streamId = lsquic_stream_id(stream)
       streamCtx.failPendingRead(newException(StreamError, "could not close the stream"))
       streamCtx.abort()
       return
 
-  # abort settles a pending read with 0, so report the bytes first or they are
-  # lost. The guard covers closeIfDone above having re-entered onClose.
+  # Report bytes before clearing the task. closeIfDone above may re-enter onClose.
   if not task.doneFut.finished:
     task.doneFut.complete(int(n))
 
