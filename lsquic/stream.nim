@@ -99,12 +99,13 @@ proc readToBuffer(
     ctx: pointer, data: ptr uint8, dataLen: csize_t, fin: cint
 ): csize_t {.cdecl, raises: [].} =
   let readCtx = cast[ptr ReadContext](ctx)
-  let count = min(dataLen.int, readCtx.dataLen - readCtx.offset)
+  let remaining = readCtx.dataLen - readCtx.offset
+  let count = min(dataLen, remaining.csize_t).int
   if count > 0:
     let dst = cast[ptr UncheckedArray[byte]](readCtx.data)
     copyMem(addr dst[readCtx.offset], data, count)
     readCtx.offset += count
-  if fin != 0 and count == dataLen.int:
+  if fin != 0 and count.csize_t == dataLen:
     readCtx.receivedFin = true
   count.csize_t
 
