@@ -470,14 +470,8 @@ suite "lifecycle":
 
     check isReset
 
-  asyncTest "vanished peer ends the stream at eof without a fin":
-    # TODO: vacp2p/nim-lsquic#140
-    # Skipped: reaching the case costs the 30s fixed lsquic idle timeout
-    skip()
-    return
-
-    # The peer's socket disappears mid-stream, so it never sends a FIN, yet the
-    # reader is handed the same end of stream a FIN produces.
+  asyncTest "vanished peer fails the stream without a fin":
+    # The peer's socket disappears mid-stream, so it never sends a FIN.
     let server = makeEndpoint(AutoAddressIP4)
     let client = makeDialEndpoint(AddressFamily.IPv4)
     defer:
@@ -497,8 +491,9 @@ suite "lifecycle":
     await server.datagramTransport().closeWait()
 
     var buf = newSeq[byte](8)
-    check (await clientStream.readOnce(buf).wait(45.seconds)) == 0
-    check clientStream.isEof
+    expect StreamError:
+      discard await clientStream.readOnce(buf).wait(45.seconds)
+    check not clientStream.isEof
     check not clientStream.resetByPeer
 
   asyncTest "zero length reads return zero":
