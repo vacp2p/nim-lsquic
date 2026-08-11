@@ -449,7 +449,8 @@ proc dial*(
 
   if endpoint.tlsConfig.certVerifier.isNone:
     raise newException(
-      QuicError, "certificate verifier is required; use dial(address, serverName, certVerifier)"
+      QuicError,
+      "certificate verifier is required; use dial(address, serverName, certVerifier)",
     )
 
   await endpoint.dial(address, serverName, Opt.none(CertificateVerifier))
