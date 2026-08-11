@@ -48,6 +48,23 @@ proc dial*(
 .} =
   await self.getEndpoint(address.family).dial(address, certVerifier)
 
+proc dial*(
+    self: QuicClient, address: TransportAddress, serverName: string
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  await self.getEndpoint(address.family).dial(address, serverName)
+
+proc dial*(
+    self: QuicClient,
+    address: TransportAddress,
+    serverName: string,
+    certVerifier: CertificateVerifier,
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  await self.getEndpoint(address.family).dial(address, serverName, certVerifier)
+
 proc stop*(self: QuicClient) {.async: (raises: [CancelledError]).} =
   var stops: seq[Future[void]]
   if not self.ip4Endpoint.isNil:
