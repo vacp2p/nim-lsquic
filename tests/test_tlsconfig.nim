@@ -82,22 +82,23 @@ suite "tls config":
       cfg.alpnWire.decodeAlpnWire() == makeAlpnSet(protocol)
 
   test "alpn value over 255 bytes is not encodable":
-    # TODO: vacp2p/nim-lsquic#113
-    # TLSConfig.new does not validate the protocol length, so chr(len) trips the range check
-    # and a RangeDefect escapes an API that reports every other misconfiguration as a QuicConfigError.
     let alpn = makeAlpnSet(repeat('a', 256))
 
-    expect RangeDefect:
+    expect QuicConfigError:
       discard TLSConfig.new(testCertificate(), testPrivateKey(), alpn)
 
-  test "empty alpn value encodes to a zero length entry":
-    # TODO: vacp2p/nim-lsquic#113
-    # RFC 7301 forbids an empty protocol name, but TLSConfig.new emits one and
-    # reports nothing. BoringSSL rejects the buffer later, at dial time, where it
-    # surfaces as AssertionDefect instead of a QuicConfigError.
-    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), makeAlpnSet(""))
+  test "empty alpn value is not encodable":
+    expect QuicConfigError:
+      discard TLSConfig.new(testCertificate(), testPrivateKey(), makeAlpnSet(""))
 
-    check cfg.alpnWire == "\x00"
+  test "alpn protocol list cannot exceed 65535 bytes":
+    var alpn = initHashSet[string]()
+    for i in 0 .. 256:
+      let prefix = $i
+      alpn.incl(prefix & repeat('a', 255 - prefix.len))
+
+    expect QuicConfigError:
+      discard TLSConfig.new(testCertificate(), testPrivateKey(), alpn)
 
   test "valid pem certificate parses":
     let parsed = testCertificate().toX509()
