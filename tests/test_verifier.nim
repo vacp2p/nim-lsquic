@@ -153,12 +153,10 @@ suite "certificate verifier":
   asyncTest "dial hostname is sent as SNI and reaches both verifiers":
     let clientRecorder = VerifierRecorder(fired: newAsyncEvent())
     let serverRecorder = VerifierRecorder(fired: newAsyncEvent())
-    let client = makeClient(
-      CustomCertificateVerifier.init(clientRecorder.makeCertificateCb(true))
-    )
-    let server = makeServer(
-      CustomCertificateVerifier.init(serverRecorder.makeCertificateCb(true))
-    )
+    let client =
+      makeClient(CustomCertificateVerifier.init(clientRecorder.makeCertificateCb(true)))
+    let server =
+      makeServer(CustomCertificateVerifier.init(serverRecorder.makeCertificateCb(true)))
     let listener = server.listen(AutoAddressIP4)
     defer:
       await allFutures(client.stop(), listener.stop())
