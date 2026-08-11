@@ -181,11 +181,16 @@ proc localAddress*(connection: Connection): TransportAddress {.raises: [].} =
   connection.local
 
 proc remoteAddress*(connection: Connection): TransportAddress {.raises: [].} =
-  if not connection.quicConn.isNil and not connection.quicConn.lsquicConn.isNil:
-    var local, remote: ptr SockAddr
-    if lsquic_conn_get_sockaddr(connection.quicConn.lsquicConn, addr local, addr remote) ==
-        0 and not remote.isNil:
-      connection.remote = remote.toTransportAddress()
+  ## Returns the current remote address while the connection is live, falling
+  ## back to the last cached address after closure.
+  if connection.quicConn.isNil or connection.quicConn.lsquicConn.isNil:
+    return connection.remote
+
+  var local, remote: ptr SockAddr
+  if lsquic_conn_get_sockaddr(connection.quicConn.lsquicConn, addr local, addr remote) ==
+      0 and not remote.isNil:
+    connection.remote = remote.toTransportAddress()
+
   connection.remote
 
 when defined(lsquic_testing):
