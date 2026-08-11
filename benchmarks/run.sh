@@ -129,9 +129,10 @@ SUMMARY_FILE="$RESULTS_DIR/summary_${TIMESTAMP}.txt"
 JSON_DIR="$RESULTS_DIR/json_${TIMESTAMP}"
 mkdir -p "$JSON_DIR"
 
-printf "\n%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s\n" \
-  "Scenario" "Mode" "Conns" "Strms" "Upload" "Download" "Lat p50" "Lat p95" "Duration" | tee "$SUMMARY_FILE"
-printf "%s\n" "$(printf '=%.0s' {1..120})" | tee -a "$SUMMARY_FILE"
+printf "\n%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s %-11s %-11s %-9s\n" \
+  "Scenario" "Mode" "Conns" "Strms" "Upload" "Download" "Lat p50" "Lat p95" "Stalls" \
+  "Duration" "CPU cli" "CPU srv" "Peak RSS" | tee "$SUMMARY_FILE"
+printf "%s\n" "$(printf '=%.0s' {1..168})" | tee -a "$SUMMARY_FILE"
 
 run_bench() {
   local scenario_str="$1"
@@ -184,8 +185,8 @@ run_bench() {
       --wait-timeout "$WAIT_TIMEOUT" \
       bench-server >/dev/null 2>&1; then
     echo "FAILED (server startup)"
-    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s\n" \
-      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" \
+    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s %-11s %-11s %-9s\n" \
+      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" "-" "-" "-" "-" \
       | tee -a "$SUMMARY_FILE"
     env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans \
       >/dev/null 2>&1 || true
@@ -193,39 +194,82 @@ run_bench() {
   fi
 
   # Only attach to bench-client so the output contains bench_client logs only.
-  local raw_output client_status output
+  # Keep the client's stderr: an unhandled exception traceback is the only clue
+  # to why a run died, and discarding it makes failures undiagnosable.
+  #
+  # `run` rather than `up --abort-on-container-exit`: the latter tears down the
+  # server as part of the same invocation, destroying its cgroup before the
+  # server-side CPU/memory counters can be read.
+  local raw_output client_status output log_file
+  log_file="$JSON_DIR/${run_name}.log"
   set +e
   raw_output=$(
-    env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" up \
+    env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" run \
+      --rm \
       --no-deps \
-      --abort-on-container-exit \
-      --exit-code-from bench-client \
-      --no-color \
-      --no-log-prefix \
-      bench-client 2>/dev/null
+      -T \
+      bench-client 2>"$log_file"
   )
   client_status=$?
   set -e
 
   output=$(printf "%s\n" "$raw_output" | sed -n '/^{/,/^}/p' || true)
 
+  # Server-side CPU/memory, read while the container is still alive. Much of the
+  # send path (GSO/USO, engine tick coalescing, sink writes) runs on the server,
+  # so the client's own getrusage would miss it. These cgroup counters are
+  # cumulative since container start and the server is recreated for every cell,
+  # so they cover exactly this run.
+  local srv_id srv_cpu_us srv_user_us srv_sys_us srv_mem_peak cpu_stat
+  srv_id=$(env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" ps -q bench-server \
+    2>/dev/null | head -1)
+  srv_cpu_us=""; srv_user_us=""; srv_sys_us=""; srv_mem_peak=""
+  if [ -n "$srv_id" ]; then
+    cpu_stat=$(docker exec "$srv_id" cat /sys/fs/cgroup/cpu.stat 2>/dev/null || true)
+    srv_cpu_us=$(awk '/^usage_usec/{print $2}' <<< "$cpu_stat")
+    srv_user_us=$(awk '/^user_usec/{print $2}' <<< "$cpu_stat")
+    srv_sys_us=$(awk '/^system_usec/{print $2}' <<< "$cpu_stat")
+    srv_mem_peak=$(docker exec "$srv_id" cat /sys/fs/cgroup/memory.peak 2>/dev/null || true)
+  fi
+
   env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans \
     >/dev/null 2>&1 || true
 
   if [ -z "$output" ]; then
+    # Preserve stdout too - the client reports fatal errors there.
+    printf "%s\n" "$raw_output" >> "$log_file"
     if [ "$client_status" -ne 0 ]; then
-      echo "FAILED (bench-client exit $client_status)"
+      echo "FAILED (bench-client exit $client_status, see $log_file)"
     else
-      echo "FAILED (no JSON output)"
+      echo "FAILED (no JSON output, see $log_file)"
     fi
-    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s\n" \
-      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" \
+    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s %-11s %-11s %-9s\n" \
+      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" "-" "-" "-" "-" \
       | tee -a "$SUMMARY_FILE"
     return
   fi
 
-  # Save raw JSON
-  echo "$output" > "$JSON_DIR/${run_name}.json"
+  # Successful runs leave no log behind unless something was written to stderr.
+  [ -s "$log_file" ] || rm -f "$log_file"
+
+  # Save JSON with the server-side counters merged in. Values are passed through
+  # the environment so no shell text ends up inside the python source.
+  SRV_CPU_US="$srv_cpu_us" SRV_USER_US="$srv_user_us" SRV_SYS_US="$srv_sys_us" \
+  SRV_MEM_PEAK="$srv_mem_peak" python3 -c "
+import os, sys, json
+
+def num(name):
+    v = os.environ.get(name, '').strip()
+    return int(v) if v.isdigit() else 0
+
+d = json.load(sys.stdin)
+d['server_cpu_ns'] = num('SRV_CPU_US') * 1000
+d['server_cpu_user_ns'] = num('SRV_USER_US') * 1000
+d['server_cpu_sys_ns'] = num('SRV_SYS_US') * 1000
+d['server_max_rss_bytes'] = num('SRV_MEM_PEAK')
+json.dump(d, sys.stdout, indent=2)
+print()
+" <<< "$output" > "$JSON_DIR/${run_name}.json"
 
   # Parse key metrics with a simple approach
   local duration_ns upload_bps download_bps lat_p50 lat_p95
@@ -294,13 +338,34 @@ if d.get('mode') == 'rampup':
 
 dur_str = fmt_dur(dur_ns)
 
-print(f'{up_str}|{down_str}|{lat_p50_str}|{lat_p95_str}|{dur_str}')
-" <<< "$output" 2>/dev/null | {
-    IFS='|' read -r upload_str download_str lat_p50_str lat_p95_str dur_str
+# CPU is user+sys for the client (getrusage) and the whole cgroup for the
+# server. Peak RSS is the larger of the two sides.
+cli_cpu = d.get('client_cpu_user_ns', 0) + d.get('client_cpu_sys_ns', 0)
+srv_cpu = d.get('server_cpu_ns', 0)
+peak_rss = max(d.get('client_max_rss_bytes', 0), d.get('server_max_rss_bytes', 0))
+
+def fmt_mib(b):
+    return '-' if b <= 0 else f'{b/1048576:.1f} MiB'
+
+cli_cpu_str = fmt_dur(cli_cpu) if cli_cpu > 0 else '-'
+srv_cpu_str = fmt_dur(srv_cpu) if srv_cpu > 0 else '-'
+
+# Stall counts (>100ms / >1s / >10s). Unlike p95/p99 these are stable across
+# repeated runs of identical code, so they are what a regression check should
+# read on shaped scenarios. See README, 'Reading the tail'.
+stalls = d.get('stall_counts', [])
+stalls_str = '/'.join(str(c) for c in stalls) if stalls else '-'
+
+print(f'{up_str}|{down_str}|{lat_p50_str}|{lat_p95_str}|{stalls_str}|{dur_str}'
+      f'|{cli_cpu_str}|{srv_cpu_str}|{fmt_mib(peak_rss)}')
+" < "$JSON_DIR/${run_name}.json" 2>/dev/null | {
+    IFS='|' read -r upload_str download_str lat_p50_str lat_p95_str stalls_str \
+      dur_str cli_cpu_str srv_cpu_str peak_rss_str
     echo "done"
-    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s\n" \
+    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s %-11s %-11s %-9s\n" \
       "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "$upload_str" "$download_str" \
-      "$lat_p50_str" "$lat_p95_str" "$dur_str" \
+      "$lat_p50_str" "$lat_p95_str" "$stalls_str" "$dur_str" \
+      "$cli_cpu_str" "$srv_cpu_str" "$peak_rss_str" \
       | tee -a "$SUMMARY_FILE"
   }
 

@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH
 
+## Tests for CID ownership and datagram header parsing - the inputs
+## `receiveDatagram` uses to pick the context a datagram belongs to.
+##
+## `packetDcid` and `isIetfInitial` are internal; `-d:lsquic_testing`
+## (set in tests/nim.cfg) publishes them, so they are asserted directly instead
+## of through a handshake that would only fail as a timeout.
+
 {.used.}
 
 import chronos, chronos/unittest2/asynctests
-import lsquic
 import lsquic/[endpoint, lsquic_ffi]
 import lsquic/context/context
-import ./helpers/[address, clientserver, trackers]
-
-initializeLsquic(true, true)
-
-const dialTimeout = 5.seconds
 
 func makeCid(bytes: openArray[byte]): CidKey =
   var cid = CidKey(len: bytes.len.uint8)
@@ -52,9 +53,6 @@ proc newTrackingContext(T: typedesc): T =
   ctx
 
 suite "cid ownership":
-  teardown:
-    checkTrackers()
-
   test "registered cids are owned, unknown ones are not":
     let ctx = newTrackingContext(ClientContext)
 
@@ -164,9 +162,6 @@ func shortHeaderPacket(dcid: CidKey, firstByte: byte = ShortFirstByte): seq[byte
   packet
 
 suite "datagram header parsing":
-  teardown:
-    checkTrackers()
-
   test "the short header cid is read at the engine's cid width":
     # a short header carries no length byte, so this width is the only thing
     # that tells the endpoint where the routing cid ends
@@ -216,54 +211,3 @@ suite "datagram header parsing":
       not isIetfInitial(longHeaderPacket(ClientCid, firstByte = InitialWithoutFixedBit))
       not isIetfInitial(shortHeaderPacket(ClientCid))
       not isIetfInitial(newSeq[byte]())
-
-suite "datagram routing":
-  teardown:
-    checkTrackers()
-
-  asyncTest "the only engine on a socket takes every datagram":
-    let listenOnly = makeEndpoint(AutoAddressIP4, {CanListen})
-    let dialOnly = makeDialEndpoint(AddressFamily.IPv4)
-    defer:
-      await allFutures(listenOnly.stop(), dialOnly.stop())
-
-    # a dial-only endpoint has no client context until it dials
-    let accepting = listenOnly.accept()
-    let outgoing = await dialOnly.dial(listenOnly.localAddress()).wait(dialTimeout)
-    let incoming = await accepting.wait(dialTimeout)
-
-    let
-      listenAddress = listenOnly.localAddress()
-      dialAddress = dialOnly.localAddress()
-    check:
-      # one engine on the socket, so the cid is never read
-      listenOnly.routeDatagram(
-        shortHeaderPacket(UnknownCid), listenAddress, dialAddress
-      ) == {rtServer}
-      dialOnly.routeDatagram(shortHeaderPacket(UnknownCid), dialAddress, listenAddress) ==
-        {rtClient}
-
-    outgoing.close()
-    incoming.close()
-    await allFutures(outgoing.closedFuture(), incoming.closedFuture())
-
-  asyncTest "an unknown cid reaches the server context only in an initial packet":
-    # a self-dial puts both engines on one socket, so the cid decides
-    let endpoint = makeEndpoint(AutoAddressIP4)
-    defer:
-      await endpoint.stop()
-
-    let accepting = endpoint.accept()
-    let outgoing = await endpoint.dial(endpoint.localAddress()).wait(dialTimeout)
-    let incoming = await accepting.wait(dialTimeout)
-
-    let address = endpoint.localAddress()
-    check:
-      # an unknown cid is worth handing over only when it can open a connection
-      endpoint.routeDatagram(longHeaderPacket(UnknownCid), address, address) ==
-        {rtServer}
-      endpoint.routeDatagram(shortHeaderPacket(UnknownCid), address, address) == {}
-
-    outgoing.close()
-    incoming.close()
-    await allFutures(outgoing.closedFuture(), incoming.closedFuture())

@@ -27,22 +27,25 @@ type Stream* = ref object
   closeRequested: bool
   # This is called when on_close callback is executed
   closed*: AsyncEvent
+  # Reuse a single closed-event waiter to minimize allocations on hot paths.
+  # (no per call allocation)
+  closedWaiter*: Future[void].Raising([CancelledError])
   resetByPeer*: bool
   resetHow*: StreamResetHow
   writeLock*: AsyncLock
   toWrite*: Opt[WriteTask]
   readLock*: AsyncLock
   isEof*: bool # Received a FIN from remote
-  # Every path that sets closedByEngine or fires `closed` must settle these;
-  # missing one hangs the parked operation instead of failing it.
   toRead*: Opt[ReadTask]
   doProcess*: proc(urgent: bool) {.gcsafe, raises: [].}
 
 proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
   let closed = newAsyncEvent()
+  let closedWaiter = closed.wait()
   let s = Stream(
     quicStream: quicStream,
     closed: closed,
+    closedWaiter: closedWaiter,
     readLock: newAsyncLock(),
     writeLock: newAsyncLock(),
   )
@@ -79,14 +82,6 @@ proc failPendingRead*(stream: Stream, error: ref StreamError) {.raises: [].} =
     return
   if not task.doneFut.finished:
     task.doneFut.fail(error)
-  stream.toRead = Opt.none(ReadTask)
-
-proc completePendingRead*(stream: Stream) {.raises: [].} =
-  ## Ends a pending read at end of stream, reporting 0 rather than failing.
-  let task = stream.toRead.valueOr:
-    return
-  if not task.doneFut.finished:
-    task.doneFut.complete(0)
   stream.toRead = Opt.none(ReadTask)
 
 proc abortPendingWrites*(stream: Stream, error: ref StreamError) {.raises: [].} =
@@ -175,7 +170,6 @@ proc abort*(stream: Stream) =
   stream.closeWrite = true
   stream.isEof = true
   stream.abortPendingWrites("stream aborted")
-  stream.completePendingRead()
   discard stream.requestClose()
   if not stream.closed.isSet():
     stream.closed.fire()
@@ -255,6 +249,17 @@ proc readOnce*(
 
   try:
     stream.doProcess(false)
+
+    let raceFut = await race(stream.closedWaiter, doneFut)
+    if raceFut == stream.closedWaiter:
+      if not doneFut.finished:
+        await doneFut.cancelAndWait()
+      raiseIfReadReset(stream)
+      stream.isEof = true
+      stream.closeWrite = true
+      discard stream.closeIfDone()
+      return 0
+
     return await doneFut
   finally:
     stream.clearPendingRead(doneFut)
@@ -265,23 +270,10 @@ template readOnce*(stream: Stream, dst: var openArray[byte]): untyped =
   else: stream.readOnce(dst[0].addr, dst.len))
 
 proc write*(
-    stream: Stream, src: ptr byte, srcLen: int
+    stream: Stream, data: sink seq[byte]
 ) {.async: (raises: [CancelledError, StreamError]).} =
-  ## Writes from a caller-owned buffer. Counterpart of `readOnce`, and the only
-  ## overload that never copies - `WriteTask` holds a pointer to the buffer, not
-  ## a copy of it.
-  ##
-  ## The buffer must stay alive and unmodified until the returned future is
-  ## *finished*. Cancelling is not enough on its own: `on_write` reads the
-  ## buffer from the engine callback, while the pending write is only cleared
-  ## when this proc resumes on a later poll tick. Freeing the buffer between
-  ## `cancel()` and that tick is a use-after-free - use `await fut.cancelAndWait()`
-  ## or otherwise wait for the future to finish before releasing it.
-  if srcLen == 0:
+  if data.len == 0:
     return
-
-  if src.isNil:
-    raiseAssert "src cannot be nil"
 
   raiseIfWriteReset(stream)
 
@@ -302,12 +294,13 @@ proc write*(
     raise newException(StreamError, "stream closed")
 
   # Try to write immediately
-  let n = lsquic_stream_write(stream.quicStream, src, srcLen.csize_t)
-  if n >= srcLen:
+  let p = data[0].addr
+  let n = lsquic_stream_write(stream.quicStream, p, data.len.csize_t)
+  if n >= data.len:
     if lsquic_stream_flush(stream.quicStream) != 0:
       stream.abort()
       raise newException(StreamError, "could not flush stream")
-    stream.doProcess(srcLen >= WriteFlushBytes)
+    stream.doProcess(data.len >= WriteFlushBytes)
     return
   elif n < 0:
     if errno == ECONNRESET:
@@ -323,25 +316,20 @@ proc write*(
     raise newException(StreamError, "could not set wantwrite")
 
   let doneFut = Future[void].Raising([CancelledError, StreamError]).init("Stream.write")
-  stream.toWrite =
-    Opt.some(WriteTask(data: src, dataLen: srcLen, doneFut: doneFut, offset: n))
+  stream.toWrite = Opt.some(
+    WriteTask(data: data[0].addr, dataLen: data.len, doneFut: doneFut, offset: n)
+  )
 
   try:
-    stream.doProcess(srcLen >= WriteFlushBytes)
+    stream.doProcess(data.len >= WriteFlushBytes)
+
+    let raceFut = await race(stream.closedWaiter, doneFut)
+    if raceFut == stream.closedWaiter:
+      raiseIfWriteReset(stream)
+      if not doneFut.finished:
+        doneFut.fail(newException(StreamError, "stream closed"))
+      stream.closeWrite = true
+
     await doneFut
   finally:
     stream.clearPendingWrite(doneFut)
-
-proc write*(
-    stream: Stream, data: sink seq[byte]
-) {.async: (raises: [CancelledError, StreamError]).} =
-  ## `sink` so that handing over a temporary - `write(@[header])`, or a freshly
-  ## built buffer - moves into the async environment instead of being copied
-  ## into it. `data` then lives in that environment for the whole call, which is
-  ## what keeps the buffer alive for the pointer overload above.
-  ##
-  ## A caller that keeps its own buffer still pays one copy here, and should use
-  ## the pointer overload instead if it can honour that overload's contract.
-  if data.len == 0:
-    return
-  await stream.write(data[0].addr, data.len)

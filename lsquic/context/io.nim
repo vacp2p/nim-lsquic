@@ -12,11 +12,6 @@ when not defined(windows):
   import chronicles
   import posix
 
-const MaxBatch = 1024
-  ## Upper bound on the stack WSABUF array in the Windows send path (`sendPacketsOut`).
-  ## In practice `iovlen` is small; if it exceeds this bound, `sendPacketsOut`
-  ## falls back to a heap-allocated seq.
-
 when defined(linux):
   {.passc: "-D_GNU_SOURCE".}
 
@@ -61,8 +56,12 @@ proc prepareDestAddr(
   ## When lsquic later asks us to send on that IPv6 socket, sending directly to
   ## an AF_INET destination can fail with EINVAL. Re-map the destination to an
   ## IPv6-mapped address when the local path is IPv6.
-  if localSa.isIPv6Family() and destSa.isIPv4Family():
-    let mappedDest = destSa.toTransportAddress().toIPv6()
+  let
+    localAddress = localSa.toTransportAddress()
+    destAddress = destSa.toTransportAddress()
+  if localAddress.family == AddressFamily.IPv6 and
+      destAddress.family == AddressFamily.IPv4:
+    let mappedDest = destAddress.toIPv6()
     mappedDest.toSAddr(destStorage, destAddrLen)
   else:
     destAddrLen = sockAddrLen(destSa.sa_family.int)
@@ -190,10 +189,6 @@ proc sendPacketsOut*(
 
     sent.cint
   else:
-    when defined(windows):
-      var
-        bufs {.noinit.}: array[MaxBatch, WSABUF]
-        overflow: seq[WSABUF]
     var sent = 0
     for i in 0 ..< nspecs.int:
       let curr = specsArr[i]
@@ -203,26 +198,19 @@ proc sendPacketsOut*(
       prepareDestAddr(curr.local_sa, curr.dest_sa, destStorage, destAddrLen)
 
       when defined(windows):
-        let
-          iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
-          iovlen = curr.iovlen.int
-          dst =
-            if iovlen <= bufs.len:
-              cast[ptr UncheckedArray[WSABUF]](addr bufs[0])
-            else:
-              overflow.setLen(iovlen)
-              cast[ptr UncheckedArray[WSABUF]](addr overflow[0])
+        let iovArr = cast[ptr UncheckedArray[struct_iovec]](curr.iov)
 
-        for j in 0 ..< iovlen:
+        var bufs = newSeq[WSABUF](curr.iovlen.int)
+        for j in 0 ..< curr.iovlen.int:
           let src = iovArr[j]
-          dst[j].len = culong(src.iov_len)
-          dst[j].buf = cast[ptr char](src.iov_base)
+          bufs[j].len = culong(src.iov_len)
+          bufs[j].buf = cast[ptr char](src.iov_base)
 
         var bytesSent: culong = 0
         let res = WSASendTo(
           SocketHandle(quicCtx.fd),
-          addr dst[0],
-          culong(iovlen),
+          addr bufs[0],
+          culong(curr.iovlen),
           addr bytesSent,
           0, # flags
           cast[ptr SockAddr](addr destStorage),
@@ -247,13 +235,3 @@ proc sendPacketsOut*(
       sent.inc
 
     sent.cint
-
-when defined(lsquic_testing):
-  proc prepareDestAddrForTest*(
-      localSa: ptr SockAddr,
-      destSa: ptr SockAddr,
-      destStorage: var Sockaddr_storage,
-      destAddrLen: var SockLen,
-  ) =
-    ## Test-only accessor for the destination remapping.
-    prepareDestAddr(localSa, destSa, destStorage, destAddrLen)
