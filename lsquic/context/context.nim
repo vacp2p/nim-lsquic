@@ -424,7 +424,7 @@ proc onNewStream*(
     return nil
 
   let quicConn = cast[QuicConnection](conn_ctx)
-  let stream_id = lsquic_stream_id(stream).int
+  let stream_id = lsquic_stream_id(stream)
   let isLocal =
     if quicConn.isOutgoing:
       (stream_id and 1) == 0
@@ -440,7 +440,7 @@ proc onNewStream*(
       discard lsquic_stream_wantwrite(stream, 1)
       s
     else:
-      let s = Stream.new(stream, canWrite = not isUnidirectional(stream_id.uint64))
+      let s = Stream.new(stream, canWrite = not isUnidirectional(stream_id))
       quicConn.incoming.putNoWait(s)
       # Whoever opens the stream reads first
       discard lsquic_stream_wantread(stream, 1)
