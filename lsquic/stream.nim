@@ -112,8 +112,9 @@ proc readFromStream*(
     stream: ptr lsquic_stream_t, data: ptr byte, dataLen: int, receivedFin: var bool
 ): ssize_t {.raises: [].} =
   var readCtx = ReadContext(data: data, dataLen: dataLen)
-  result = lsquic_stream_readf(stream, readToBuffer, addr readCtx)
+  let n = lsquic_stream_readf(stream, readToBuffer, addr readCtx)
   receivedFin = readCtx.receivedFin
+  return n
 
 proc failPendingRead*(stream: Stream, error: ref StreamError) {.raises: [].} =
   let task = stream.toRead.valueOr:
