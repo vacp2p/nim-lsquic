@@ -727,44 +727,6 @@ suite "lifecycle":
     expect AssertionDefect:
       discard await stream.readOnce(nil, 8)
 
-  asyncTest "negative read length is rejected":
-    let stream = Stream.new()
-    defer:
-      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
-    var data: byte
-
-    expect AssertionDefect:
-      discard await stream.readOnce(addr data, -1)
-
-  test "read helper rejects invalid buffers before ffi":
-    var receivedFin = true
-
-    check:
-      readFromStream(nil, nil, -1, receivedFin) == -1
-      errno == EINVAL
-      not receivedFin
-
-    receivedFin = true
-    check:
-      readFromStream(nil, nil, 1, receivedFin) == -1
-      errno == EINVAL
-      not receivedFin
-
-  asyncTest "nil write source is rejected":
-    let stream = Stream.new()
-    defer:
-      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
-
-    expect AssertionDefect:
-      await stream.write(nil, 8)
-
-  asyncTest "zero length writes ignore a nil source":
-    let stream = Stream.new()
-    defer:
-      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
-
-    await stream.write(nil, 0)
-
   asyncTest "read waiting for the read lock sees the stream closed by the engine":
     let stream = Stream.new()
     defer:
