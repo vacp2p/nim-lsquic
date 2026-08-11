@@ -3,7 +3,7 @@
 
 {.used.}
 
-import std/sets
+import std/[posix, sets]
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
 import lsquic/context/[client, context, io, stream]
@@ -726,6 +726,29 @@ suite "lifecycle":
 
     expect AssertionDefect:
       discard await stream.readOnce(nil, 8)
+
+  asyncTest "negative read length is rejected":
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+    var data: byte
+
+    expect AssertionDefect:
+      discard await stream.readOnce(addr data, -1)
+
+  test "read helper rejects invalid buffers before ffi":
+    var receivedFin = true
+
+    check:
+      readFromStream(nil, nil, -1, receivedFin) == -1
+      errno == EINVAL
+      not receivedFin
+
+    receivedFin = true
+    check:
+      readFromStream(nil, nil, 1, receivedFin) == -1
+      errno == EINVAL
+      not receivedFin
 
   asyncTest "nil write source is rejected":
     let stream = Stream.new()

@@ -111,6 +111,11 @@ proc readToBuffer(
 proc readFromStream*(
     stream: ptr lsquic_stream_t, data: ptr byte, dataLen: int, receivedFin: var bool
 ): ssize_t {.raises: [].} =
+  receivedFin = false
+  if dataLen < 0 or (dataLen > 0 and data.isNil):
+    errno = EINVAL
+    return -1
+
   var readCtx = ReadContext(data: data, dataLen: dataLen)
   let n = lsquic_stream_readf(stream, readToBuffer, addr readCtx)
   receivedFin = readCtx.receivedFin
@@ -248,6 +253,9 @@ proc readOnce*(
 ): Future[int] {.async: (raises: [CancelledError, StreamError]).} =
   if not stream.canRead:
     raise newException(StreamError, "stream is write-only")
+
+  if dstLen < 0:
+    raiseAssert "dstLen cannot be negative"
 
   if dstLen == 0:
     return 0
