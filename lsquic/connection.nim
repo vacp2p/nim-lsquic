@@ -183,9 +183,8 @@ proc localAddress*(connection: Connection): TransportAddress {.raises: [].} =
 proc remoteAddress*(connection: Connection): TransportAddress {.raises: [].} =
   if not connection.quicConn.isNil and not connection.quicConn.lsquicConn.isNil:
     var local, remote: ptr SockAddr
-    if lsquic_conn_get_sockaddr(
-      connection.quicConn.lsquicConn, addr local, addr remote
-    ) == 0 and not remote.isNil:
+    if lsquic_conn_get_sockaddr(connection.quicConn.lsquicConn, addr local, addr remote) ==
+        0 and not remote.isNil:
       connection.remote = remote.toTransportAddress()
   connection.remote
 
