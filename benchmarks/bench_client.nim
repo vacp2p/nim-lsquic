@@ -30,6 +30,19 @@ proc tryStream(
   except IOError, QuicError, TransportError:
     return err(getCurrentExceptionMsg())
 
+proc recordStream(
+    runResult: var RunResult,
+    connResult: var ConnectionResult,
+    streamResult: Result[StreamResult, string],
+    context = "",
+) =
+  if streamResult.isOk:
+    connResult.streamResults.add(streamResult.get())
+  elif context.len > 0:
+    runResult.errors.add(context & ": " & streamResult.error())
+  else:
+    runResult.errors.add(streamResult.error())
+
 # -- Throughput on a single stream --
 
 proc runThroughputStream(
@@ -80,7 +93,7 @@ proc runLatencyStream(conn: Connection, runs: int): Future[StreamResult] {.async
 
   let payload = newSeq[byte](64) # small ping payload
   let payloadLenBytes = toSeq(payload.len.uint32.toBytesBE())
-  var samples: seq[LatencySample]
+  var samples = newSeqOfCap[LatencySample](runs)
 
   for i in 0 ..< runs:
     let start = Moment.now()
@@ -135,20 +148,18 @@ proc modeThroughput(
     uploadSize: uploadSize,
     downloadSize: downloadSize,
     chunkSize: chunkSize,
+    connResults: newSeqOfCap[ConnectionResult](1),
   )
 
   let client = makeClient()
   let conn = await client.dial(serverAddr)
   let start = Moment.now()
 
-  var connRes = ConnectionResult()
+  var connRes = ConnectionResult(streamResults: newSeqOfCap[StreamResult](runs))
   for i in 0 ..< runs:
     let sr =
       await tryStream(runThroughputStream(conn, uploadSize, downloadSize, chunkSize))
-    if sr.isOk:
-      connRes.streamResults.add(sr.get())
-    else:
-      runResult.errors.add("run " & $(i + 1) & ": " & sr.error())
+    recordStream(runResult, connRes, sr, "run " & $(i + 1))
 
   connRes.durationNs = (Moment.now() - start).nanoseconds
   runResult.connResults.add(connRes)
@@ -161,18 +172,20 @@ proc modeThroughput(
 # -- Mode: latency (1 conn, 1 stream) --
 
 proc modeLatency(serverAddr: TransportAddress, runs: int): Future[RunResult] {.async.} =
-  var runResult = RunResult(mode: Latency, connections: 1, streamsPerConn: 1)
+  var runResult = RunResult(
+    mode: Latency,
+    connections: 1,
+    streamsPerConn: 1,
+    connResults: newSeqOfCap[ConnectionResult](1),
+  )
 
   let client = makeClient()
   let conn = await client.dial(serverAddr)
   let start = Moment.now()
 
-  var connRes = ConnectionResult()
+  var connRes = ConnectionResult(streamResults: newSeqOfCap[StreamResult](1))
   let sr = await tryStream(runLatencyStream(conn, runs))
-  if sr.isOk:
-    connRes.streamResults.add(sr.get())
-  else:
-    runResult.errors.add(sr.error())
+  recordStream(runResult, connRes, sr)
   connRes.durationNs = (Moment.now() - start).nanoseconds
   runResult.connResults.add(connRes)
   runResult.durationNs = connRes.durationNs
@@ -194,17 +207,19 @@ proc modeMultiStream(
     uploadSize: uploadSize,
     downloadSize: downloadSize,
     chunkSize: chunkSize,
+    connResults: newSeqOfCap[ConnectionResult](1),
   )
 
   let client = makeClient()
   let conn = await client.dial(serverAddr)
   let start = Moment.now()
 
-  var connRes = ConnectionResult()
+  var connRes =
+    ConnectionResult(streamResults: newSeqOfCap[StreamResult](runs * numStreams))
 
   for run in 0 ..< runs:
     # Launch K-1 throughput streams + 1 latency probe in parallel
-    var futs: seq[Future[StreamResult]]
+    var futs = newSeqOfCap[Future[StreamResult]](numStreams)
     for s in 0 ..< numStreams - 1:
       futs.add(runThroughputStream(conn, uploadSize, downloadSize, chunkSize))
 
@@ -214,10 +229,7 @@ proc modeMultiStream(
     # Wait for all streams to complete
     for f in futs:
       let sr = await tryStream(f)
-      if sr.isOk:
-        connRes.streamResults.add(sr.get())
-      else:
-        runResult.errors.add(sr.error())
+      recordStream(runResult, connRes, sr)
 
   connRes.durationNs = (Moment.now() - start).nanoseconds
   runResult.connResults.add(connRes)
@@ -240,22 +252,26 @@ proc modeMultiConn(
     uploadSize: uploadSize,
     downloadSize: downloadSize,
     chunkSize: chunkSize,
+    connResults: newSeq[ConnectionResult](numConns),
   )
 
   # Create N separate clients (each gets its own engine context)
-  var clients: seq[QuicClient]
-  var conns: seq[Connection]
+  var clients = newSeqOfCap[QuicClient](numConns)
+  var conns = newSeqOfCap[Connection](numConns)
   for i in 0 ..< numConns:
     let client = makeClient()
     let conn = await client.dial(serverAddr)
     clients.add(client)
     conns.add(conn)
 
+  for cr in runResult.connResults.mitems:
+    cr.streamResults = newSeqOfCap[StreamResult](runs)
+
   let start = Moment.now()
 
   for run in 0 ..< runs:
     # Launch throughput on N-1 connections + latency probe on last
-    var futs: seq[Future[StreamResult]]
+    var futs = newSeqOfCap[Future[StreamResult]](numConns)
     for i in 0 ..< numConns - 1:
       futs.add(runThroughputStream(conns[i], uploadSize, downloadSize, chunkSize))
 
@@ -264,13 +280,7 @@ proc modeMultiConn(
 
     for i, f in futs:
       let sr = await tryStream(f)
-      # Associate with the right connection metrics
-      while runResult.connResults.len <= i:
-        runResult.connResults.add(ConnectionResult())
-      if sr.isOk:
-        runResult.connResults[i].streamResults.add(sr.get())
-      else:
-        runResult.errors.add("conn " & $(i + 1) & ": " & sr.error())
+      recordStream(runResult, runResult.connResults[i], sr, "conn " & $(i + 1))
 
   let totalDur = (Moment.now() - start).nanoseconds
   for cr in runResult.connResults.mitems:
@@ -297,21 +307,25 @@ proc modeStress(
     uploadSize: uploadSize,
     downloadSize: downloadSize,
     chunkSize: chunkSize,
+    connResults: newSeq[ConnectionResult](numConns),
   )
 
-  var clients: seq[QuicClient]
-  var conns: seq[Connection]
+  var clients = newSeqOfCap[QuicClient](numConns)
+  var conns = newSeqOfCap[Connection](numConns)
   for i in 0 ..< numConns:
     let client = makeClient()
     let conn = await client.dial(serverAddr)
     clients.add(client)
     conns.add(conn)
 
+  for cr in runResult.connResults.mitems:
+    cr.streamResults = newSeqOfCap[StreamResult](runs * numStreams)
+
   let start = Moment.now()
 
   for run in 0 ..< runs:
-    var allFuts: seq[Future[StreamResult]]
-    var futConnIdx: seq[int] # track which connection each future belongs to
+    var allFuts = newSeqOfCap[Future[StreamResult]](numConns * numStreams)
+    var futConnIdx = newSeqOfCap[int](numConns * numStreams)
 
     for ci in 0 ..< numConns:
       # On each connection: K-1 throughput streams + 1 latency probe
@@ -324,16 +338,12 @@ proc modeStress(
       allFuts.add(runLatencyStream(conns[ci], 50))
       futConnIdx.add(ci)
 
-    # Ensure we have connResults slots
-    while runResult.connResults.len < numConns:
-      runResult.connResults.add(ConnectionResult())
-
     for i, f in allFuts:
       let sr = await tryStream(f)
-      if sr.isOk:
-        runResult.connResults[futConnIdx[i]].streamResults.add(sr.get())
-      else:
-        runResult.errors.add("conn " & $(futConnIdx[i] + 1) & ": " & sr.error())
+      let connIdx = futConnIdx[i]
+      recordStream(
+        runResult, runResult.connResults[connIdx], sr, "conn " & $(connIdx + 1)
+      )
 
   let totalDur = (Moment.now() - start).nanoseconds
   for cr in runResult.connResults.mitems:
@@ -355,13 +365,21 @@ const
 
 proc modeRampUp(
     serverAddr: TransportAddress, downloadSize: int, chunkSize: int
-): Future[RunResult] {.async.} =
+): Future[RunResult] {.
+    async: (
+      raises: [
+        CancelledError, QuicConfigError, QuicError, TransportOsError, IOError,
+        TransportError,
+      ]
+    )
+.} =
   var runResult = RunResult(
     mode: RampUp,
     connections: 1,
     streamsPerConn: 1,
     downloadSize: downloadSize,
     chunkSize: chunkSize,
+    connResults: newSeqOfCap[ConnectionResult](1),
   )
 
   let client = makeClient()
@@ -382,7 +400,7 @@ proc modeRampUp(
 
   var buf = newSeq[byte](chunkSize)
   var totalDown = 0
-  var points: seq[DataPoint]
+  var points = newSeqOfCap[DataPoint](downloadSize div chunkSize + 1)
 
   let start = Moment.now()
 
@@ -394,8 +412,6 @@ proc modeRampUp(
       totalDown += n
       let elapsed = Moment.now() - start
       points.add(DataPoint(elapsedNs: elapsed.nanoseconds, cumulativeBytes: totalDown))
-  except CancelledError as e:
-    raise e
   except IOError, QuicError, TransportError:
     # Keep the samples collected so far - a truncated ramp-up curve is still
     # informative about slow-start behaviour.
@@ -404,7 +420,7 @@ proc modeRampUp(
   let totalDuration = Moment.now() - start
 
   # Bucket into time windows
-  var samples: seq[RampUpSample]
+  var samples = newSeqOfCap[RampUpSample](points.len)
   let windowNs = RampUpWindowMs.int64 * 1_000_000
 
   if points.len > 0:
@@ -662,7 +678,7 @@ when isMainModule:
     echo "benchmark cancelled"
     cleanupLsquic()
     quit(1)
-  except IOError, QuicError, TransportError:
+  except IOError, QuicConfigError, QuicError, TransportError, TransportOsError:
     echo "benchmark failed: ", getCurrentExceptionMsg()
     cleanupLsquic()
     quit(1)
@@ -671,7 +687,10 @@ when isMainModule:
 
   var completedStreams = 0
   for cr in benchResult.connResults:
-    completedStreams += cr.streamResults.len
+    for sr in cr.streamResults:
+      if sr.uploadBytes > 0 or sr.downloadBytes > 0 or sr.latencySamples.len > 0 or
+          sr.rampUpSamples.len > 0:
+        inc completedStreams
 
   # Emitting a result set in which every stream failed would report zeroes as if
   # they were measurements, so fail the run instead.

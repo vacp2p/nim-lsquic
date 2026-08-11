@@ -185,8 +185,8 @@ run_bench() {
       --wait-timeout "$WAIT_TIMEOUT" \
       bench-server >/dev/null 2>&1; then
     echo "FAILED (server startup)"
-    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s\n" \
-      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" "-" \
+    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s %-11s %-11s %-9s\n" \
+      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" "-" "-" "-" "-" \
       | tee -a "$SUMMARY_FILE"
     env "${env_args[@]}" docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans \
       >/dev/null 2>&1 || true
@@ -243,8 +243,8 @@ run_bench() {
     else
       echo "FAILED (no JSON output, see $log_file)"
     fi
-    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s\n" \
-      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" "-" \
+    printf "%-15s %-14s %-6s %-6s %-15s %-15s %-12s %-12s %-12s %-12s %-11s %-11s %-9s\n" \
+      "$sc_name" "$bm_mode" "$bm_conns" "$bm_streams" "FAILED" "-" "-" "-" "-" "-" "-" "-" "-" \
       | tee -a "$SUMMARY_FILE"
     return
   fi
