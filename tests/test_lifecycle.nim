@@ -595,6 +595,28 @@ suite "lifecycle":
 
     check (await stream.readOnce(empty)) == 0
 
+  test "stream id direction bit identifies unidirectional streams":
+    check:
+      not isUnidirectional(0)
+      not isUnidirectional(1)
+      isUnidirectional(2)
+      isUnidirectional(3)
+
+  asyncTest "receive-only stream rejects writes locally":
+    let stream = Stream.new(canWrite = false)
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+
+    check:
+      stream.canRead
+      not stream.canWrite
+      stream.closeWrite
+
+    expect StreamError:
+      await stream.write(@[])
+
+    await stream.close()
+
   asyncTest "late datagrams are ignored after context stops":
     let verifier: CertificateVerifier = CustomCertificateVerifier.init(
       proc(serverName: string, derCertificates: seq[seq[byte]]): bool {.gcsafe.} =
