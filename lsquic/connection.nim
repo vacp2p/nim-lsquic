@@ -23,6 +23,7 @@ type
   IncomingConnection = ref object of Connection
 
   OutgoingConnection = ref object of Connection
+    serverName: string
     certVerifier: Opt[CertificateVerifier]
 
 proc ensureClosed(connection: Connection) {.async: (raises: [CancelledError]).} =
@@ -52,6 +53,7 @@ proc newOutgoingConnection*(
     quicContext: QuicContext,
     local: TransportAddress,
     remote: TransportAddress,
+    serverName: string = "",
     certVerifier: Opt[CertificateVerifier] = Opt.none(CertificateVerifier),
 ): OutgoingConnection =
   let closed = newAsyncEvent()
@@ -61,6 +63,7 @@ proc newOutgoingConnection*(
     local: local,
     remote: remote,
     closed: closed,
+    serverName: serverName,
     certVerifier: certVerifier,
     closedWaiter: closedWaiter,
   )
@@ -101,7 +104,8 @@ proc dial*(
     connection.closed.fire()
 
   connection.quicConn = connection.quicContext.dial(
-    connection.local, connection.remote, retFut, onClose, connection.certVerifier
+    connection.local, connection.remote, retFut, onClose, connection.serverName,
+    connection.certVerifier,
   ).valueOr:
     retFut.fail(newException(DialError, "could not dial: " & error))
     nil

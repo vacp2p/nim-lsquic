@@ -397,6 +397,7 @@ method dial*(
     remote: TransportAddress,
     connectedFut: Future[void],
     onClose: proc() {.gcsafe, raises: [].},
+    serverName: string,
     certVerifier: Opt[CertificateVerifier],
 ): Result[QuicConnection, string] {.base, gcsafe, raises: [].} =
   raiseAssert "dial not implemented"
@@ -410,6 +411,9 @@ proc makeStream*(
     raise newException(ConnectionClosedError, "connection closed")
   lsquic_conn_make_stream(quicConn.lsquicConn)
 
+func isUnidirectional*(streamId: lsquic_stream_id_t): bool {.raises: [].} =
+  (streamId and 2) != 0
+
 proc onNewStream*(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
@@ -421,7 +425,7 @@ proc onNewStream*(
     return nil
 
   let quicConn = cast[QuicConnection](conn_ctx)
-  let stream_id = lsquic_stream_id(stream).int
+  let stream_id = lsquic_stream_id(stream)
   let isLocal =
     if quicConn.isOutgoing:
       (stream_id and 1) == 0
@@ -437,7 +441,7 @@ proc onNewStream*(
       discard lsquic_stream_wantwrite(stream, 1)
       s
     else:
-      let s = Stream.new(stream)
+      let s = Stream.new(stream, canWrite = not isUnidirectional(stream_id))
       quicConn.incoming.putNoWait(s)
       # Whoever opens the stream reads first
       discard lsquic_stream_wantread(stream, 1)
