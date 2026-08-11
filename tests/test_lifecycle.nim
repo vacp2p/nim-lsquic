@@ -3,7 +3,7 @@
 
 {.used.}
 
-import std/[posix, sets]
+import std/sets
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
 import lsquic/context/[client, context, io, stream]
