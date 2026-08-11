@@ -102,11 +102,7 @@ proc dial*(
     connection.closed.fire()
 
   connection.quicConn = connection.quicContext.dial(
-    connection.local,
-    connection.remote,
-    retFut,
-    onClose,
-    connection.serverName,
+    connection.local, connection.remote, retFut, onClose, connection.serverName,
     connection.certVerifier,
   ).valueOr:
     retFut.fail(newException(DialError, "could not dial: " & error))
