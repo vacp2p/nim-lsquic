@@ -401,13 +401,15 @@ proc accept*(
 proc dial(
     endpoint: QuicEndpoint,
     address: TransportAddress,
+    serverName: string,
     certVerifier: Opt[CertificateVerifier],
 ): Future[Connection] {.
     async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
 .} =
   let ctx = endpoint.ensureClientContext()
-  let connection =
-    newOutgoingConnection(ctx, endpoint.udp.localAddress(), address, certVerifier)
+  let connection = newOutgoingConnection(
+    ctx, endpoint.udp.localAddress(), address, serverName, certVerifier
+  )
   endpoint.connman.addConnection(connection)
   var connected = false
   try:
@@ -419,6 +421,13 @@ proc dial(
 
   connection
 
+proc validateServerName(serverName: string) {.raises: [QuicError].} =
+  if serverName.len == 0:
+    raise newException(QuicError, "server name is empty")
+  for c in serverName:
+    if c == '\0':
+      raise newException(QuicError, "server name contains a null byte")
+
 proc dial*(
     endpoint: QuicEndpoint, address: TransportAddress
 ): Future[Connection] {.
@@ -429,7 +438,22 @@ proc dial*(
       QuicError, "certificate verifier is required; use dial(address, certVerifier)"
     )
 
-  await endpoint.dial(address, Opt.none(CertificateVerifier))
+  await endpoint.dial(address, "", Opt.none(CertificateVerifier))
+
+proc dial*(
+    endpoint: QuicEndpoint, address: TransportAddress, serverName: string
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  validateServerName(serverName)
+
+  if endpoint.tlsConfig.certVerifier.isNone:
+    raise newException(
+      QuicError,
+      "certificate verifier is required; use dial(address, serverName, certVerifier)",
+    )
+
+  await endpoint.dial(address, serverName, Opt.none(CertificateVerifier))
 
 proc dial*(
     endpoint: QuicEndpoint, address: TransportAddress, certVerifier: CertificateVerifier
@@ -439,7 +463,21 @@ proc dial*(
   if certVerifier.isNil:
     raise newException(QuicError, "certificate verifier is nil")
 
-  await endpoint.dial(address, Opt.some(certVerifier))
+  await endpoint.dial(address, "", Opt.some(certVerifier))
+
+proc dial*(
+    endpoint: QuicEndpoint,
+    address: TransportAddress,
+    serverName: string,
+    certVerifier: CertificateVerifier,
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  validateServerName(serverName)
+  if certVerifier.isNil:
+    raise newException(QuicError, "certificate verifier is nil")
+
+  await endpoint.dial(address, serverName, Opt.some(certVerifier))
 
 proc localAddress*(
     endpoint: QuicEndpoint
