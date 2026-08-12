@@ -292,8 +292,9 @@ suite "lifecycle":
         await stream.close()
         check (await stream.readOnce(buf)) == 0
 
-      check (await serving.withTimeout(timeout))
-      await serving
+      if not await serving.withTimeout(timeout):
+        await serving.cancelAndWait()
+      check serving.completed()
 
       # Open until the retired credit is exhausted again.
       var extra = 0
