@@ -76,6 +76,7 @@ method dial*(
     remote: TransportAddress,
     connectedFut: Future[void],
     onClose: proc() {.gcsafe, raises: [].},
+    serverName: string,
     certVerifier: Opt[CertificateVerifier],
 ): Result[QuicConnection, string] {.raises: [], gcsafe.} =
   var
@@ -105,7 +106,7 @@ method dial*(
     cast[ptr SockAddr](addr remoteAddress),
     cast[pointer](ctx),
     cast[ptr lsquic_conn_ctx_t](quicClientConn),
-    nil,
+    if serverName.len == 0: nil else: serverName.cstring,
     0,
     nil,
     0,

@@ -30,8 +30,14 @@ proc new*(
 
   var alpnWire = newString(0)
   for a in alpn:
+    if a.len == 0 or a.len > 255:
+      raise
+        newException(QuicConfigError, "ALPN protocol names must contain 1 to 255 bytes")
     alpnWire.add chr(a.len)
     alpnWire.add a
+
+  if alpnWire.len > high(uint16).int:
+    raise newException(QuicConfigError, "ALPN protocol list is too long")
 
   TLSConfig(
     alpnWire: alpnWire, certVerifier: certVerifier, certificate: certificate, key: key
