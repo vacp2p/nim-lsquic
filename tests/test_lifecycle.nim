@@ -8,7 +8,8 @@ import chronos, chronos/unittest2/asynctests, results
 import lsquic
 import lsquic/context/[client, context, io, stream]
 import ./helpers/[address, certificate, clientserver, stream, trackers]
-from lsquic/lsquic_ffi import lsquic_stream_ctx_t, lsquic_conn_t
+from lsquic/lsquic_ffi import
+  lsquic_stream_ctx_t, lsquic_conn_t, lsquic_stream_t, LSQUIC_DF_INIT_MAX_STREAMS_BIDI
 
 initializeLsquic(true, true)
 
@@ -222,6 +223,94 @@ suite "lifecycle":
     expect ConnectionError:
       await pending2.wait(timeout)
     check quicConn.popPendingStream(nil).isNone()
+
+  asyncTest "a cancelled pending stream stays in the queue":
+    # TODO: vacp2p/nim-lsquic#154
+    let quicConn = QuicConnection(incoming: newAsyncQueue[Stream]())
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+    let pending = quicConn.addPendingStream(stream)
+
+    await pending.cancelAndWait()
+    check pending.cancelled()
+
+    # popPendingStream hands the engine's new stream to a caller that is gone.
+    var nativeStream = 0
+    let native = cast[ptr lsquic_stream_t](addr nativeStream)
+    let popped = quicConn.popPendingStream(native)
+    check popped.isSome()
+    check stream.quicStream == native
+
+  asyncTest "openStream parks once the peer's stream credit is exhausted":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    var opened: seq[Stream]
+    for _ in 0 ..< LSQUIC_DF_INIT_MAX_STREAMS_BIDI:
+      opened.add(await peers.outgoing.openStream())
+
+    let parked = peers.outgoing.openStream()
+    check not (await parked.withTimeout(timeout))
+
+    await parked.cancelAndWait()
+
+  asyncTest "a cancelled parked openStream costs a stream credit slot":
+    # TODO: vacp2p/nim-lsquic#154
+    # Returns the stream credit available once every stream opened here is retired.
+    proc creditAfterRetiringAll(cancellations: int): Future[int] {.async.} =
+      let peers = await connectPeers()
+      defer:
+        await peers.stop()
+
+      # The peer reads each stream to EOF and closes it, retiring that stream's credit.
+      proc serve() {.async.} =
+        var buf = newSeq[byte](1)
+        for _ in 0 ..< LSQUIC_DF_INIT_MAX_STREAMS_BIDI:
+          let stream = await peers.incoming.incomingStream()
+          check (await stream.readOnce(buf)) == 0
+          await stream.close()
+
+      let serving = serve()
+
+      # Exhaust the peer's initial stream credit.
+      var opened: seq[Stream]
+      for _ in 0 ..< LSQUIC_DF_INIT_MAX_STREAMS_BIDI:
+        opened.add(await peers.outgoing.openStream())
+
+      # Park an openStream on the exhausted credit, then cancel it.
+      for _ in 0 ..< cancellations:
+        let parked = peers.outgoing.openStream()
+        check not (await parked.withTimeout(timeout))
+        # The cancelled openStream stays in pendingStreams, holding its slot.
+        await parked.cancelAndWait()
+
+      # Close+EOF every stream, retiring the stream credit they hold.
+      var buf = newSeq[byte](1)
+      for stream in opened:
+        await stream.close()
+        check (await stream.readOnce(buf)) == 0
+
+      if not await serving.withTimeout(timeout):
+        await serving.cancelAndWait()
+      check serving.completed()
+
+      # Open until the retired credit is exhausted again.
+      var extra = 0
+      while extra <= LSQUIC_DF_INIT_MAX_STREAMS_BIDI:
+        let opening = peers.outgoing.openStream()
+        if not await opening.withTimeout(timeout):
+          await opening.cancelAndWait()
+          break
+        discard await opening
+        inc extra
+      extra
+
+    check (await creditAfterRetiringAll(0)) == LSQUIC_DF_INIT_MAX_STREAMS_BIDI
+
+    # The engine creates the stream anyway, and nothing ever retires it.
+    check (await creditAfterRetiringAll(1)) == LSQUIC_DF_INIT_MAX_STREAMS_BIDI - 1
 
   asyncTest "abort after open stream still closes connection":
     let peers = await connectPeers()
