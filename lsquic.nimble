@@ -31,6 +31,10 @@ task test, "Run tests":
   exec nimc & " tests/test_all.nim"
   exec "./tests/test_all --output-level=VERBOSE"
 
+task test_no_asm, "Run tests without BoringSSL assembly":
+  flags = flags & " -d:BORINGSS_USE_ASM=false "
+  testTask()
+
 task test_release, "Run tests - release":
   flags = flags & " -d:release "
   testTask()
