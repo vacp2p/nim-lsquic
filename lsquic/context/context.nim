@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
-import std/[deques, hashes, sets, strutils]
+import std/[deques, hashes, sets, strutils, tables]
 import boringssl
 import chronos
 import chronos/osdefs
@@ -176,11 +176,13 @@ type QuicConnection* = ref object of RootObj
   connectedFut*: Future[void]
   pendingStreams: Deque[PendingStream] = initDeque[PendingStream]()
   certChain*: seq[seq[byte]]
+  negotiatedProtocol*: string
 
 type ClientContext* = ref object of QuicContext
 
 type ServerContext* = ref object of QuicContext
   incoming*: AsyncQueue[QuicConnection]
+  pendingNegotiatedProtocols: Table[CidKey, string] = initTable[CidKey, string]()
 
 proc processWhenReady*(quicContext: QuicContext) =
   if quicContext.isNil or quicContext.engine.isNil:
@@ -228,6 +230,37 @@ proc popPendingStream*(
   pending.created.complete()
   Opt.some(pending.stream)
 
+proc storeNegotiatedProtocol(
+    ssl: ptr SSL, protocol: ptr uint8, protocolLen: int
+) {.raises: [].} =
+  if protocol.isNil or protocolLen == 0:
+    return
+
+  let conn = lsquic_ssl_to_conn(ssl)
+  if conn.isNil:
+    return
+  let connCtx = lsquic_conn_get_ctx(conn)
+  if connCtx.isNil:
+    return
+
+  let quicConn = cast[QuicConnection](connCtx)
+  quicConn.negotiatedProtocol = newString(protocolLen)
+  copyMem(addr quicConn.negotiatedProtocol[0], protocol, protocolLen)
+
+proc copyProtocol(protocol: ptr uint8, protocolLen: int): string {.raises: [].} =
+  if protocol.isNil or protocolLen == 0:
+    return
+  result = newString(protocolLen)
+  copyMem(addr result[0], protocol, protocolLen)
+
+proc takeNegotiatedProtocol*(
+    ctx: ServerContext, conn: ptr lsquic_conn_t
+): string {.raises: [].} =
+  let cid = lsquic_conn_id(conn)
+  var key: CidKey
+  if not cid.isNil and toCidKey(cid[], key):
+    discard ctx.pendingNegotiatedProtocols.pop(key, result)
+
 proc cancelPending*(quicConn: QuicConnection) =
   while quicConn.pendingStreams.len > 0:
     let pending = quicConn.pendingStreams.popFirst()
@@ -261,6 +294,13 @@ proc alpnSelectProtoCB(
       inlen,
     ) == OPENSSL_NPN_NEGOTIATED
   ):
+    # Passing the local list first deliberately applies server preference.
+    let conn = lsquic_ssl_to_conn(ssl)
+    if not conn.isNil:
+      let cid = lsquic_conn_id(conn)
+      var key: CidKey
+      if not cid.isNil and toCidKey(cid[], key):
+        serverCtx.pendingNegotiatedProtocols[key] = copyProtocol(outv[], outlen[].int)
     return SSL_TLSEXT_ERR_OK
 
   return SSL_TLSEXT_ERR_ALERT_FATAL
@@ -280,6 +320,11 @@ proc verifyCertificate(
       if not out_alert.isNil:
         out_alert[] = SSL_AD_INTERNAL_ERROR
       return ssl_verify_invalid
+
+    var selected: ptr uint8
+    var selectedLen: cuint
+    SSL_get0_alpn_selected(ssl, addr selected, addr selectedLen)
+    storeNegotiatedProtocol(ssl, selected, selectedLen.int)
 
     var certVerifier = quicCtx.tlsConfig.certVerifier
     let conn = lsquic_ssl_to_conn(ssl)

@@ -14,6 +14,7 @@ proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
 ): ptr lsquic_conn_ctx_t {.cdecl.} =
   debug "New connection established: server"
+  let serverCtx = cast[ServerContext](stream_if_ctx)
   var local: ptr SockAddr
   var remote: ptr SockAddr
   discard lsquic_conn_get_sockaddr(conn, addr local, addr remote)
@@ -30,10 +31,10 @@ proc onNewConn(
     remote: remote.toTransportAddress(),
     lsquicConn: conn,
     certChain: certChain,
+    negotiatedProtocol: serverCtx.takeNegotiatedProtocol(conn),
     onClose: proc() =
       discard,
   )
-  let serverCtx = cast[ServerContext](stream_if_ctx)
   serverCtx.trackConnectionCid(conn)
   pin(quicConn) # Keep it pinned until on_conn_closed is called
   serverCtx.incoming.putNoWait(quicConn)

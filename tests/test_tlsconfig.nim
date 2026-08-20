@@ -3,7 +3,7 @@
 
 {.used.}
 
-import std/[sets, strutils]
+import std/strutils
 import results
 import unittest2
 import boringssl
@@ -11,33 +11,6 @@ import lsquic
 import lsquic/certificates
 import lsquic/lsquic_ffi
 import ./helpers/[certificate, trackers]
-
-proc decodeAlpnWire(wire: string): HashSet[string] =
-  ## Reverses the ALPN encoding that TLSConfig.new applies, so a test can check
-  ## which protocol names ended up on the wire.
-  ##
-  ## Each name is stored as one byte holding its length followed by the name
-  ## itself, and those pairs are concatenated:
-  ##
-  ##   {"test", "quic-echo"}  ->  "\x04test" & "\x09quic-echo"
-  ##
-  ## A length byte that points past the end of the buffer means the encoding is
-  ## broken, so decoding stops there and the caller gets the names read so far.
-  var decoded = initHashSet[string]()
-  var i = 0
-  while i < wire.len:
-    let length = wire[i].byte.int
-    if i + 1 + length > wire.len:
-      return decoded
-    decoded.incl(wire[i + 1 ..< i + 1 + length])
-    i += 1 + length
-  decoded
-
-proc makeAlpnSet(protocols: varargs[string]): HashSet[string] =
-  var alpn = initHashSet[string]()
-  for protocol in protocols:
-    alpn.incl(protocol)
-  alpn
 
 suite "tls config":
   teardown:
@@ -57,45 +30,39 @@ suite "tls config":
       discard QuicServer.new(cfg)
 
   test "single alpn value is encoded":
-    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), makeAlpn())
+    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), @["test"])
 
     check cfg.alpnWire == "\x04test"
 
   test "every alpn value gets its own length prefix":
-    let alpn = makeAlpnSet("test", "quic-echo")
+    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), @["test", "quic-echo"])
 
-    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), alpn)
-
-    # alpn is a HashSet, so the encoder has no order to preserve: decode the
-    # wire form back instead of pinning a byte string.
-    check:
-      cfg.alpnWire.len == (1 + "test".len) + (1 + "quic-echo".len)
-      cfg.alpnWire.decodeAlpnWire() == alpn
+    check cfg.alpnWire == "\x04test\x09quic-echo"
 
   test "alpn value of 255 bytes still encodes":
     let protocol = repeat('a', 255)
-    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), makeAlpnSet(protocol))
+    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), @[protocol])
 
     check:
       cfg.alpnWire.len == 256
       cfg.alpnWire[0].byte.int == 255
-      cfg.alpnWire.decodeAlpnWire() == makeAlpnSet(protocol)
+      cfg.alpnWire[1 .. ^1] == protocol
 
   test "alpn value over 255 bytes is not encodable":
-    let alpn = makeAlpnSet(repeat('a', 256))
+    let alpn = @[repeat('a', 256)]
 
     expect QuicConfigError:
       discard TLSConfig.new(testCertificate(), testPrivateKey(), alpn)
 
   test "empty alpn value is not encodable":
     expect QuicConfigError:
-      discard TLSConfig.new(testCertificate(), testPrivateKey(), makeAlpnSet(""))
+      discard TLSConfig.new(testCertificate(), testPrivateKey(), @[""])
 
   test "alpn protocol list cannot exceed 65535 bytes":
-    var alpn = initHashSet[string]()
+    var alpn: seq[string]
     for i in 0 .. 256:
       let prefix = $i
-      alpn.incl(prefix & repeat('a', 255 - prefix.len))
+      alpn.add(prefix & repeat('a', 255 - prefix.len))
 
     expect QuicConfigError:
       discard TLSConfig.new(testCertificate(), testPrivateKey(), alpn)

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
-import std/sets
 import boringssl
 import results
 import ./[errors, certificateverifier, lsquic_ffi]
@@ -16,7 +15,7 @@ proc new*(
     T: typedesc[TLSConfig],
     certificate: seq[byte] = @[],
     key: seq[byte] = @[],
-    alpn: HashSet[string] = initHashSet[string](),
+    alpn: seq[string] = @[],
     certVerifier: Opt[CertificateVerifier] = Opt.none(CertificateVerifier),
 ): T =
   # In a config, certificate and keys are optional, but if using them, both must

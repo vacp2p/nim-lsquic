@@ -181,6 +181,9 @@ proc openStream*(
 proc certificates*(conn: Connection): seq[seq[byte]] {.raises: [].} =
   conn.quicContext.certificates(conn.quicConn)
 
+proc negotiatedProtocol*(conn: Connection): string {.raises: [].} =
+  conn.quicConn.negotiatedProtocol
+
 proc localAddress*(connection: Connection): TransportAddress {.raises: [].} =
   connection.local
 

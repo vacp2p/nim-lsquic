@@ -3,7 +3,6 @@
 
 {.used.}
 
-import std/sets
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
 import lsquic/context/[client, context, io, stream]
@@ -621,9 +620,8 @@ suite "lifecycle":
         discard serverName
         derCertificates.len > 0
     )
-    let tlsConfig = TLSConfig.new(
-      testCertificate(), testPrivateKey(), @["test"].toHashSet(), Opt.some(verifier)
-    )
+    let tlsConfig =
+      TLSConfig.new(testCertificate(), testPrivateKey(), @["test"], Opt.some(verifier))
     let ctx = ClientContext.new(tlsConfig).valueOr:
       raiseAssert error
     let local = initTAddress("127.0.0.1:12345")
