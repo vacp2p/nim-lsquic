@@ -20,6 +20,12 @@ type ReadTask* = object
   dataLen*: int
   doneFut*: Future[int].Raising([CancelledError, StreamError])
 
+type ReadContext = object
+  data: ptr byte
+  dataLen: int
+  offset: int
+  receivedFin: bool
+
 type Stream* = ref object
   quicStream*: ptr lsquic_stream_t
   canRead*: bool
@@ -35,6 +41,7 @@ type Stream* = ref object
   toWrite*: Opt[WriteTask]
   readLock*: AsyncLock
   isEof*: bool # Received a FIN from remote
+  readFailure*: string
   # Every path that sets closedByEngine or fires `closed` must settle these;
   # missing one hangs the parked operation instead of failing it.
   toRead*: Opt[ReadTask]
@@ -83,6 +90,37 @@ proc newStreamResetError*(
   )
   exc.how = stream.resetHow
   exc
+
+proc markReadFailed*(stream: Stream, reason: string) {.raises: [].} =
+  if stream.readFailure.len == 0:
+    stream.readFailure = reason
+
+proc readToBuffer(
+    ctx: pointer, data: ptr uint8, dataLen: csize_t, fin: cint
+): csize_t {.cdecl, raises: [].} =
+  let readCtx = cast[ptr ReadContext](ctx)
+  let remaining = readCtx.dataLen - readCtx.offset
+  let count = min(dataLen, remaining.csize_t).int
+  if count > 0:
+    let dst = cast[ptr UncheckedArray[byte]](readCtx.data)
+    copyMem(addr dst[readCtx.offset], data, count)
+    readCtx.offset += count
+  if fin != 0 and count.csize_t == dataLen:
+    readCtx.receivedFin = true
+  count.csize_t
+
+proc readFromStream*(
+    stream: ptr lsquic_stream_t, data: ptr byte, dataLen: int, receivedFin: var bool
+): ssize_t {.raises: [].} =
+  receivedFin = false
+  if dataLen < 0 or (dataLen > 0 and data.isNil):
+    errno = EINVAL
+    return -1
+
+  var readCtx = ReadContext(data: data, dataLen: dataLen)
+  let n = lsquic_stream_readf(stream, readToBuffer, addr readCtx)
+  receivedFin = readCtx.receivedFin
+  return n
 
 proc failPendingRead*(stream: Stream, error: ref StreamError) {.raises: [].} =
   let task = stream.toRead.valueOr:
@@ -147,6 +185,10 @@ template raiseIfReadReset(stream: Stream) =
   if stream.readResetByPeer():
     raise stream.newStreamResetError("stream read")
 
+template raiseIfReadFailed(stream: Stream) =
+  if stream.readFailure.len > 0:
+    raise newException(StreamError, stream.readFailure)
+
 template raiseIfWriteReset(stream: Stream) =
   if stream.writeResetByPeer():
     raise stream.newStreamResetError("stream write")
@@ -183,9 +225,9 @@ proc closeIfDone*(stream: Stream): bool {.raises: [].} =
 
 proc abort*(stream: Stream) =
   stream.closeWrite = true
-  stream.isEof = true
+  stream.markReadFailed("stream aborted")
   stream.abortPendingWrites("stream aborted")
-  stream.completePendingRead()
+  stream.failPendingRead(newException(StreamError, stream.readFailure))
   discard stream.requestClose()
   if not stream.closed.isSet():
     stream.closed.fire()
@@ -213,6 +255,9 @@ proc readOnce*(
   if not stream.canRead:
     raise newException(StreamError, "stream is write-only")
 
+  if dstLen < 0:
+    raiseAssert "dstLen cannot be negative"
+
   if dstLen == 0:
     return 0
 
@@ -220,9 +265,15 @@ proc readOnce*(
     raiseAssert "dst cannot be nil"
 
   raiseIfReadReset(stream)
+  raiseIfReadFailed(stream)
 
-  if stream.isEof or stream.closedByEngine:
+  if stream.isEof:
+    if not stream.closeIfDone():
+      stream.abort()
+      raise newException(StreamError, "could not close the stream")
     return 0
+  if stream.closedByEngine:
+    raise newException(StreamError, "stream closed before end of stream")
 
   await stream.readLock.acquire()
 
@@ -233,19 +284,23 @@ proc readOnce*(
       discard # should not happen - lock acquired directly above
 
   raiseIfReadReset(stream)
+  raiseIfReadFailed(stream)
 
   # In case stream was closed while waiting for lock being acquired
   if stream.closedByEngine:
-    return 0
+    raise newException(StreamError, "stream closed before end of stream")
 
-  let n = lsquic_stream_read(stream.quicStream, dst, dstLen.csize_t)
+  var receivedFin = false
+  let n = readFromStream(stream.quicStream, dst, dstLen, receivedFin)
+  if receivedFin:
+    stream.isEof = true
 
   if n == 0:
-    stream.isEof = true
-    if not stream.closeIfDone():
-      stream.abort()
-      raise newException(StreamError, "could not close the stream")
-    return 0
+    if stream.isEof:
+      if not stream.closeIfDone():
+        stream.abort()
+        raise newException(StreamError, "could not close the stream")
+      return 0
   elif n > 0:
     return n
 

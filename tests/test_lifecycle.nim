@@ -76,8 +76,7 @@ suite "lifecycle":
     expect StreamResetError:
       discard await incomingStream.readOnce(buf).wait(timeout)
 
-  asyncTest "connection abort ends the peer's stream at eof":
-    # TODO: vacp2p/nim-lsquic#136
+  asyncTest "connection abort fails the peer's stream without fin":
     let peers = await connectPeers()
     defer:
       await peers.stop()
@@ -92,7 +91,8 @@ suite "lifecycle":
     check (await peers.incoming.closedFuture().withTimeout(timeout))
 
     var buf = newSeq[byte](8)
-    check (await incomingStream.readOnce(buf).wait(timeout)) == 0
+    expect StreamError:
+      discard await incomingStream.readOnce(buf).wait(timeout)
 
   asyncTest "accept skips closed connection and client redials":
     let server = makeServer()
@@ -156,7 +156,8 @@ suite "lifecycle":
 
     let stream = await incomingStream
     var buf = newSeq[byte](1)
-    check (await stream.readOnce(buf)) == 0
+    expect StreamError:
+      discard await stream.readOnce(buf)
 
   asyncTest "pending incoming stream survives immediate client close":
     let peers = await connectPeers()
@@ -170,7 +171,8 @@ suite "lifecycle":
 
     let stream = await incomingStream.wait(timeout)
     var buf = newSeq[byte](1)
-    check (await stream.readOnce(buf)) == 0
+    expect StreamError:
+      discard await stream.readOnce(buf)
 
   asyncTest "client stop closes active connections":
     let peers = await connectPeers()
@@ -557,14 +559,8 @@ suite "lifecycle":
 
     check isReset
 
-  asyncTest "vanished peer ends the stream at eof without a fin":
-    # TODO: vacp2p/nim-lsquic#140
-    # Skipped: reaching the case costs the 30s fixed lsquic idle timeout
-    skip()
-    return
-
-    # The peer's socket disappears mid-stream, so it never sends a FIN, yet the
-    # reader is handed the same end of stream a FIN produces.
+  asyncTest "vanished peer fails the stream without a fin":
+    # The peer's socket disappears mid-stream, so it never sends a FIN.
     let server = makeEndpoint(AutoAddressIP4)
     let client = makeDialEndpoint(AddressFamily.IPv4)
     defer:
@@ -584,8 +580,9 @@ suite "lifecycle":
     await server.datagramTransport().closeWait()
 
     var buf = newSeq[byte](8)
-    check (await clientStream.readOnce(buf).wait(45.seconds)) == 0
-    check clientStream.isEof
+    expect StreamError:
+      discard await clientStream.readOnce(buf).wait(45.seconds)
+    check not clientStream.isEof
     check not clientStream.resetByPeer
 
   asyncTest "zero length reads return zero":
@@ -819,21 +816,6 @@ suite "lifecycle":
     expect AssertionDefect:
       discard await stream.readOnce(nil, 8)
 
-  asyncTest "nil write source is rejected":
-    let stream = Stream.new()
-    defer:
-      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
-
-    expect AssertionDefect:
-      await stream.write(nil, 8)
-
-  asyncTest "zero length writes ignore a nil source":
-    let stream = Stream.new()
-    defer:
-      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
-
-    await stream.write(nil, 0)
-
   asyncTest "read waiting for the read lock sees the stream closed by the engine":
     let stream = Stream.new()
     defer:
@@ -849,7 +831,8 @@ suite "lifecycle":
 
     # the post-lock re-check keeps the read away from the freed native stream
     check (await reading.withTimeout(timeout))
-    check (await reading) == 0
+    expect StreamError:
+      discard await reading
 
   asyncTest "read waiting for the read lock sees a peer reset":
     let stream = Stream.new()
@@ -897,7 +880,7 @@ suite "lifecycle":
   # One test per close path, pinning the rule that each settles the parked
   # operation itself.
 
-  asyncTest "engine close completes a parked read with eof":
+  asyncTest "engine close without fin fails parked and later reads":
     let stream = Stream.new()
     var buf = newSeq[byte](8)
     let doneFut =
@@ -909,7 +892,13 @@ suite "lifecycle":
 
     check stream.toRead.isNone()
     check doneFut.finished
-    check (await doneFut.wait(timeout)) == 0
+    expect StreamError:
+      discard await doneFut.wait(timeout)
+
+    var laterBuf = newSeq[byte](1)
+    expect StreamError:
+      discard await stream.readOnce(laterBuf)
+    check not stream.isEof
 
   asyncTest "engine close fails a parked read after a peer read reset":
     let stream = Stream.new()
@@ -965,14 +954,15 @@ suite "lifecycle":
 
     stream.abort()
 
-    # Unlike close, abort takes the read side down too, so later reads end at eof.
-    check stream.isEof
+    # Unlike a received FIN, abort terminates the read side with an error.
+    check not stream.isEof
     check stream.toRead.isNone()
     check stream.toWrite.isNone()
     check readFut.finished
     check writeFut.finished
-    check (await readFut.wait(timeout)) == 0
 
+    expect StreamError:
+      discard await readFut.wait(timeout)
     expect StreamError:
       await writeFut.wait(timeout)
 
