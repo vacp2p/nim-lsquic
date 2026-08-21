@@ -102,8 +102,8 @@ proc packetIn*(
     remote: TransportAddress,
     ecn: cint = 0,
 ): bool {.discardable.} =
-  ## Returns false when the engine did not take the datagram, so that a caller
-  ## draining a burst knows whether it has to tick at all.
+  ## Returns false when the datagram was not handed to the engine because it is
+  ## empty or the context has stopped. The engine's return code is not exposed.
   if data.len == 0 or not ctx.isRunning():
     return false
 
