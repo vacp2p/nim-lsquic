@@ -5,6 +5,10 @@ when not defined(windows):
   else:
     switch("gcc.linkerexe", "g++")
 
+const BORINGSSL_USE_ASM {.booldefine.}: bool = true
+when not BORINGSSL_USE_ASM:
+  switch("passC", "-DOPENSSL_NO_ASM")
+
 switch("warningAsError", "UnusedImport:on")
 switch("warningAsError", "UseBase:on")
 
