@@ -261,7 +261,7 @@ proc alpnSelectProtoCB(
       inlen,
     ) == OPENSSL_NPN_NEGOTIATED
   ):
-    # Passing the local list first deliberately applies server preference.
+    # SSL_select_next_proto prefers its first list, so pass the server list first.
     return SSL_TLSEXT_ERR_OK
 
   return SSL_TLSEXT_ERR_ALERT_FATAL
