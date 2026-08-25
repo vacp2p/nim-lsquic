@@ -247,7 +247,7 @@ suite "datagram routing":
     incoming.close()
     await allFutures(outgoing.closedFuture(), incoming.closedFuture())
 
-  asyncTest "an unknown cid reaches the server context only in an initial packet":
+  asyncTest "unknown reset candidates reach both contexts":
     # a self-dial puts both engines on one socket, so the cid decides
     let endpoint = makeEndpoint(AutoAddressIP4)
     defer:
@@ -262,7 +262,9 @@ suite "datagram routing":
       # an unknown cid is worth handing over only when it can open a connection
       endpoint.routeDatagram(longHeaderPacket(UnknownCid), address, address) ==
         {rtServer}
-      endpoint.routeDatagram(shortHeaderPacket(UnknownCid), address, address) == {}
+      # Only LSQUIC can identify a stateless reset by its trailing token.
+      endpoint.routeDatagram(shortHeaderPacket(UnknownCid), address, address) ==
+        {rtClient, rtServer}
 
     outgoing.close()
     incoming.close()

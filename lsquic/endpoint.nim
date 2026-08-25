@@ -169,6 +169,14 @@ proc routeDatagram(
     endpoint.serverContext.packetIn(data, local, remote)
     return {rtServer}
 
+  if hasClientContext and hasServerContext and data.len > 0 and
+      (data[0] and 0xC0'u8) == 0x40'u8:
+    trace "Routing unknown short-header datagram to both contexts",
+      bytes = data.len, local, remote
+    endpoint.clientContext.packetIn(data, local, remote)
+    endpoint.serverContext.packetIn(data, local, remote)
+    return {rtClient, rtServer}
+
   trace "Dropping datagram with unknown CID", bytes = data.len, local, remote
   {}
 
