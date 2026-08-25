@@ -13,7 +13,7 @@ requires "chronos >= 4.0.4"
 requires "nimcrypto >= 0.6.0"
 requires "unittest2"
 requires "chronicles >= 0.11.0"
-requires "https://github.com/vacp2p/nim-boringssl >= 0.0.4"
+requires "https://github.com/vacp2p/nim-boringssl >= 0.0.11"
 
 import std/[os, strutils, sequtils]
 
@@ -32,7 +32,7 @@ task test, "Run tests":
   exec "./tests/test_all --output-level=VERBOSE"
 
 task test_no_asm, "Run tests without BoringSSL assembly":
-  flags = flags & " -d:BORINGSS_USE_ASM=false "
+  flags = flags & " -d:BORINGSSL_USE_ASM=false "
   testTask()
 
 task test_release, "Run tests - release":
