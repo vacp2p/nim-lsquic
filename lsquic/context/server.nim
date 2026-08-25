@@ -69,6 +69,13 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
   ctx.settings.es_base_plpmtu = 1280
   ctx.settings.es_max_plpmtu = 0
   ctx.settings.es_pace_packets = 1
+  ctx.settings.es_handshake_to = 10 * 1000 * 1000
+  ctx.settings.es_idle_conn_to = 30 * 1000 * 1000
+  ctx.settings.es_idle_timeout = 30
+  ctx.settings.es_ping_period = 0
+  ctx.settings.es_max_streams_in = 100
+  ctx.settings.es_init_max_streams_bidi = 100
+  ctx.settings.es_init_max_streams_uni = 3
 
   ctx.settings.es_cfcw = 1536 * 1024
   ctx.settings.es_max_cfcw = 1536 * 1024
