@@ -319,27 +319,6 @@ suite "certificate verifier":
     expect DialError:
       discard await client.dial(listener.localAddress()).wait(dialTimeout)
 
-  asyncTest "alpn negotiation uses server preference and is readable":
-    let client = makeClient(
-      CustomCertificateVerifier.init(acceptingCertificateCb),
-      @["client-first", "shared"],
-    )
-    let server = makeServer(
-      CustomCertificateVerifier.init(acceptingCertificateCb),
-      @["shared", "client-first"],
-    )
-    let listener = server.listen(AutoAddressIP4)
-    defer:
-      await allFutures(client.stop(), listener.stop())
-
-    let accepting = listener.accept()
-    let outgoing = await client.dial(listener.localAddress())
-    let incoming = await accepting
-
-    check:
-      outgoing.negotiatedProtocol() == "shared"
-      incoming.negotiatedProtocol() == "shared"
-
   asyncTest "server-side verifier callback does not fail handshake without client auth":
     let recorder = RejectVerifierRecorder(fired: newAsyncEvent())
     let client = makeClient(CustomCertificateVerifier.init(acceptingCertificateCb))

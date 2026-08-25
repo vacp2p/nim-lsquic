@@ -3,7 +3,7 @@
 
 {.used.}
 
-import std/strutils
+import std/[sets, strutils]
 import results
 import unittest2
 import boringssl
@@ -38,6 +38,20 @@ suite "tls config":
     let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), @["test", "quic-echo"])
 
     check cfg.alpnWire == "\x04test\x09quic-echo"
+
+  test "hash set alpn remains source compatible":
+    let alpn = @["test"].toHashSet()
+    let positional = TLSConfig.new(
+      testCertificate(), testPrivateKey(), alpn, Opt.none(CertificateVerifier)
+    )
+    let named = TLSConfig.new(alpn = alpn)
+
+    check positional.alpnWire == "\x04test"
+    check named.alpnWire == "\x04test"
+
+  test "duplicate alpn values are rejected":
+    expect QuicConfigError:
+      discard TLSConfig.new(testCertificate(), testPrivateKey(), @["test", "test"])
 
   test "alpn value of 255 bytes still encodes":
     let protocol = repeat('a', 255)

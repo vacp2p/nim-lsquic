@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
+import std/sets
 import boringssl
 import results
 import ./[errors, certificateverifier, lsquic_ffi]
@@ -28,10 +29,15 @@ proc new*(
       raise newException(QuicConfigError, "key is required in TLSConfig")
 
   var alpnWire = newString(0)
+  var seen = initHashSet[string]()
   for a in alpn:
     if a.len == 0 or a.len > 255:
       raise
         newException(QuicConfigError, "ALPN protocol names must contain 1 to 255 bytes")
+    if a in seen:
+      raise newException(QuicConfigError, "ALPN protocol names must be unique")
+    seen.incl(a)
+
     alpnWire.add chr(a.len)
     alpnWire.add a
 
@@ -41,6 +47,18 @@ proc new*(
   TLSConfig(
     alpnWire: alpnWire, certVerifier: certVerifier, certificate: certificate, key: key
   )
+
+proc new*(
+    T: typedesc[TLSConfig],
+    certificate: seq[byte] = @[],
+    key: seq[byte] = @[],
+    alpn: HashSet[string],
+    certVerifier: Opt[CertificateVerifier] = Opt.none(CertificateVerifier),
+): T {.deprecated: "use an ordered seq[string] for ALPN".} =
+  var protocols: seq[string]
+  for protocol in alpn:
+    protocols.add(protocol)
+  T.new(certificate, key, protocols, certVerifier)
 
 proc toX509*(pemCertificate: seq[byte]): Result[ptr X509, string] =
   if pemCertificate.len == 0:
