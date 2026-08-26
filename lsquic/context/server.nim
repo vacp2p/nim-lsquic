@@ -40,7 +40,9 @@ proc onNewConn(
   cast[ptr lsquic_conn_ctx_t](quicConn)
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
-  debug "Connection closed: server"
+  let (connStatus, msg) = connectionStatus(conn)
+  debug "Connection closed: server",
+    status = connStatus, statelessReset = connStatus == LSCONN_ST_RESET, reason = msg
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
     let quicConn = cast[QuicConnection](conn_ctx)
@@ -76,6 +78,7 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
   ctx.settings.es_max_streams_in = 100
   ctx.settings.es_init_max_streams_bidi = 100
   ctx.settings.es_init_max_streams_uni = 3
+  ctx.settings.es_honor_prst = 1
 
   ctx.settings.es_cfcw = 1536 * 1024
   ctx.settings.es_max_cfcw = 1536 * 1024

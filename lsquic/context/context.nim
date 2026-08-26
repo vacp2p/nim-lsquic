@@ -107,6 +107,13 @@ proc trackConnectionCid*(ctx: QuicContext, conn: ptr lsquic_conn_t) {.raises: []
 proc ownsCid*(ctx: QuicContext, cid: CidKey): bool {.raises: [].} =
   not ctx.isNil and cid in ctx.ownedCids
 
+proc connectionStatus*(
+    conn: ptr lsquic_conn_t
+): tuple[status: enum_LSQUIC_CONN_STATUS, reason: string] {.raises: [].} =
+  var buf: array[256, char]
+  result.status = lsquic_conn_status(conn, cast[cstring](addr buf[0]), buf.len.csize_t)
+  result.reason = $cast[cstring](addr buf[0])
+
 proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
   not ctx.isNil and ctx.running and not ctx.engine.isNil
 
