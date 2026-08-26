@@ -75,6 +75,20 @@ suite "lifecycle":
     check (await peers.incoming.closedFuture().withTimeout(timeout))
     check peers.incoming.isClosed
 
+  asyncTest "connection close does not propagate to the dialing peer":
+    # TODO: vacp2p/nim-lsquic#162
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    peers.incoming.close()
+
+    check (await peers.incoming.closedFuture().withTimeout(timeout))
+    # the CONNECTION_CLOSE is scheduled but no engine pass flushes it,
+    # so the dialer is left to time out after 30s
+    check not (await peers.outgoing.closedFuture().withTimeout(timeout))
+    check not peers.outgoing.isClosed
+
   asyncTest "connection close resets the peer's stream":
     # TODO: vacp2p/nim-lsquic#136
     let peers = await connectPeers()
