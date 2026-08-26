@@ -74,6 +74,17 @@ suite "lifecycle":
     check (await peers.incoming.closedFuture().withTimeout(timeout))
     check peers.incoming.isClosed
 
+  asyncTest "accepted connection close propagates to peer":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    peers.incoming.close()
+
+    check (await peers.incoming.closedFuture().withTimeout(timeout))
+    check (await peers.outgoing.closedFuture().withTimeout(timeout))
+    check peers.outgoing.isClosed
+
   asyncTest "connection close resets the peer's stream":
     # TODO: vacp2p/nim-lsquic#136
     let peers = await connectPeers()

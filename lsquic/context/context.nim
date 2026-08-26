@@ -391,7 +391,12 @@ proc getSSLCtx*(peer_ctx: pointer, sockaddr: ptr SockAddr): ptr SSL_CTX {.cdecl.
 
 proc close*(ctx: QuicContext, conn: QuicConnection) =
   if ctx.isRunning() and conn != nil and conn.lsquicConn != nil:
-    lsquic_conn_close(conn.lsquicConn)
+    if conn.isOutgoing:
+      lsquic_conn_close(conn.lsquicConn)
+    else:
+      # LSQUIC may close servers locally without sending CONNECTION_CLOSE.
+      # Its abort path sends CONNECTION_CLOSE with NO_ERROR.
+      lsquic_conn_abort(conn.lsquicConn)
     ctx.processWhenReady()
 
 proc abort*(ctx: QuicContext, conn: QuicConnection) =
