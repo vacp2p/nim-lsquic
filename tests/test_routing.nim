@@ -217,6 +217,13 @@ suite "datagram header parsing":
       not isIetfInitial(shortHeaderPacket(ClientCid))
       not isIetfInitial(newSeq[byte]())
 
+  test "IETF short headers require the fixed bit":
+    check:
+      isIetfShortHeader(shortHeaderPacket(ClientCid))
+      not isIetfShortHeader(shortHeaderPacket(ClientCid, firstByte = 0))
+      not isIetfShortHeader(longHeaderPacket(ClientCid))
+      not isIetfShortHeader(newSeq[byte]())
+
 suite "datagram routing":
   teardown:
     checkTrackers()

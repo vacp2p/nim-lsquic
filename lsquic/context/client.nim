@@ -47,9 +47,7 @@ proc onHandshakeDone(
     quicClientConn.connectedFut.complete()
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
-  var buf: array[256, char]
-  let connStatus = lsquic_conn_status(conn, cast[cstring](addr buf[0]), buf.len.csize_t)
-  let msg = $cast[cstring](addr buf[0])
+  let (connStatus, msg) = connectionStatus(conn)
   trace "Connection closed: client",
     status = connStatus, statelessReset = connStatus == LSCONN_ST_RESET, reason = msg
   let conn_ctx = lsquic_conn_get_ctx(conn)
