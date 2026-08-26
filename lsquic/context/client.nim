@@ -47,16 +47,14 @@ proc onHandshakeDone(
     quicClientConn.connectedFut.complete()
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
-  debug "Connection closed: client"
+  let (connStatus, msg) = connectionStatus(conn)
+  trace "Connection closed: client",
+    status = connStatus, statelessReset = connStatus == LSCONN_ST_RESET, reason = msg
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
     let quicClientConn = cast[QuicConnection](conn_ctx)
     if not quicClientConn.connectedFut.finished:
       # Not connected yet
-      var buf: array[256, char]
-      let connStatus =
-        lsquic_conn_status(conn, cast[cstring](addr buf[0]), buf.len.csize_t)
-      let msg = $cast[cstring](addr buf[0])
       quicClientConn.connectedFut.fail(
         newException(
           DialError, "could not connect to server. Status: " & $connStatus & ". " & msg
@@ -147,6 +145,7 @@ proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
   ctx.settings.es_max_streams_in = 100
   ctx.settings.es_init_max_streams_bidi = 100
   ctx.settings.es_init_max_streams_uni = 100
+  ctx.settings.es_honor_prst = 1
 
   ctx.settings.es_cfcw = 4 * 1024 * 1024
   ctx.settings.es_max_cfcw = 8 * 1024 * 1024

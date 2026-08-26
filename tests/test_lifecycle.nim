@@ -5,7 +5,7 @@
 
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
-import lsquic/context/[client, context, io, stream]
+import lsquic/context/[client, context, io, server, stream]
 import ./helpers/[address, certificate, clientserver, stream, trackers]
 from lsquic/lsquic_ffi import
   lsquic_stream_ctx_t, lsquic_conn_t, lsquic_stream_t, LSQUIC_DF_INIT_MAX_STREAMS_BIDI
@@ -17,6 +17,25 @@ const timeout = 2.seconds
 suite "lifecycle":
   teardown:
     checkTrackers()
+
+  test "client and server honor stateless resets":
+    let
+      tlsConfig = makeTLSConfig()
+      clientCtx = ClientContext.new(tlsConfig).valueOr:
+        raiseAssert error
+      serverCtx = ServerContext.new(tlsConfig).valueOr:
+        clientCtx.stop()
+        clientCtx.destroy()
+        raiseAssert error
+    defer:
+      clientCtx.stop()
+      clientCtx.destroy()
+      serverCtx.stop()
+      serverCtx.destroy()
+
+    check:
+      clientCtx.settings.es_honor_prst == 1
+      serverCtx.settings.es_honor_prst == 1
 
   asyncTest "listener stop makes accept fail":
     let server = makeServer()

@@ -127,10 +127,21 @@ proc packetDcid(
     cid.bytes[i] = packet[start + i]
   true
 
+const
+  HeaderFormBit = 0b1000_0000'u8
+  FixedBit = 0b0100_0000'u8
+  HeaderBitsMask = HeaderFormBit or FixedBit
+  LongPacketTypeMask = 0b0011_0000'u8
+
 func isIetfInitial(packet: openArray[byte]): bool {.raises: [].} =
   if packet.len == 0:
     return false
-  (packet[0] and 0xC0'u8) == 0xC0'u8 and (packet[0] and 0x30'u8) == 0
+  (packet[0] and HeaderBitsMask) == HeaderBitsMask and
+    (packet[0] and LongPacketTypeMask) == 0
+
+func isIetfShortHeader(packet: openArray[byte]): bool {.raises: [].} =
+  ## IETF short headers have Header Form clear and Fixed Bit set.
+  packet.len > 0 and (packet[0] and HeaderBitsMask) == FixedBit
 
 proc routeDatagram(
     endpoint: QuicEndpoint, data: openArray[byte], local, remote: TransportAddress
@@ -168,6 +179,13 @@ proc routeDatagram(
       bytes = data.len, local, remote
     endpoint.serverContext.packetIn(data, local, remote)
     return {rtServer}
+
+  if hasClientContext and hasServerContext and data.isIetfShortHeader():
+    trace "Routing unknown short-header datagram to both contexts",
+      bytes = data.len, local, remote
+    endpoint.clientContext.packetIn(data, local, remote)
+    endpoint.serverContext.packetIn(data, local, remote)
+    return {rtClient, rtServer}
 
   trace "Dropping datagram with unknown CID", bytes = data.len, local, remote
   {}
@@ -515,4 +533,5 @@ when defined(lsquic_testing):
     ## Test-only: number of connections tracked by this endpoint's manager.
     endpoint.connman.len
 
-  export scidLen, packetDcid, isIetfInitial, routeDatagram, RouteTarget
+  export
+    scidLen, packetDcid, isIetfInitial, isIetfShortHeader, routeDatagram, RouteTarget
