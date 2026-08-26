@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH
 
-import std/[json, sets, sequtils, os, algorithm, math, strutils]
+import std/[json, sequtils, os, algorithm, math, strutils]
 from std/posix import Rusage, RUSAGE_SELF, getrusage
 import chronos, results, stew/endians2, chronicles
 import lsquic
 
-export json, sets, sequtils, os, algorithm, math, strutils
+export json, sequtils, os, algorithm, math, strutils
 export chronos, results, endians2, chronicles
 export lsquic
 
@@ -117,10 +117,7 @@ proc makeClient*(): QuicClient {.
   let customCertVerif: CertificateVerifier =
     CustomCertificateVerifier.init(certificateCb)
   let clientTLSConfig = TLSConfig.new(
-    testCertificate(),
-    testPrivateKey(),
-    @["bench"].toHashSet(),
-    Opt.some(customCertVerif),
+    testCertificate(), testPrivateKey(), @["bench"], Opt.some(customCertVerif)
   )
   return QuicClient.new(clientTLSConfig)
 
@@ -128,10 +125,7 @@ proc makeServer*(): QuicServer {.raises: [QuicConfigError].} =
   let customCertVerif: CertificateVerifier =
     CustomCertificateVerifier.init(certificateCb)
   let serverTLSConfig = TLSConfig.new(
-    testCertificate(),
-    testPrivateKey(),
-    @["bench"].toHashSet(),
-    Opt.some(customCertVerif),
+    testCertificate(), testPrivateKey(), @["bench"], Opt.some(customCertVerif)
   )
   return QuicServer.new(serverTLSConfig)
 
