@@ -105,7 +105,7 @@ suite "tls config":
     let der = cert.x509toDERBytes().valueOr:
       raiseAssert "test certificate must convert to DER"
 
-    var readPos = cast[ptr uint8](unsafeAddr der[0])
+    var readPos = cast[ptr uint8](addr der[0])
     let reparsed = d2i_X509(nil, addr readPos, der.len.clong)
     defer:
       X509_free(reparsed)

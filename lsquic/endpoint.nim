@@ -113,7 +113,7 @@ proc packetDcid(
 
   var cidLen: uint8
   let offset = lsquic_dcid_from_packet(
-    unsafeAddr packet[0], packet.len.csize_t, endpoint.scidLen(), addr cidLen
+    addr packet[0], packet.len.csize_t, endpoint.scidLen(), addr cidLen
   )
   if offset < 0:
     return false
