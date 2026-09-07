@@ -378,6 +378,22 @@ suite "lifecycle":
     check (await incomingStream.readOnce(buf)) == 0
     await incomingStream.close()
 
+  asyncTest "write callback after local shutdown does not abort stream":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[42'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+    var firstByte = newSeq[byte](1)
+    check (await incomingStream.readOnce(firstByte)) == 1
+    await outgoingStream.close()
+
+    onWrite(outgoingStream.quicStream, cast[ptr lsquic_stream_ctx_t](outgoingStream))
+
+    check outgoingStream.readFailure.len == 0
+
   asyncTest "cancel pending write clears stream write task":
     let peers = await connectPeers()
     defer:
@@ -473,6 +489,30 @@ suite "lifecycle":
     check (await reading.withTimeout(timeout))
     check (await reading) == 0
     await incomingStream.close()
+
+  asyncTest "EOF after local half close does not abort stream":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[42'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+
+    var firstByte = newSeq[byte](1)
+    check (await incomingStream.readOnce(firstByte)) == 1
+    await incomingStream.close()
+
+    var buf = newSeq[byte](8)
+    let reading = incomingStream.readOnce(buf)
+    await sleepAsync(100.milliseconds)
+    check not reading.finished
+
+    await outgoingStream.close()
+
+    check (await reading.withTimeout(timeout))
+    check (await reading) == 0
+    check incomingStream.readFailure.len == 0
 
   asyncTest "close then EOF retires peer-initiated stream credit":
     const StreamCount = 120
