@@ -161,8 +161,10 @@ proc clearPendingRead(
     return
 
   if lsquic_stream_wantread(stream.quicStream, 0) == -1:
-    error "could not set stream wantread",
-      streamId = lsquic_stream_id(stream.quicStream)
+    let readErrno = errno
+    if readErrno != EBADF:
+      error "could not set stream wantread",
+        streamId = lsquic_stream_id(stream.quicStream), errno = readErrno
 
 proc clearPendingWrite(
     stream: Stream, doneFut: Future[void].Raising([CancelledError, StreamError])
@@ -178,8 +180,10 @@ proc clearPendingWrite(
     return
 
   if lsquic_stream_wantwrite(stream.quicStream, 0) == -1:
-    error "could not set stream wantwrite",
-      streamId = lsquic_stream_id(stream.quicStream)
+    let writeErrno = errno
+    if writeErrno != EBADF:
+      error "could not set stream wantwrite",
+        streamId = lsquic_stream_id(stream.quicStream), errno = writeErrno
 
 template raiseIfReadReset(stream: Stream) =
   if stream.readResetByPeer():
