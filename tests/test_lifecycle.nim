@@ -390,10 +390,7 @@ suite "lifecycle":
     check (await incomingStream.readOnce(firstByte)) == 1
     await outgoingStream.close()
 
-    onWrite(
-      outgoingStream.quicStream,
-      cast[ptr lsquic_stream_ctx_t](outgoingStream),
-    )
+    onWrite(outgoingStream.quicStream, cast[ptr lsquic_stream_ctx_t](outgoingStream))
 
     check outgoingStream.readFailure.len == 0
 
