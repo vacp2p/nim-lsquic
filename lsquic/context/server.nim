@@ -8,7 +8,7 @@ import chronos
 import chronos/osdefs
 import ./[context, io, stream]
 import ../[lsquic_ffi, tlsconfig, timeout, stream, certificates, tracking]
-import ../helpers/[sequninit, transportaddr]
+import ../helpers/transportaddr
 
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
@@ -67,25 +67,14 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
   ctx.settings.es_cc_algo = Cubic
-  ctx.settings.es_dplpmtud = 1
   ctx.settings.es_base_plpmtu = 1280
-  ctx.settings.es_max_plpmtu = 0
-  ctx.settings.es_pace_packets = 1
-  ctx.settings.es_handshake_to = 10 * 1000 * 1000
-  ctx.settings.es_idle_conn_to = 30 * 1000 * 1000
-  ctx.settings.es_idle_timeout = 30
-  ctx.settings.es_ping_period = 0
-  ctx.settings.es_max_streams_in = 100
   ctx.settings.es_init_max_streams_bidi = 100
-  ctx.settings.es_init_max_streams_uni = 3
   ctx.settings.es_honor_prst = 1
 
-  ctx.settings.es_cfcw = 1536 * 1024
   ctx.settings.es_max_cfcw = 1536 * 1024
-  ctx.settings.es_sfcw = 1 * 1024 * 1024
   ctx.settings.es_max_sfcw = 1 * 1024 * 1024
-  ctx.settings.es_init_max_stream_data_bidi_local = ctx.settings.es_sfcw
-  ctx.settings.es_init_max_stream_data_bidi_remote = ctx.settings.es_sfcw
+  ctx.settings.es_init_max_stream_data_bidi_local = 1024 * 1024
+  ctx.settings.es_init_max_stream_data_bidi_remote = 1024 * 1024
 
   ctx.stream_if = struct_lsquic_stream_if(
     on_new_conn: onNewConn,
@@ -117,7 +106,7 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
 
   ctx.tickTimeout = newTimeout(
     proc() =
-      ctx.engine_process()
+      ctx.processWhenReady()
   )
   ctx.tickTimeout.set(Moment.now())
 

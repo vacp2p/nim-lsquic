@@ -63,6 +63,21 @@ suite "lifecycle":
     expect TransportError:
       discard await accepting3.wait(timeout)
 
+  asyncTest "remote closure defers state and notification together":
+    # The opaque handle is never passed to the native engine.
+    let quicConn = QuicConnection(lsquicConn: cast[ptr lsquic_conn_t](1))
+    let conn = newIncomingConnection(nil, quicConn)
+
+    quicConn.onClose()
+    quicConn.onClose = nil
+    quicConn.lsquicConn = nil
+
+    check not conn.isClosed
+    check not conn.closedFuture().finished
+
+    check (await conn.closedFuture().withTimeout(timeout))
+    check conn.isClosed
+
   asyncTest "connection close propagates to peer":
     let peers = await connectPeers()
     defer:
@@ -84,6 +99,28 @@ suite "lifecycle":
     check (await peers.incoming.closedFuture().withTimeout(timeout))
     check (await peers.outgoing.closedFuture().withTimeout(timeout))
     check peers.outgoing.isClosed
+
+  asyncTest "cancelling a stream waiter preserves connection closure notification":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let waiting = peers.incoming.incomingStream()
+    await waiting.cancelAndWait()
+    check not peers.incoming.isClosed
+    check not peers.incoming.closedFuture().finished
+
+    let nextStream = peers.incoming.incomingStream()
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[42'u8])
+    let incomingStream = await nextStream.wait(timeout)
+    var buf: array[1, byte]
+    check (await incomingStream.readOnce(buf)) == 1
+    check buf[0] == 42
+
+    peers.outgoing.close()
+    check (await peers.incoming.closedFuture().withTimeout(timeout))
+    check peers.incoming.isClosed
 
   asyncTest "connection close resets the peer's stream":
     # TODO: vacp2p/nim-lsquic#136

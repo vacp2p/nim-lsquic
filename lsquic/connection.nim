@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
-import chronicles
 import chronos, results
 import chronos/osdefs
 import ./[errors, stream, lsquic_ffi, certificateverifier]
@@ -12,26 +11,23 @@ type
   Connection* = ref object of RootObj
     local: TransportAddress
     remote: TransportAddress
-    ensureClosedFut: Future[void]
     isClosed*: bool
-    closed: AsyncEvent
-    # Reuse a single closed-event waiter to minimize allocations on hot paths.
-    closedWaiter: Future[void].Raising([CancelledError])
+    closed: Future[void].Raising([CancelledError])
     quicContext: QuicContext
     quicConn: QuicConnection
-
-  IncomingConnection = ref object of Connection
 
   OutgoingConnection = ref object of Connection
     serverName: string
     certVerifier: Opt[CertificateVerifier]
 
-proc ensureClosed(connection: Connection) {.async: (raises: [CancelledError]).} =
-  await connection.closedWaiter
-  debug "Closing connection"
-  connection.isClosed = true
-  if not connection.quicConn.closedLocal:
-    connection.quicConn.closedRemote = true
+proc markClosed(connection: Connection) {.raises: [].} =
+  # Keep the state update and close notification deferred beyond the native callback.
+  callSoon(
+    proc(_: pointer) {.gcsafe, raises: [].} =
+      connection.isClosed = true
+      if not connection.closed.finished:
+        connection.closed.complete()
+  )
 
 proc close*(conn: Connection) {.raises: [].} =
   if conn.isClosed:
@@ -47,8 +43,6 @@ proc abort*(conn: Connection) {.gcsafe, raises: [].} =
   conn.quicConn.closedLocal = true
   conn.quicContext.abort(conn.quicConn)
 
-# TODO: refactor this into a single newConnection
-
 proc newOutgoingConnection*(
     quicContext: QuicContext,
     local: TransportAddress,
@@ -56,44 +50,36 @@ proc newOutgoingConnection*(
     serverName: string = "",
     certVerifier: Opt[CertificateVerifier] = Opt.none(CertificateVerifier),
 ): OutgoingConnection =
-  let closed = newAsyncEvent()
-  let closedWaiter = closed.wait()
   let conn = OutgoingConnection(
     quicContext: quicContext,
     local: local,
     remote: remote,
-    closed: closed,
+    closed: Future[void].Raising([CancelledError]).init("Connection.closed"),
     serverName: serverName,
     certVerifier: certVerifier,
-    closedWaiter: closedWaiter,
   )
-  conn.ensureClosedFut = conn.ensureClosed()
   conn
 
 proc newIncomingConnection*(
     quicContext: QuicContext, quicConn: QuicConnection
 ): Connection =
-  let closed = newAsyncEvent()
-  let closedWaiter = closed.wait()
-  let conn = IncomingConnection(
+  let conn = Connection(
     quicContext: quicContext,
     quicConn: quicConn,
-    closed: closed,
-    closedWaiter: closedWaiter,
+    closed: Future[void].Raising([CancelledError]).init("Connection.closed"),
     local: quicConn.local,
     remote: quicConn.remote,
     isClosed: quicConn.lsquicConn.isNil,
   )
-  conn.ensureClosedFut = conn.ensureClosed()
   if conn.isClosed:
-    conn.closed.fire()
+    conn.markClosed()
   else:
     conn.quicConn.onClose = proc() {.raises: [].} =
-      conn.closed.fire()
+      conn.markClosed()
   conn
 
 proc closedFuture*(connection: Connection): Future[void] {.raises: [].} =
-  connection.ensureClosedFut
+  connection.closed
 
 proc dial*(
     connection: OutgoingConnection
@@ -101,7 +87,7 @@ proc dial*(
   let retFut =
     Future[void].Raising([CancelledError, DialError]).init("OutgoingConnection.dial")
   let onClose = proc() {.raises: [].} =
-    connection.closed.fire()
+    connection.markClosed()
 
   connection.quicConn = connection.quicContext.dial(
     connection.local, connection.remote, retFut, onClose, connection.serverName,
@@ -120,10 +106,10 @@ proc takeQueuedStream(connection: Connection): Opt[Stream] {.raises: [].} =
 proc waitForIncomingStream(
     connection: Connection
 ): Future[Stream] {.async: (raises: [CancelledError, ConnectionError]).} =
-  let incomingFut = connection.quicConn.incomingStream()
+  let incomingFut = connection.quicConn.incoming.get()
 
   try:
-    discard await race(incomingFut, connection.closedWaiter)
+    discard await race(incomingFut, connection.closed)
     if incomingFut.finished:
       return await incomingFut
 
@@ -179,7 +165,7 @@ proc openStream*(
   s
 
 proc certificates*(conn: Connection): seq[seq[byte]] {.raises: [].} =
-  conn.quicContext.certificates(conn.quicConn)
+  conn.quicConn.certChain
 
 proc localAddress*(connection: Connection): TransportAddress {.raises: [].} =
   connection.local

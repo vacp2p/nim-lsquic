@@ -117,7 +117,7 @@ proc connectionStatus*(
 proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
   not ctx.isNil and ctx.running and not ctx.engine.isNil
 
-proc engine_process*(ctx: QuicContext) =
+proc processWhenReady*(ctx: QuicContext) =
   if not ctx.isRunning():
     return
 
@@ -178,7 +178,6 @@ type QuicConnection* = ref object of RootObj
   certVerifier*: Opt[CertificateVerifier]
   onClose*: proc() {.gcsafe, raises: [].}
   closedLocal*: bool
-  closedRemote*: bool
   incoming*: AsyncQueue[Stream]
   connectedFut*: Future[void]
   pendingStreams: Deque[PendingStream] = initDeque[PendingStream]()
@@ -188,11 +187,6 @@ type ClientContext* = ref object of QuicContext
 
 type ServerContext* = ref object of QuicContext
   incoming*: AsyncQueue[QuicConnection]
-
-proc processWhenReady*(quicContext: QuicContext) =
-  if quicContext.isNil or quicContext.engine.isNil:
-    return
-  quicContext.engine_process()
 
 proc flushDeferred(udata: pointer) {.gcsafe, raises: [].} =
   let ctx = cast[QuicContext](udata)
@@ -208,11 +202,6 @@ proc processSoon*(quicContext: QuicContext) {.raises: [].} =
   quicContext.flushScheduled = true
   pin(quicContext) # the dispatcher holds a raw pointer until the callback runs
   callSoon(flushDeferred, cast[pointer](quicContext))
-
-proc incomingStream*(
-    quicConn: QuicConnection
-): Future[Stream] {.async: (raises: [CancelledError]).} =
-  await quicConn.incoming.get()
 
 proc addPendingStream*(
     quicConn: QuicConnection, s: Stream
@@ -457,8 +446,3 @@ proc onNewStream*(
       s
 
   return cast[ptr lsquic_stream_ctx_t](streamCtx)
-
-proc certificates*(
-    ctx: QuicContext, conn: QuicConnection
-): seq[seq[byte]] {.raises: [].} =
-  conn.certChain
