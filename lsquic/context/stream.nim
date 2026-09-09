@@ -69,8 +69,11 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
 
   let task = streamCtx.toRead.valueOr:
     if lsquic_stream_wantread(stream, 0) == -1:
-      trace "could not set stream wantread", streamId = lsquic_stream_id(stream)
-      streamCtx.abort()
+      let readErrno = errno
+      if readErrno != EBADF:
+        trace "could not set stream wantread",
+          streamId = lsquic_stream_id(stream), errno = readErrno
+        streamCtx.abort()
     return
 
   var receivedFin = false
@@ -106,8 +109,11 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
   streamCtx.toRead = Opt.none(ReadTask)
 
   if lsquic_stream_wantread(stream, 0) == -1:
-    trace "could not set stream wantread", streamId = lsquic_stream_id(stream)
-    streamCtx.abort()
+    let readErrno = errno
+    if readErrno != EBADF:
+      trace "could not set stream wantread",
+        streamId = lsquic_stream_id(stream), errno = readErrno
+      streamCtx.abort()
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
   trace "onWrite"
@@ -120,8 +126,11 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
 
   var w = streamCtx.toWrite.valueOr:
     if lsquic_stream_wantwrite(stream, 0) == -1:
-      trace "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
-      streamCtx.abort()
+      let writeErrno = errno
+      if writeErrno != EBADF:
+        trace "could not set stream wantwrite",
+          streamId = lsquic_stream_id(stream), errno = writeErrno
+        streamCtx.abort()
     return
 
   let dataArr = cast[ptr UncheckedArray[byte]](w.data)
@@ -157,5 +166,8 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   streamCtx.toWrite = Opt.none(WriteTask)
 
   if lsquic_stream_wantwrite(stream, 0) == -1:
-    trace "could not set stream wantwrite", streamId = lsquic_stream_id(stream)
-    streamCtx.abort()
+    let writeErrno = errno
+    if writeErrno != EBADF:
+      trace "could not set stream wantwrite",
+        streamId = lsquic_stream_id(stream), errno = writeErrno
+      streamCtx.abort()
