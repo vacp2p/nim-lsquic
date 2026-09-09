@@ -4,8 +4,8 @@
 import chronos
 import chronos/osdefs
 import ./context
-import ../[lsquic_ffi, datagram]
-import ../helpers/[sequninit, transportaddr]
+import ../lsquic_ffi
+import ../helpers/transportaddr
 import std/[nativesockets, net]
 
 when not defined(windows):
@@ -127,27 +127,6 @@ proc packetIn*(
   )
 
   true
-
-proc receive*(
-    ctx: QuicContext,
-    data: openArray[byte],
-    local: TransportAddress,
-    remote: TransportAddress,
-    ecn: cint = 0,
-) =
-  ## With several datagrams in hand, prefer `packetIn` and one
-  ## `processWhenReady`: lsquic picks what to send once per tick, so a tick per
-  ## datagram is a send batch per datagram.
-  if ctx.packetIn(data, local, remote, ecn):
-    ctx.processWhenReady()
-
-proc receive*(
-    ctx: QuicContext,
-    datagram: sink Datagram,
-    local: TransportAddress,
-    remote: TransportAddress,
-) =
-  ctx.receive(datagram.data, local, remote, datagram.ecn)
 
 proc sendPacketsOut*(
     ctx: pointer, specs: ptr struct_lsquic_out_spec, nspecs: cuint

@@ -303,26 +303,6 @@ proc createUdp(
   udp.configureReceiveBuffer(socketConfig)
   udp
 
-proc createUdp(
-    endpoint: QuicEndpoint, family: AddressFamily, socketConfig: QuicSocketConfig
-): DatagramTransport {.raises: [QuicError, TransportOsError].} =
-  proc onReceive(
-      udp: DatagramTransport, remote: TransportAddress
-  ) {.async: (raises: []).} =
-    endpoint.receiveFromUdp(udp, remote)
-
-  let udp =
-    case family
-    of AddressFamily.IPv4:
-      newDatagramTransport(onReceive)
-    of AddressFamily.IPv6:
-      newDatagramTransport6(onReceive)
-    else:
-      raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
-
-  udp.configureReceiveBuffer(socketConfig)
-  udp
-
 proc new*(
     _: type QuicEndpoint,
     tlsConfig: TLSConfig,
@@ -363,13 +343,15 @@ proc new*(
     family: AddressFamily,
     socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
 ): QuicEndpoint {.raises: [QuicError, TransportOsError].} =
-  socketConfig.validate()
-
-  var endpoint = QuicEndpoint(
-    tlsConfig: tlsConfig, capabilities: {CanDial}, connman: ConnectionManager.new()
-  )
-  endpoint.udp = endpoint.createUdp(family, socketConfig)
-  endpoint
+  let address =
+    case family
+    of AddressFamily.IPv4:
+      AnyAddress
+    of AddressFamily.IPv6:
+      AnyAddress6
+    else:
+      raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
+  QuicEndpoint.new(tlsConfig, address, {CanDial}, socketConfig)
 
 proc ensureClientContext(
     endpoint: QuicEndpoint
@@ -383,11 +365,6 @@ proc ensureClientContext(
 
   endpoint.clientContext
 
-proc waitForIncoming(
-    endpoint: QuicEndpoint
-): Future[QuicConnection] {.async: (raises: [CancelledError]).} =
-  await endpoint.serverContext.incoming.get()
-
 proc accept*(
     endpoint: QuicEndpoint
 ): Future[Connection] {.async: (raises: [CancelledError, TransportError]).} =
@@ -399,7 +376,7 @@ proc accept*(
 
   while true:
     let
-      incomingFut = endpoint.waitForIncoming()
+      incomingFut = endpoint.serverContext.incoming.get()
       closedFut = endpoint.connman.closed
       raceFut = await race(closedFut, incomingFut)
 
