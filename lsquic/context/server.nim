@@ -7,7 +7,10 @@ import chronicles
 import chronos
 import chronos/osdefs
 import ./[context, io, stream]
-import ../[lsquic_ffi, tlsconfig, timeout, stream, certificates, tracking]
+import
+  ../[
+    errors, lsquic_ffi, tlsconfig, timeout, stream, certificates, tracking, engineconfig
+  ]
 import ../helpers/transportaddr
 
 proc onNewConn(
@@ -53,10 +56,11 @@ proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
     unpin(quicConn)
   lsquic_conn_set_ctx(conn, nil)
 
-const Cubic = 1
-const Adaptive = 3
-
-proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
+proc new*(
+    T: typedesc[ServerContext],
+    tlsConfig: TLSConfig,
+    engineConfig: QuicEngineConfig = DefaultQuicEngineConfig,
+): Result[T, string] =
   var ctx = ServerContext()
   ctx.tlsConfig = tlsConfig
   ctx.running = true
@@ -66,7 +70,7 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
 
   lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
-  ctx.settings.es_cc_algo = Cubic
+  ctx.settings.es_cc_algo = Cubic.cuint
   ctx.settings.es_base_plpmtu = 1280
   ctx.settings.es_init_max_streams_bidi = 100
   ctx.settings.es_honor_prst = 1
@@ -75,6 +79,12 @@ proc new*(T: typedesc[ServerContext], tlsConfig: TLSConfig): Result[T, string] =
   ctx.settings.es_max_sfcw = 1 * 1024 * 1024
   ctx.settings.es_init_max_stream_data_bidi_local = 1024 * 1024
   ctx.settings.es_init_max_stream_data_bidi_remote = 1024 * 1024
+
+  try:
+    engineConfig.apply(ctx.settings, true)
+  except QuicConfigError:
+    ctx.destroy()
+    return err(getCurrentExceptionMsg())
 
   ctx.stream_if = struct_lsquic_stream_if(
     on_new_conn: onNewConn,

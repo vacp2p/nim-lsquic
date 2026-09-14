@@ -9,7 +9,7 @@ else:
 import
   ./[
     errors, connection, tlsconfig, connectionmanager, lsquic_ffi, certificateverifier,
-    socketconfig,
+    socketconfig, engineconfig,
   ]
 import ./context/[server, client, context, io]
 import ./helpers/transportaddr
@@ -39,6 +39,7 @@ type
     udp: DatagramTransport
     stopped: bool
     drainBuf: seq[byte]
+    engineConfig: QuicEngineConfig
 
 const
   CloseWait: Duration = 300.milliseconds
@@ -81,17 +82,17 @@ proc configureReceiveBuffer(
       requestedBytes = requested, effectiveBytes = effective
 
 proc createServerContext(
-    tlsConfig: TLSConfig, fd: cint
+    tlsConfig: TLSConfig, fd: cint, engineConfig: QuicEngineConfig
 ): ServerContext {.raises: [QuicError].} =
-  var context = ServerContext.new(tlsConfig).valueOr:
+  var context = ServerContext.new(tlsConfig, engineConfig).valueOr:
     raise newException(QuicError, error)
   context.fd = fd
   context
 
 proc createClientContext(
-    tlsConfig: TLSConfig, fd: cint
+    tlsConfig: TLSConfig, fd: cint, engineConfig: QuicEngineConfig
 ): ClientContext {.raises: [QuicError].} =
-  var context = ClientContext.new(tlsConfig).valueOr:
+  var context = ClientContext.new(tlsConfig, engineConfig).valueOr:
     raise newException(QuicError, error)
   context.fd = fd
   context
@@ -309,6 +310,7 @@ proc new*(
     address: TransportAddress,
     capabilities: QuicEndpointCapabilities = {CanListen, CanDial},
     socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
+    engineConfig: QuicEngineConfig = DefaultQuicEngineConfig,
 ): QuicEndpoint {.raises: [QuicConfigError, QuicError, TransportOsError].} =
   if CanListen in capabilities and tlsConfig.certificate.len == 0:
     raise newException(QuicConfigError, "tlsConfig does not contain a certificate")
@@ -316,7 +318,10 @@ proc new*(
   socketConfig.validate()
 
   var endpoint = QuicEndpoint(
-    tlsConfig: tlsConfig, capabilities: capabilities, connman: ConnectionManager.new()
+    tlsConfig: tlsConfig,
+    capabilities: capabilities,
+    connman: ConnectionManager.new(),
+    engineConfig: engineConfig,
   )
   endpoint.udp = endpoint.createUdp(address, socketConfig)
 
@@ -332,7 +337,8 @@ proc new*(
         endpoint.udp.close()
 
   if CanListen in capabilities:
-    endpoint.serverContext = createServerContext(tlsConfig, cint(endpoint.udp.fd))
+    endpoint.serverContext =
+      createServerContext(tlsConfig, cint(endpoint.udp.fd), engineConfig)
 
   initialized = true
   endpoint
@@ -342,6 +348,7 @@ proc new*(
     tlsConfig: TLSConfig,
     family: AddressFamily,
     socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
+    engineConfig: QuicEngineConfig = DefaultQuicEngineConfig,
 ): QuicEndpoint {.raises: [QuicError, TransportOsError].} =
   let address =
     case family
@@ -351,7 +358,7 @@ proc new*(
       AnyAddress6
     else:
       raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
-  QuicEndpoint.new(tlsConfig, address, {CanDial}, socketConfig)
+  QuicEndpoint.new(tlsConfig, address, {CanDial}, socketConfig, engineConfig)
 
 proc ensureClientContext(
     endpoint: QuicEndpoint
@@ -360,8 +367,9 @@ proc ensureClientContext(
     raise newException(QuicError, "endpoint is not dial-capable")
 
   if endpoint.clientContext.isNil:
-    endpoint.clientContext =
-      createClientContext(endpoint.tlsConfig, cint(endpoint.udp.fd))
+    endpoint.clientContext = createClientContext(
+      endpoint.tlsConfig, cint(endpoint.udp.fd), endpoint.engineConfig
+    )
 
   endpoint.clientContext
 
