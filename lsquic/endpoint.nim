@@ -342,7 +342,7 @@ proc new*(
 
   if CanListen in capabilities:
     endpoint.serverContext =
-      createServerContext(tlsConfig, cint(endpoint.udp.fd), engineConfig)
+      createServerContext(tlsConfig, endpoint.udp.fd.cint, engineConfig)
 
   initialized = true
   endpoint
@@ -372,7 +372,7 @@ proc ensureClientContext(
 
   if endpoint.clientContext.isNil:
     endpoint.clientContext = createClientContext(
-      endpoint.tlsConfig, cint(endpoint.udp.fd), endpoint.engineConfig
+      endpoint.tlsConfig, endpoint.udp.fd.cint, endpoint.engineConfig
     )
 
   endpoint.clientContext
