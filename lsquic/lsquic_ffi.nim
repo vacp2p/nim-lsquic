@@ -268,6 +268,8 @@ type
     es_amp_factor*: cint
     es_send_verneg*: cint
     es_preferred_address*: array[24'i64, uint8]
+    es_max_header_sets*: cuint
+      ## Native settings initialization writes this trailing field on i386.
 
   struct_lsquic_out_spec* {.pure, inheritable, bycopy.} = object
     iov*: ptr struct_iovec
