@@ -9,7 +9,7 @@ else:
 import
   ./[
     errors, connection, tlsconfig, connectionmanager, lsquic_ffi, certificateverifier,
-    socketconfig, engineconfig,
+    socketconfig, engine_config,
   ]
 import ./context/[server, client, context, io]
 import ./helpers/transportaddr
@@ -316,6 +316,10 @@ proc new*(
     raise newException(QuicConfigError, "tlsConfig does not contain a certificate")
 
   socketConfig.validate()
+  if CanListen in capabilities:
+    engineConfig.validate(true)
+  if CanDial in capabilities:
+    engineConfig.validate(false)
 
   var endpoint = QuicEndpoint(
     tlsConfig: tlsConfig,
@@ -349,7 +353,7 @@ proc new*(
     family: AddressFamily,
     socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
     engineConfig: QuicEngineConfig = DefaultQuicEngineConfig,
-): QuicEndpoint {.raises: [QuicError, TransportOsError].} =
+): QuicEndpoint {.raises: [QuicConfigError, QuicError, TransportOsError].} =
   let address =
     case family
     of AddressFamily.IPv4:

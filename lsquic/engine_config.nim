@@ -39,13 +39,6 @@ func wholeUnits(
 proc apply*(
     config: QuicEngineConfig, settings: var struct_lsquic_engine_settings, server: bool
 ) {.raises: [QuicConfigError].} =
-  if config.handshakeTimeout.isSome:
-    let value =
-      wholeUnits(config.handshakeTimeout.unsafeGet(), 1_000'i64, "handshake timeout")
-    if value > high(culong).uint64:
-      raise newException(QuicConfigError, "handshake timeout is too large")
-    settings.es_handshake_to = value.culong
-
   template applySeconds(field, target, label: untyped) =
     if field.isSome:
       let value = wholeUnits(field.unsafeGet(), 1_000_000_000'i64, label)
@@ -53,15 +46,22 @@ proc apply*(
         raise newException(QuicConfigError, label & " is too large")
       target = value.cuint
 
+  template applyUint(field, target: untyped) =
+    if field.isSome:
+      target = field.unsafeGet().cuint
+
+  if config.handshakeTimeout.isSome:
+    let value =
+      wholeUnits(config.handshakeTimeout.unsafeGet(), 1_000'i64, "handshake timeout")
+    if value > high(culong).uint64:
+      raise newException(QuicConfigError, "handshake timeout is too large")
+    settings.es_handshake_to = value.culong
+
   applySeconds(config.idleTimeout, settings.es_idle_timeout, "idle timeout")
   applySeconds(config.pingPeriod, settings.es_ping_period, "ping period")
   applySeconds(
     config.noProgressTimeout, settings.es_noprogress_timeout, "no-progress timeout"
   )
-
-  template applyUint(field, target: untyped) =
-    if field.isSome:
-      target = field.unsafeGet().cuint
 
   applyUint(config.initialMaxData, settings.es_init_max_data)
   applyUint(
@@ -90,3 +90,31 @@ proc apply*(
       QuicConfigError,
       "invalid LSQUIC engine configuration: " & $cast[cstring](addr errorBuffer[0]),
     )
+
+proc initSettings*(
+    settings: var struct_lsquic_engine_settings, server: bool
+) {.raises: [].} =
+  let flags = if server: LSENG_SERVER.cuint else: 0.cuint
+  lsquic_engine_init_settings(addr settings, flags)
+  settings.es_versions = 1.cuint shl LSQVER_I001.cuint
+  settings.es_cc_algo = Cubic.cuint
+  settings.es_base_plpmtu = 1280
+  settings.es_init_max_streams_bidi = 100
+  settings.es_honor_prst = 1
+  settings.es_max_cfcw =
+    if server:
+      1536 * 1024
+    else:
+      8 * 1024 * 1024
+  settings.es_max_sfcw =
+    if server:
+      1 * 1024 * 1024
+    else:
+      2 * 1024 * 1024
+  settings.es_init_max_stream_data_bidi_local = 1024 * 1024
+  settings.es_init_max_stream_data_bidi_remote = 1024 * 1024
+
+proc validate*(config: QuicEngineConfig, server: bool) {.raises: [QuicConfigError].} =
+  var settings: struct_lsquic_engine_settings
+  settings.initSettings(server)
+  config.apply(settings, server)

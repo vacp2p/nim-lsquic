@@ -7,7 +7,9 @@ import chronos, results, unittest2
 import lsquic
 import lsquic/context/[client, context, server]
 import lsquic/lsquic_ffi
-import ./helpers/[clientserver, trackers]
+import ./helpers/[address, clientserver, trackers]
+
+initializeLsquic(true, true)
 
 suite "engine config":
   teardown:
@@ -22,6 +24,8 @@ suite "engine config":
     check:
       clientSettings.es_ping_period != serverSettings.es_ping_period
       clientSettings.es_idle_timeout == serverSettings.es_idle_timeout
+      clientSettings.es_max_header_sets > 0
+      serverSettings.es_max_header_sets > 0
 
   test "custom settings are applied with native units":
     var settings: struct_lsquic_engine_settings
@@ -66,6 +70,19 @@ suite "engine config":
     let config = QuicEngineConfig(idleTimeout: Opt.some(601.seconds))
     expect QuicConfigError:
       config.apply(settings, true)
+
+  test "client setup rejects invalid engine settings before dialing":
+    let config = QuicEngineConfig(idleTimeout: Opt.some(601.seconds))
+    expect QuicConfigError:
+      discard QuicClient.new(TLSConfig.new(), engineConfig = config)
+    expect QuicConfigError:
+      discard
+        QuicEndpoint.new(TLSConfig.new(), AddressFamily.IPv4, engineConfig = config)
+
+  test "listener setup rejects invalid engine settings":
+    let config = QuicEngineConfig(idleTimeout: Opt.some(601.seconds))
+    expect QuicConfigError:
+      discard QuicEndpoint.new(makeTLSConfig(), AutoAddressIP4, engineConfig = config)
 
   test "contexts receive custom config":
     let config = QuicEngineConfig(initialMaxStreamsBidi: Opt.some(321'u32))

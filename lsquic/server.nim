@@ -5,7 +5,7 @@ import chronos, results
 import
   ./[
     errors, connection, tlsconfig, endpoint, certificateverifier, socketconfig,
-    engineconfig,
+    engine_config,
   ]
 
 type
@@ -26,6 +26,8 @@ proc new*(
   if tlsConfig.certificate.len == 0:
     raise newException(QuicConfigError, "tlsConfig does not contain a certificate")
   socketConfig.validate()
+  engineConfig.validate(true)
+  engineConfig.validate(false)
   return QuicServer(
     tlsConfig: tlsConfig, socketConfig: socketConfig, engineConfig: engineConfig
   )

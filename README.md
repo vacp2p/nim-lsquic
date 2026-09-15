@@ -158,7 +158,8 @@ is split by ownership:
 All engine fields are optional. Leaving a field unset preserves nim-lsquic's
 role-specific behavior, which lets nim-libp2p expose one configuration object for
 both dialing and listening. `Duration` values must match LSQUIC's precision:
-whole microseconds for handshakes and whole seconds for the other timers.
+whole microseconds for handshakes and whole seconds for the other timers. Invalid
+values are rejected when a client, server, or endpoint is created.
 
 ```nim
 let engineConfig = QuicEngineConfig(
@@ -223,7 +224,7 @@ The script installs `futhark@0.15.0`, regenerates the binding file, and appends 
 | [`lsquic/stream`](lsquic/stream.nim) | Async stream reads, writes, close, and abort |
 | [`lsquic/tlsconfig`](lsquic/tlsconfig.nim) | TLS configuration plus PEM-to-X509/PKey helpers |
 | [`lsquic/socketconfig`](lsquic/socketconfig.nim) | UDP socket configuration |
-| [`lsquic/engineconfig`](lsquic/engineconfig.nim) | Typed LSQUIC engine configuration |
+| [`lsquic/engine_config`](lsquic/engine_config.nim) | Typed LSQUIC engine configuration |
 | [`lsquic/certificateverifier`](lsquic/certificateverifier.nim) | Base, custom, and insecure certificate verifier adapters |
 | [`lsquic/lsquic_ffi`](lsquic/lsquic_ffi.nim) | Generated low-level bindings to the vendored native libraries |
 

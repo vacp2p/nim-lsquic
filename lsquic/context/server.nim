@@ -9,7 +9,8 @@ import chronos/osdefs
 import ./[context, io, stream]
 import
   ../[
-    errors, lsquic_ffi, tlsconfig, timeout, stream, certificates, tracking, engineconfig
+    errors, lsquic_ffi, tlsconfig, timeout, stream, certificates, tracking,
+    engine_config,
   ]
 import ../helpers/transportaddr
 
@@ -68,17 +69,7 @@ proc new*(
   ctx.setupSSLContext()
   ctx.initCidTracking()
 
-  lsquic_engine_init_settings(addr ctx.settings, LSENG_SERVER)
-  ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
-  ctx.settings.es_cc_algo = Cubic.cuint
-  ctx.settings.es_base_plpmtu = 1280
-  ctx.settings.es_init_max_streams_bidi = 100
-  ctx.settings.es_honor_prst = 1
-
-  ctx.settings.es_max_cfcw = 1536 * 1024
-  ctx.settings.es_max_sfcw = 1 * 1024 * 1024
-  ctx.settings.es_init_max_stream_data_bidi_local = 1024 * 1024
-  ctx.settings.es_init_max_stream_data_bidi_remote = 1024 * 1024
+  ctx.settings.initSettings(true)
 
   try:
     engineConfig.apply(ctx.settings, true)

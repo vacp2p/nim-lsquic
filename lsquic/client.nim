@@ -5,7 +5,7 @@ import chronos
 import
   ./[
     errors, connection, tlsconfig, endpoint, certificateverifier, socketconfig,
-    engineconfig,
+    engine_config,
   ]
 
 type QuicClient* = ref object of RootObj
@@ -20,7 +20,8 @@ proc new*(
     tlsConfig: TLSConfig,
     socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
     engineConfig: QuicEngineConfig = DefaultQuicEngineConfig,
-): QuicClient {.raises: [].} =
+): QuicClient {.raises: [QuicConfigError].} =
+  engineConfig.validate(false)
   QuicClient(
     tlsConfig: tlsConfig, socketConfig: socketConfig, engineConfig: engineConfig
   )
