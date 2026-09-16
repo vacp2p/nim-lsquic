@@ -66,10 +66,24 @@ proc dial*(
 ): Future[Connection] {.
     async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
 .} =
-  if certVerifier.isNil:
-    raise newException(QuicError, "certificate verifier is nil")
-
   await listener.endpoint.dial(address, certVerifier)
+
+proc dial*(
+    listener: Listener, address: TransportAddress, serverName: string
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  await listener.endpoint.dial(address, serverName)
+
+proc dial*(
+    listener: Listener,
+    address: TransportAddress,
+    serverName: string,
+    certVerifier: CertificateVerifier,
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  await listener.endpoint.dial(address, serverName, certVerifier)
 
 proc localAddress*(
     listener: Listener

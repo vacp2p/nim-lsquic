@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Copyright (c) Status Research & Development GmbH 
 
-import results, std/sets, chronos, chronicles
+import results, chronos, chronicles
 import lsquic
 import ./[address, certificate]
 
@@ -17,19 +17,19 @@ proc defaultCertificateVerifier*(): CertificateVerifier =
 
 proc makeTLSConfig*(
     verifier: CertificateVerifier = defaultCertificateVerifier(),
-    alpn: HashSet[string] = makeAlpn(),
+    alpn: seq[string] = makeAlpn(),
 ): TLSConfig {.raises: [QuicConfigError].} =
   TLSConfig.new(testCertificate(), testPrivateKey(), alpn, Opt.some(verifier))
 
 proc makeClient*(
     verifier: CertificateVerifier = defaultCertificateVerifier(),
-    alpn: HashSet[string] = makeAlpn(),
+    alpn: seq[string] = makeAlpn(),
 ): QuicClient {.raises: [QuicConfigError, QuicError, TransportOsError].} =
   return QuicClient.new(makeTLSConfig(verifier, alpn))
 
 proc makeServer*(
     verifier: CertificateVerifier = defaultCertificateVerifier(),
-    alpn: HashSet[string] = makeAlpn(),
+    alpn: seq[string] = makeAlpn(),
 ): QuicServer {.raises: [QuicConfigError].} =
   return QuicServer.new(makeTLSConfig(verifier, alpn))
 

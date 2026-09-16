@@ -12,7 +12,6 @@ import
     lsquic_ffi, errors, tlsconfig, timeout, stream, certificates, certificateverifier,
     tracking,
   ]
-import ../helpers/sequninit
 
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
@@ -47,16 +46,14 @@ proc onHandshakeDone(
     quicClientConn.connectedFut.complete()
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
-  debug "Connection closed: client"
+  let (connStatus, msg) = connectionStatus(conn)
+  trace "Connection closed: client",
+    status = connStatus, statelessReset = connStatus == LSCONN_ST_RESET, reason = msg
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
     let quicClientConn = cast[QuicConnection](conn_ctx)
     if not quicClientConn.connectedFut.finished:
       # Not connected yet
-      var buf: array[256, char]
-      let connStatus =
-        lsquic_conn_status(conn, cast[cstring](addr buf[0]), buf.len.csize_t)
-      let msg = $cast[cstring](addr buf[0])
       quicClientConn.connectedFut.fail(
         newException(
           DialError, "could not connect to server. Status: " & $connStatus & ". " & msg
@@ -76,6 +73,7 @@ method dial*(
     remote: TransportAddress,
     connectedFut: Future[void],
     onClose: proc() {.gcsafe, raises: [].},
+    serverName: string,
     certVerifier: Opt[CertificateVerifier],
 ): Result[QuicConnection, string] {.raises: [], gcsafe.} =
   var
@@ -105,7 +103,7 @@ method dial*(
     cast[ptr SockAddr](addr remoteAddress),
     cast[pointer](ctx),
     cast[ptr lsquic_conn_ctx_t](quicClientConn),
-    nil,
+    if serverName.len == 0: nil else: serverName.cstring,
     0,
     nil,
     0,
@@ -135,17 +133,14 @@ proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
   lsquic_engine_init_settings(addr ctx.settings, 0)
   ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
   ctx.settings.es_cc_algo = Cubic
-  ctx.settings.es_dplpmtud = 1
   ctx.settings.es_base_plpmtu = 1280
-  ctx.settings.es_max_plpmtu = 0
-  ctx.settings.es_pace_packets = 1
+  ctx.settings.es_init_max_streams_bidi = 100
+  ctx.settings.es_honor_prst = 1
 
-  ctx.settings.es_cfcw = 4 * 1024 * 1024
   ctx.settings.es_max_cfcw = 8 * 1024 * 1024
-  ctx.settings.es_sfcw = 1 * 1024 * 1024
   ctx.settings.es_max_sfcw = 2 * 1024 * 1024
-  ctx.settings.es_init_max_stream_data_bidi_local = ctx.settings.es_sfcw
-  ctx.settings.es_init_max_stream_data_bidi_remote = ctx.settings.es_sfcw
+  ctx.settings.es_init_max_stream_data_bidi_local = 1024 * 1024
+  ctx.settings.es_init_max_stream_data_bidi_remote = 1024 * 1024
 
   ctx.stream_if = struct_lsquic_stream_if(
     on_new_conn: onNewConn,
@@ -177,7 +172,7 @@ proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
 
   ctx.tickTimeout = newTimeout(
     proc() =
-      ctx.engine_process()
+      ctx.processWhenReady()
   )
   ctx.tickTimeout.set(Moment.now())
 

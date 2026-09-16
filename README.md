@@ -47,7 +47,7 @@ The project links through a C++ linker profile on non-Windows platforms, so `g++
 The main entry point is [`lsquic.nim`](lsquic.nim):
 
 ```nim
-import std/[sequtils, sets]
+import std/sequtils
 import chronos
 import results
 import lsquic
@@ -72,7 +72,7 @@ proc main() {.async.} =
   defer:
     cleanupLsquic()
 
-  let alpn = ["echo"].toHashSet()
+  let alpn = @["echo"]
 
   let server = QuicServer.new(
     TLSConfig.new(

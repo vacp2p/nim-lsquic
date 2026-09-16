@@ -20,8 +20,16 @@ type ReadTask* = object
   dataLen*: int
   doneFut*: Future[int].Raising([CancelledError, StreamError])
 
+type ReadContext = object
+  data: ptr byte
+  dataLen: int
+  offset: int
+  receivedFin: bool
+
 type Stream* = ref object
   quicStream*: ptr lsquic_stream_t
+  canRead*: bool
+  canWrite*: bool
   closedByEngine*: bool
   closeWrite*: bool
   closeRequested: bool
@@ -33,15 +41,24 @@ type Stream* = ref object
   toWrite*: Opt[WriteTask]
   readLock*: AsyncLock
   isEof*: bool # Received a FIN from remote
+  readFailure*: string
   # Every path that sets closedByEngine or fires `closed` must settle these;
   # missing one hangs the parked operation instead of failing it.
   toRead*: Opt[ReadTask]
   doProcess*: proc(urgent: bool) {.gcsafe, raises: [].}
 
-proc new*(T: typedesc[Stream], quicStream: ptr lsquic_stream_t = nil): T =
+proc new*(
+    T: typedesc[Stream],
+    quicStream: ptr lsquic_stream_t = nil,
+    canRead = true,
+    canWrite = true,
+): T =
   let closed = newAsyncEvent()
   let s = Stream(
     quicStream: quicStream,
+    canRead: canRead,
+    canWrite: canWrite,
+    closeWrite: not canWrite,
     closed: closed,
     readLock: newAsyncLock(),
     writeLock: newAsyncLock(),
@@ -73,6 +90,37 @@ proc newStreamResetError*(
   )
   exc.how = stream.resetHow
   exc
+
+proc markReadFailed*(stream: Stream, reason: string) {.raises: [].} =
+  if stream.readFailure.len == 0:
+    stream.readFailure = reason
+
+proc readToBuffer(
+    ctx: pointer, data: ptr uint8, dataLen: csize_t, fin: cint
+): csize_t {.cdecl, raises: [].} =
+  let readCtx = cast[ptr ReadContext](ctx)
+  let remaining = readCtx.dataLen - readCtx.offset
+  let count = min(dataLen, remaining.csize_t).int
+  if count > 0:
+    let dst = cast[ptr UncheckedArray[byte]](readCtx.data)
+    copyMem(addr dst[readCtx.offset], data, count)
+    readCtx.offset += count
+  if fin != 0 and count.csize_t == dataLen:
+    readCtx.receivedFin = true
+  count.csize_t
+
+proc readFromStream*(
+    stream: ptr lsquic_stream_t, data: ptr byte, dataLen: int, receivedFin: var bool
+): ssize_t {.raises: [].} =
+  receivedFin = false
+  if dataLen < 0 or (dataLen > 0 and data.isNil):
+    errno = EINVAL
+    return -1
+
+  var readCtx = ReadContext(data: data, dataLen: dataLen)
+  let n = lsquic_stream_readf(stream, readToBuffer, addr readCtx)
+  receivedFin = readCtx.receivedFin
+  return n
 
 proc failPendingRead*(stream: Stream, error: ref StreamError) {.raises: [].} =
   let task = stream.toRead.valueOr:
@@ -113,8 +161,10 @@ proc clearPendingRead(
     return
 
   if lsquic_stream_wantread(stream.quicStream, 0) == -1:
-    error "could not set stream wantread",
-      streamId = lsquic_stream_id(stream.quicStream)
+    let readErrno = errno
+    if readErrno != EBADF:
+      error "could not set stream wantread",
+        streamId = lsquic_stream_id(stream.quicStream), errno = readErrno
 
 proc clearPendingWrite(
     stream: Stream, doneFut: Future[void].Raising([CancelledError, StreamError])
@@ -130,12 +180,18 @@ proc clearPendingWrite(
     return
 
   if lsquic_stream_wantwrite(stream.quicStream, 0) == -1:
-    error "could not set stream wantwrite",
-      streamId = lsquic_stream_id(stream.quicStream)
+    let writeErrno = errno
+    if writeErrno != EBADF:
+      error "could not set stream wantwrite",
+        streamId = lsquic_stream_id(stream.quicStream), errno = writeErrno
 
 template raiseIfReadReset(stream: Stream) =
   if stream.readResetByPeer():
     raise stream.newStreamResetError("stream read")
+
+template raiseIfReadFailed(stream: Stream) =
+  if stream.readFailure.len > 0:
+    raise newException(StreamError, stream.readFailure)
 
 template raiseIfWriteReset(stream: Stream) =
   if stream.writeResetByPeer():
@@ -173,9 +229,9 @@ proc closeIfDone*(stream: Stream): bool {.raises: [].} =
 
 proc abort*(stream: Stream) =
   stream.closeWrite = true
-  stream.isEof = true
+  stream.markReadFailed("stream aborted")
   stream.abortPendingWrites("stream aborted")
-  stream.completePendingRead()
+  stream.failPendingRead(newException(StreamError, stream.readFailure))
   discard stream.requestClose()
   if not stream.closed.isSet():
     stream.closed.fire()
@@ -200,6 +256,12 @@ proc close*(stream: Stream) {.async: (raises: [StreamError, CancelledError]).} =
 proc readOnce*(
     stream: Stream, dst: ptr byte, dstLen: int
 ): Future[int] {.async: (raises: [CancelledError, StreamError]).} =
+  if not stream.canRead:
+    raise newException(StreamError, "stream is write-only")
+
+  if dstLen < 0:
+    raiseAssert "dstLen cannot be negative"
+
   if dstLen == 0:
     return 0
 
@@ -207,9 +269,15 @@ proc readOnce*(
     raiseAssert "dst cannot be nil"
 
   raiseIfReadReset(stream)
+  raiseIfReadFailed(stream)
 
-  if stream.isEof or stream.closedByEngine:
+  if stream.isEof:
+    if not stream.closeIfDone():
+      stream.abort()
+      raise newException(StreamError, "could not close the stream")
     return 0
+  if stream.closedByEngine:
+    raise newException(StreamError, "stream closed before end of stream")
 
   await stream.readLock.acquire()
 
@@ -220,19 +288,23 @@ proc readOnce*(
       discard # should not happen - lock acquired directly above
 
   raiseIfReadReset(stream)
+  raiseIfReadFailed(stream)
 
   # In case stream was closed while waiting for lock being acquired
   if stream.closedByEngine:
-    return 0
+    raise newException(StreamError, "stream closed before end of stream")
 
-  let n = lsquic_stream_read(stream.quicStream, dst, dstLen.csize_t)
+  var receivedFin = false
+  let n = readFromStream(stream.quicStream, dst, dstLen, receivedFin)
+  if receivedFin:
+    stream.isEof = true
 
   if n == 0:
-    stream.isEof = true
-    if not stream.closeIfDone():
-      stream.abort()
-      raise newException(StreamError, "could not close the stream")
-    return 0
+    if stream.isEof:
+      if not stream.closeIfDone():
+        stream.abort()
+        raise newException(StreamError, "could not close the stream")
+      return 0
   elif n > 0:
     return n
 
@@ -277,6 +349,9 @@ proc write*(
   ## when this proc resumes on a later poll tick. Freeing the buffer between
   ## `cancel()` and that tick is a use-after-free - use `await fut.cancelAndWait()`
   ## or otherwise wait for the future to finish before releasing it.
+  if not stream.canWrite:
+    raise newException(StreamError, "stream is read-only")
+
   if srcLen == 0:
     return
 
@@ -342,6 +417,9 @@ proc write*(
   ##
   ## A caller that keeps its own buffer still pays one copy here, and should use
   ## the pointer overload instead if it can honour that overload's contract.
+  if not stream.canWrite:
+    raise newException(StreamError, "stream is read-only")
+
   if data.len == 0:
     return
   await stream.write(data[0].addr, data.len)
