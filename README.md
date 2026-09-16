@@ -132,10 +132,13 @@ The snippet expects `cert.pem` and `key.pem` in PEM format and embeds them at co
 - `cleanupLsquic()` is idempotent and can be safely called during shutdown.
 - Server-side `TLSConfig` must include both a certificate and a private key.
 - Client and server ALPN values must match or the handshake will fail.
-- `Stream.close()` gracefully shuts down its write side. `Connection.close()`
-  resets open bidirectional streams before closing the connection, while
-  `Connection.abort()` skips those per-stream resets. Neither connection method
-  drains open streams; close them first when graceful delivery is required.
+- `Stream.close()` shuts down the stream's write side gracefully.
+  `Connection.close()` can reset open bidirectional streams;
+  `Connection.abort()` terminates the connection without those per-stream resets.
+  Neither connection method drains open streams or guarantees delivery of pending
+  data. Complete application-level exchanges before closing the connection.
+  Connection teardown without a received stream FIN is reported as a stream error,
+  not normal EOF.
 - UDP sockets request an 8 MiB receive buffer by default. Pass `QuicSocketConfig(receiveBufferBytes: 0)` to keep the OS default, or set another byte value; Linux may cap the effective size at `net.core.rmem_max`.
 
 For more complete usage patterns, see:
