@@ -3,12 +3,12 @@
 
 {.used.}
 
-import std/sets
 import chronos, chronos/unittest2/asynctests, results
 import lsquic
-import lsquic/context/[client, context, io, stream]
+import lsquic/context/[client, context, io, server, stream]
 import ./helpers/[address, certificate, clientserver, stream, trackers]
-from lsquic/lsquic_ffi import lsquic_stream_ctx_t, lsquic_conn_t
+from lsquic/lsquic_ffi import
+  lsquic_stream_ctx_t, lsquic_conn_t, lsquic_stream_t, LSQUIC_DF_INIT_MAX_STREAMS_BIDI
 
 initializeLsquic(true, true)
 
@@ -17,6 +17,25 @@ const timeout = 2.seconds
 suite "lifecycle":
   teardown:
     checkTrackers()
+
+  test "client and server honor stateless resets":
+    let
+      tlsConfig = makeTLSConfig()
+      clientCtx = ClientContext.new(tlsConfig).valueOr:
+        raiseAssert error
+      serverCtx = ServerContext.new(tlsConfig).valueOr:
+        clientCtx.stop()
+        clientCtx.destroy()
+        raiseAssert error
+    defer:
+      clientCtx.stop()
+      clientCtx.destroy()
+      serverCtx.stop()
+      serverCtx.destroy()
+
+    check:
+      clientCtx.settings.es_honor_prst == 1
+      serverCtx.settings.es_honor_prst == 1
 
   asyncTest "listener stop makes accept fail":
     let server = makeServer()
@@ -44,6 +63,21 @@ suite "lifecycle":
     expect TransportError:
       discard await accepting3.wait(timeout)
 
+  asyncTest "remote closure defers state and notification together":
+    # The opaque handle is never passed to the native engine.
+    let quicConn = QuicConnection(lsquicConn: cast[ptr lsquic_conn_t](1))
+    let conn = newIncomingConnection(nil, quicConn)
+
+    quicConn.onClose()
+    quicConn.onClose = nil
+    quicConn.lsquicConn = nil
+
+    check not conn.isClosed
+    check not conn.closedFuture().finished
+
+    check (await conn.closedFuture().withTimeout(timeout))
+    check conn.isClosed
+
   asyncTest "connection close propagates to peer":
     let peers = await connectPeers()
     defer:
@@ -52,6 +86,39 @@ suite "lifecycle":
     peers.outgoing.close()
 
     check (await peers.outgoing.closedFuture().withTimeout(timeout))
+    check (await peers.incoming.closedFuture().withTimeout(timeout))
+    check peers.incoming.isClosed
+
+  asyncTest "accepted connection close propagates to peer":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    peers.incoming.close()
+
+    check (await peers.incoming.closedFuture().withTimeout(timeout))
+    check (await peers.outgoing.closedFuture().withTimeout(timeout))
+    check peers.outgoing.isClosed
+
+  asyncTest "cancelling a stream waiter preserves connection closure notification":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let waiting = peers.incoming.incomingStream()
+    await waiting.cancelAndWait()
+    check not peers.incoming.isClosed
+    check not peers.incoming.closedFuture().finished
+
+    let nextStream = peers.incoming.incomingStream()
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[42'u8])
+    let incomingStream = await nextStream.wait(timeout)
+    var buf: array[1, byte]
+    check (await incomingStream.readOnce(buf)) == 1
+    check buf[0] == 42
+
+    peers.outgoing.close()
     check (await peers.incoming.closedFuture().withTimeout(timeout))
     check peers.incoming.isClosed
 
@@ -75,8 +142,7 @@ suite "lifecycle":
     expect StreamResetError:
       discard await incomingStream.readOnce(buf).wait(timeout)
 
-  asyncTest "connection abort ends the peer's stream at eof":
-    # TODO: vacp2p/nim-lsquic#136
+  asyncTest "connection abort fails the peer's stream without fin":
     let peers = await connectPeers()
     defer:
       await peers.stop()
@@ -91,7 +157,8 @@ suite "lifecycle":
     check (await peers.incoming.closedFuture().withTimeout(timeout))
 
     var buf = newSeq[byte](8)
-    check (await incomingStream.readOnce(buf).wait(timeout)) == 0
+    expect StreamError:
+      discard await incomingStream.readOnce(buf).wait(timeout)
 
   asyncTest "accept skips closed connection and client redials":
     let server = makeServer()
@@ -155,7 +222,8 @@ suite "lifecycle":
 
     let stream = await incomingStream
     var buf = newSeq[byte](1)
-    check (await stream.readOnce(buf)) == 0
+    expect StreamError:
+      discard await stream.readOnce(buf)
 
   asyncTest "pending incoming stream survives immediate client close":
     let peers = await connectPeers()
@@ -169,7 +237,8 @@ suite "lifecycle":
 
     let stream = await incomingStream.wait(timeout)
     var buf = newSeq[byte](1)
-    check (await stream.readOnce(buf)) == 0
+    expect StreamError:
+      discard await stream.readOnce(buf)
 
   asyncTest "client stop closes active connections":
     let peers = await connectPeers()
@@ -223,6 +292,94 @@ suite "lifecycle":
       await pending2.wait(timeout)
     check quicConn.popPendingStream(nil).isNone()
 
+  asyncTest "a cancelled pending stream stays in the queue":
+    # TODO: vacp2p/nim-lsquic#154
+    let quicConn = QuicConnection(incoming: newAsyncQueue[Stream]())
+    let stream = Stream.new()
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+    let pending = quicConn.addPendingStream(stream)
+
+    await pending.cancelAndWait()
+    check pending.cancelled()
+
+    # popPendingStream hands the engine's new stream to a caller that is gone.
+    var nativeStream = 0
+    let native = cast[ptr lsquic_stream_t](addr nativeStream)
+    let popped = quicConn.popPendingStream(native)
+    check popped.isSome()
+    check stream.quicStream == native
+
+  asyncTest "openStream parks once the peer's stream credit is exhausted":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    var opened: seq[Stream]
+    for _ in 0 ..< LSQUIC_DF_INIT_MAX_STREAMS_BIDI:
+      opened.add(await peers.outgoing.openStream())
+
+    let parked = peers.outgoing.openStream()
+    check not (await parked.withTimeout(timeout))
+
+    await parked.cancelAndWait()
+
+  asyncTest "a cancelled parked openStream costs a stream credit slot":
+    # TODO: vacp2p/nim-lsquic#154
+    # Returns the stream credit available once every stream opened here is retired.
+    proc creditAfterRetiringAll(cancellations: int): Future[int] {.async.} =
+      let peers = await connectPeers()
+      defer:
+        await peers.stop()
+
+      # The peer reads each stream to EOF and closes it, retiring that stream's credit.
+      proc serve() {.async.} =
+        var buf = newSeq[byte](1)
+        for _ in 0 ..< LSQUIC_DF_INIT_MAX_STREAMS_BIDI:
+          let stream = await peers.incoming.incomingStream()
+          check (await stream.readOnce(buf)) == 0
+          await stream.close()
+
+      let serving = serve()
+
+      # Exhaust the peer's initial stream credit.
+      var opened: seq[Stream]
+      for _ in 0 ..< LSQUIC_DF_INIT_MAX_STREAMS_BIDI:
+        opened.add(await peers.outgoing.openStream())
+
+      # Park an openStream on the exhausted credit, then cancel it.
+      for _ in 0 ..< cancellations:
+        let parked = peers.outgoing.openStream()
+        check not (await parked.withTimeout(timeout))
+        # The cancelled openStream stays in pendingStreams, holding its slot.
+        await parked.cancelAndWait()
+
+      # Close+EOF every stream, retiring the stream credit they hold.
+      var buf = newSeq[byte](1)
+      for stream in opened:
+        await stream.close()
+        check (await stream.readOnce(buf)) == 0
+
+      if not await serving.withTimeout(timeout):
+        await serving.cancelAndWait()
+      check serving.completed()
+
+      # Open until the retired credit is exhausted again.
+      var extra = 0
+      while extra <= LSQUIC_DF_INIT_MAX_STREAMS_BIDI:
+        let opening = peers.outgoing.openStream()
+        if not await opening.withTimeout(timeout):
+          await opening.cancelAndWait()
+          break
+        discard await opening
+        inc extra
+      extra
+
+    check (await creditAfterRetiringAll(0)) == LSQUIC_DF_INIT_MAX_STREAMS_BIDI
+
+    # The engine creates the stream anyway, and nothing ever retires it.
+    check (await creditAfterRetiringAll(1)) == LSQUIC_DF_INIT_MAX_STREAMS_BIDI - 1
+
   asyncTest "abort after open stream still closes connection":
     let peers = await connectPeers()
     defer:
@@ -257,6 +414,22 @@ suite "lifecycle":
     var buf = newSeq[byte](8)
     check (await incomingStream.readOnce(buf)) == 0
     await incomingStream.close()
+
+  asyncTest "write callback after local shutdown does not abort stream":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[42'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+    var firstByte = newSeq[byte](1)
+    check (await incomingStream.readOnce(firstByte)) == 1
+    await outgoingStream.close()
+
+    onWrite(outgoingStream.quicStream, cast[ptr lsquic_stream_ctx_t](outgoingStream))
+
+    check outgoingStream.readFailure.len == 0
 
   asyncTest "cancel pending write clears stream write task":
     let peers = await connectPeers()
@@ -353,6 +526,30 @@ suite "lifecycle":
     check (await reading.withTimeout(timeout))
     check (await reading) == 0
     await incomingStream.close()
+
+  asyncTest "EOF after local half close does not abort stream":
+    let peers = await connectPeers()
+    defer:
+      await peers.stop()
+
+    let outgoingStream = await peers.outgoing.openStream()
+    await outgoingStream.write(@[42'u8])
+    let incomingStream = await peers.incoming.incomingStream()
+
+    var firstByte = newSeq[byte](1)
+    check (await incomingStream.readOnce(firstByte)) == 1
+    await incomingStream.close()
+
+    var buf = newSeq[byte](8)
+    let reading = incomingStream.readOnce(buf)
+    await sleepAsync(100.milliseconds)
+    check not reading.finished
+
+    await outgoingStream.close()
+
+    check (await reading.withTimeout(timeout))
+    check (await reading) == 0
+    check incomingStream.readFailure.len == 0
 
   asyncTest "close then EOF retires peer-initiated stream credit":
     const StreamCount = 120
@@ -468,14 +665,8 @@ suite "lifecycle":
 
     check isReset
 
-  asyncTest "vanished peer ends the stream at eof without a fin":
-    # TODO: vacp2p/nim-lsquic#140
-    # Skipped: reaching the case costs the 30s fixed lsquic idle timeout
-    skip()
-    return
-
-    # The peer's socket disappears mid-stream, so it never sends a FIN, yet the
-    # reader is handed the same end of stream a FIN produces.
+  asyncTest "vanished peer fails the stream without a fin":
+    # The peer's socket disappears mid-stream, so it never sends a FIN.
     let server = makeEndpoint(AutoAddressIP4)
     let client = makeDialEndpoint(AddressFamily.IPv4)
     defer:
@@ -495,8 +686,9 @@ suite "lifecycle":
     await server.datagramTransport().closeWait()
 
     var buf = newSeq[byte](8)
-    check (await clientStream.readOnce(buf).wait(45.seconds)) == 0
-    check clientStream.isEof
+    expect StreamError:
+      discard await clientStream.readOnce(buf).wait(45.seconds)
+    check not clientStream.isEof
     check not clientStream.resetByPeer
 
   asyncTest "zero length reads return zero":
@@ -507,15 +699,36 @@ suite "lifecycle":
 
     check (await stream.readOnce(empty)) == 0
 
+  test "stream id direction bit identifies unidirectional streams":
+    check:
+      not isUnidirectional(0)
+      not isUnidirectional(1)
+      isUnidirectional(2)
+      isUnidirectional(3)
+
+  asyncTest "receive-only stream rejects writes locally":
+    let stream = Stream.new(canWrite = false)
+    defer:
+      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
+
+    check:
+      stream.canRead
+      not stream.canWrite
+      stream.closeWrite
+
+    expect StreamError:
+      await stream.write(@[])
+
+    await stream.close()
+
   asyncTest "late datagrams are ignored after context stops":
     let verifier: CertificateVerifier = CustomCertificateVerifier.init(
       proc(serverName: string, derCertificates: seq[seq[byte]]): bool {.gcsafe.} =
         discard serverName
         derCertificates.len > 0
     )
-    let tlsConfig = TLSConfig.new(
-      testCertificate(), testPrivateKey(), @["test"].toHashSet(), Opt.some(verifier)
-    )
+    let tlsConfig =
+      TLSConfig.new(testCertificate(), testPrivateKey(), @["test"], Opt.some(verifier))
     let ctx = ClientContext.new(tlsConfig).valueOr:
       raiseAssert error
     let local = initTAddress("127.0.0.1:12345")
@@ -708,21 +921,6 @@ suite "lifecycle":
     expect AssertionDefect:
       discard await stream.readOnce(nil, 8)
 
-  asyncTest "nil write source is rejected":
-    let stream = Stream.new()
-    defer:
-      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
-
-    expect AssertionDefect:
-      await stream.write(nil, 8)
-
-  asyncTest "zero length writes ignore a nil source":
-    let stream = Stream.new()
-    defer:
-      onClose(nil, cast[ptr lsquic_stream_ctx_t](stream)) # release the pin
-
-    await stream.write(nil, 0)
-
   asyncTest "read waiting for the read lock sees the stream closed by the engine":
     let stream = Stream.new()
     defer:
@@ -738,7 +936,8 @@ suite "lifecycle":
 
     # the post-lock re-check keeps the read away from the freed native stream
     check (await reading.withTimeout(timeout))
-    check (await reading) == 0
+    expect StreamError:
+      discard await reading
 
   asyncTest "read waiting for the read lock sees a peer reset":
     let stream = Stream.new()
@@ -786,7 +985,7 @@ suite "lifecycle":
   # One test per close path, pinning the rule that each settles the parked
   # operation itself.
 
-  asyncTest "engine close completes a parked read with eof":
+  asyncTest "engine close without fin fails parked and later reads":
     let stream = Stream.new()
     var buf = newSeq[byte](8)
     let doneFut =
@@ -798,7 +997,13 @@ suite "lifecycle":
 
     check stream.toRead.isNone()
     check doneFut.finished
-    check (await doneFut.wait(timeout)) == 0
+    expect StreamError:
+      discard await doneFut.wait(timeout)
+
+    var laterBuf = newSeq[byte](1)
+    expect StreamError:
+      discard await stream.readOnce(laterBuf)
+    check not stream.isEof
 
   asyncTest "engine close fails a parked read after a peer read reset":
     let stream = Stream.new()
@@ -854,14 +1059,15 @@ suite "lifecycle":
 
     stream.abort()
 
-    # Unlike close, abort takes the read side down too, so later reads end at eof.
-    check stream.isEof
+    # Unlike a received FIN, abort terminates the read side with an error.
+    check not stream.isEof
     check stream.toRead.isNone()
     check stream.toWrite.isNone()
     check readFut.finished
     check writeFut.finished
-    check (await readFut.wait(timeout)) == 0
 
+    expect StreamError:
+      discard await readFut.wait(timeout)
     expect StreamError:
       await writeFut.wait(timeout)
 

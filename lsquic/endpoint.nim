@@ -113,7 +113,7 @@ proc packetDcid(
 
   var cidLen: uint8
   let offset = lsquic_dcid_from_packet(
-    unsafeAddr packet[0], packet.len.csize_t, endpoint.scidLen(), addr cidLen
+    addr packet[0], packet.len.csize_t, endpoint.scidLen(), addr cidLen
   )
   if offset < 0:
     return false
@@ -127,10 +127,21 @@ proc packetDcid(
     cid.bytes[i] = packet[start + i]
   true
 
+const
+  HeaderFormBit = 0b1000_0000'u8
+  FixedBit = 0b0100_0000'u8
+  HeaderBitsMask = HeaderFormBit or FixedBit
+  LongPacketTypeMask = 0b0011_0000'u8
+
 func isIetfInitial(packet: openArray[byte]): bool {.raises: [].} =
   if packet.len == 0:
     return false
-  (packet[0] and 0xC0'u8) == 0xC0'u8 and (packet[0] and 0x30'u8) == 0
+  (packet[0] and HeaderBitsMask) == HeaderBitsMask and
+    (packet[0] and LongPacketTypeMask) == 0
+
+func isIetfShortHeader(packet: openArray[byte]): bool {.raises: [].} =
+  ## IETF short headers have Header Form clear and Fixed Bit set.
+  packet.len > 0 and (packet[0] and HeaderBitsMask) == FixedBit
 
 proc routeDatagram(
     endpoint: QuicEndpoint, data: openArray[byte], local, remote: TransportAddress
@@ -168,6 +179,13 @@ proc routeDatagram(
       bytes = data.len, local, remote
     endpoint.serverContext.packetIn(data, local, remote)
     return {rtServer}
+
+  if hasClientContext and hasServerContext and data.isIetfShortHeader():
+    trace "Routing unknown short-header datagram to both contexts",
+      bytes = data.len, local, remote
+    endpoint.clientContext.packetIn(data, local, remote)
+    endpoint.serverContext.packetIn(data, local, remote)
+    return {rtClient, rtServer}
 
   trace "Dropping datagram with unknown CID", bytes = data.len, local, remote
   {}
@@ -285,26 +303,6 @@ proc createUdp(
   udp.configureReceiveBuffer(socketConfig)
   udp
 
-proc createUdp(
-    endpoint: QuicEndpoint, family: AddressFamily, socketConfig: QuicSocketConfig
-): DatagramTransport {.raises: [QuicError, TransportOsError].} =
-  proc onReceive(
-      udp: DatagramTransport, remote: TransportAddress
-  ) {.async: (raises: []).} =
-    endpoint.receiveFromUdp(udp, remote)
-
-  let udp =
-    case family
-    of AddressFamily.IPv4:
-      newDatagramTransport(onReceive)
-    of AddressFamily.IPv6:
-      newDatagramTransport6(onReceive)
-    else:
-      raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
-
-  udp.configureReceiveBuffer(socketConfig)
-  udp
-
 proc new*(
     _: type QuicEndpoint,
     tlsConfig: TLSConfig,
@@ -345,13 +343,15 @@ proc new*(
     family: AddressFamily,
     socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
 ): QuicEndpoint {.raises: [QuicError, TransportOsError].} =
-  socketConfig.validate()
-
-  var endpoint = QuicEndpoint(
-    tlsConfig: tlsConfig, capabilities: {CanDial}, connman: ConnectionManager.new()
-  )
-  endpoint.udp = endpoint.createUdp(family, socketConfig)
-  endpoint
+  let address =
+    case family
+    of AddressFamily.IPv4:
+      AnyAddress
+    of AddressFamily.IPv6:
+      AnyAddress6
+    else:
+      raise newException(QuicError, "endpoint supports only IPv4/IPv6 address")
+  QuicEndpoint.new(tlsConfig, address, {CanDial}, socketConfig)
 
 proc ensureClientContext(
     endpoint: QuicEndpoint
@@ -365,11 +365,6 @@ proc ensureClientContext(
 
   endpoint.clientContext
 
-proc waitForIncoming(
-    endpoint: QuicEndpoint
-): Future[QuicConnection] {.async: (raises: [CancelledError]).} =
-  await endpoint.serverContext.incoming.get()
-
 proc accept*(
     endpoint: QuicEndpoint
 ): Future[Connection] {.async: (raises: [CancelledError, TransportError]).} =
@@ -381,7 +376,7 @@ proc accept*(
 
   while true:
     let
-      incomingFut = endpoint.waitForIncoming()
+      incomingFut = endpoint.serverContext.incoming.get()
       closedFut = endpoint.connman.closed
       raceFut = await race(closedFut, incomingFut)
 
@@ -401,13 +396,15 @@ proc accept*(
 proc dial(
     endpoint: QuicEndpoint,
     address: TransportAddress,
+    serverName: string,
     certVerifier: Opt[CertificateVerifier],
 ): Future[Connection] {.
     async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
 .} =
   let ctx = endpoint.ensureClientContext()
-  let connection =
-    newOutgoingConnection(ctx, endpoint.udp.localAddress(), address, certVerifier)
+  let connection = newOutgoingConnection(
+    ctx, endpoint.udp.localAddress(), address, serverName, certVerifier
+  )
   endpoint.connman.addConnection(connection)
   var connected = false
   try:
@@ -419,6 +416,13 @@ proc dial(
 
   connection
 
+proc validateServerName(serverName: string) {.raises: [QuicError].} =
+  if serverName.len == 0:
+    raise newException(QuicError, "server name is empty")
+  for c in serverName:
+    if c == '\0':
+      raise newException(QuicError, "server name contains a null byte")
+
 proc dial*(
     endpoint: QuicEndpoint, address: TransportAddress
 ): Future[Connection] {.
@@ -429,7 +433,22 @@ proc dial*(
       QuicError, "certificate verifier is required; use dial(address, certVerifier)"
     )
 
-  await endpoint.dial(address, Opt.none(CertificateVerifier))
+  await endpoint.dial(address, "", Opt.none(CertificateVerifier))
+
+proc dial*(
+    endpoint: QuicEndpoint, address: TransportAddress, serverName: string
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  validateServerName(serverName)
+
+  if endpoint.tlsConfig.certVerifier.isNone:
+    raise newException(
+      QuicError,
+      "certificate verifier is required; use dial(address, serverName, certVerifier)",
+    )
+
+  await endpoint.dial(address, serverName, Opt.none(CertificateVerifier))
 
 proc dial*(
     endpoint: QuicEndpoint, address: TransportAddress, certVerifier: CertificateVerifier
@@ -439,7 +458,21 @@ proc dial*(
   if certVerifier.isNil:
     raise newException(QuicError, "certificate verifier is nil")
 
-  await endpoint.dial(address, Opt.some(certVerifier))
+  await endpoint.dial(address, "", Opt.some(certVerifier))
+
+proc dial*(
+    endpoint: QuicEndpoint,
+    address: TransportAddress,
+    serverName: string,
+    certVerifier: CertificateVerifier,
+): Future[Connection] {.
+    async: (raises: [CancelledError, QuicError, DialError, TransportOsError])
+.} =
+  validateServerName(serverName)
+  if certVerifier.isNil:
+    raise newException(QuicError, "certificate verifier is nil")
+
+  await endpoint.dial(address, serverName, Opt.some(certVerifier))
 
 proc localAddress*(
     endpoint: QuicEndpoint
@@ -477,4 +510,5 @@ when defined(lsquic_testing):
     ## Test-only: number of connections tracked by this endpoint's manager.
     endpoint.connman.len
 
-  export scidLen, packetDcid, isIetfInitial, routeDatagram, RouteTarget
+  export
+    scidLen, packetDcid, isIetfInitial, isIetfShortHeader, routeDatagram, RouteTarget

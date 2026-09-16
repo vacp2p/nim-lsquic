@@ -18,6 +18,7 @@ type RejectVerifierRecorder = ref object
 type VerifierRecorder = ref object
   count: int
   fired: AsyncEvent
+  serverNames: seq[string]
 
 type ServerNameRecorder = ref object
   serverName: string
@@ -55,8 +56,9 @@ proc makeRejectingCertificateCb(
 proc makeCertificateCb(
     recorder: VerifierRecorder, accepted: bool
 ): certificateVerifierCB =
-  return proc(_: string, derCertificates: seq[seq[byte]]): bool {.gcsafe.} =
+  return proc(serverName: string, derCertificates: seq[seq[byte]]): bool {.gcsafe.} =
     inc recorder.count
+    recorder.serverNames.add(serverName)
     recorder.fired.fire()
     if accepted:
       derCertificates.len > 0
@@ -121,8 +123,7 @@ suite "certificate verifier":
     outgoing.close()
     incoming.close()
 
-  asyncTest "verifier receives an empty server name":
-    # TODO: vacp2p/nim-lsquic#138
+  asyncTest "verifier receives an empty server name without explicit SNI":
     let clientRecorder = ServerNameRecorder(fired: newAsyncEvent())
     let serverRecorder = ServerNameRecorder(fired: newAsyncEvent())
     let client = makeClient(
@@ -148,6 +149,38 @@ suite "certificate verifier":
 
     outgoing.close()
     incoming.close()
+
+  asyncTest "dial hostname is sent as SNI and reaches both verifiers":
+    let clientRecorder = VerifierRecorder(fired: newAsyncEvent())
+    let serverRecorder = VerifierRecorder(fired: newAsyncEvent())
+    let client =
+      makeClient(CustomCertificateVerifier.init(clientRecorder.makeCertificateCb(true)))
+    let server =
+      makeServer(CustomCertificateVerifier.init(serverRecorder.makeCertificateCb(true)))
+    let listener = server.listen(AutoAddressIP4)
+    defer:
+      await allFutures(client.stop(), listener.stop())
+
+    let accepting = listener.accept()
+    let outgoing = await client.dial(listener.localAddress(), "example.com")
+    let incoming = await accepting
+
+    check:
+      clientRecorder.serverNames == @["example.com"]
+      serverRecorder.serverNames == @["example.com"]
+
+    outgoing.close()
+    incoming.close()
+
+  asyncTest "explicit hostname rejects empty and embedded null values":
+    let client = makeClient()
+    defer:
+      await client.stop()
+
+    expect QuicError:
+      discard await client.dial(AutoAddressIP4, "")
+    expect QuicError:
+      discard await client.dial(AutoAddressIP4, "example.com\0invalid")
 
   asyncTest "rejecting client verifier rejects handshake":
     let client = makeClient(CustomCertificateVerifier.init(rejectingCertificateCb))

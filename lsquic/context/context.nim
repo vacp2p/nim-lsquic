@@ -107,10 +107,17 @@ proc trackConnectionCid*(ctx: QuicContext, conn: ptr lsquic_conn_t) {.raises: []
 proc ownsCid*(ctx: QuicContext, cid: CidKey): bool {.raises: [].} =
   not ctx.isNil and cid in ctx.ownedCids
 
+proc connectionStatus*(
+    conn: ptr lsquic_conn_t
+): tuple[status: enum_LSQUIC_CONN_STATUS, reason: string] {.raises: [].} =
+  var buf: array[256, char]
+  result.status = lsquic_conn_status(conn, cast[cstring](addr buf[0]), buf.len.csize_t)
+  result.reason = $cast[cstring](addr buf[0])
+
 proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
   not ctx.isNil and ctx.running and not ctx.engine.isNil
 
-proc engine_process*(ctx: QuicContext) =
+proc processWhenReady*(ctx: QuicContext) =
   if not ctx.isRunning():
     return
 
@@ -171,7 +178,6 @@ type QuicConnection* = ref object of RootObj
   certVerifier*: Opt[CertificateVerifier]
   onClose*: proc() {.gcsafe, raises: [].}
   closedLocal*: bool
-  closedRemote*: bool
   incoming*: AsyncQueue[Stream]
   connectedFut*: Future[void]
   pendingStreams: Deque[PendingStream] = initDeque[PendingStream]()
@@ -181,11 +187,6 @@ type ClientContext* = ref object of QuicContext
 
 type ServerContext* = ref object of QuicContext
   incoming*: AsyncQueue[QuicConnection]
-
-proc processWhenReady*(quicContext: QuicContext) =
-  if quicContext.isNil or quicContext.engine.isNil:
-    return
-  quicContext.engine_process()
 
 proc flushDeferred(udata: pointer) {.gcsafe, raises: [].} =
   let ctx = cast[QuicContext](udata)
@@ -201,11 +202,6 @@ proc processSoon*(quicContext: QuicContext) {.raises: [].} =
   quicContext.flushScheduled = true
   pin(quicContext) # the dispatcher holds a raw pointer until the callback runs
   callSoon(flushDeferred, cast[pointer](quicContext))
-
-proc incomingStream*(
-    quicConn: QuicConnection
-): Future[Stream] {.async: (raises: [CancelledError]).} =
-  await quicConn.incoming.get()
 
 proc addPendingStream*(
     quicConn: QuicConnection, s: Stream
@@ -236,7 +232,7 @@ proc cancelPending*(quicConn: QuicConnection) =
 
     pending.stream.closedByEngine = true
     pending.stream.closeWrite = true
-    pending.stream.isEof = true
+    pending.stream.markReadFailed("connection closed before stream opened")
     if not pending.stream.closed.isSet():
       pending.stream.closed.fire()
     unpin(pending.stream)
@@ -261,6 +257,7 @@ proc alpnSelectProtoCB(
       inlen,
     ) == OPENSSL_NPN_NEGOTIATED
   ):
+    # SSL_select_next_proto prefers its first list, so pass the server list first.
     return SSL_TLSEXT_ERR_OK
 
   return SSL_TLSEXT_ERR_ALERT_FATAL
@@ -397,6 +394,7 @@ method dial*(
     remote: TransportAddress,
     connectedFut: Future[void],
     onClose: proc() {.gcsafe, raises: [].},
+    serverName: string,
     certVerifier: Opt[CertificateVerifier],
 ): Result[QuicConnection, string] {.base, gcsafe, raises: [].} =
   raiseAssert "dial not implemented"
@@ -410,6 +408,9 @@ proc makeStream*(
     raise newException(ConnectionClosedError, "connection closed")
   lsquic_conn_make_stream(quicConn.lsquicConn)
 
+func isUnidirectional*(streamId: lsquic_stream_id_t): bool {.raises: [].} =
+  (streamId and 2) != 0
+
 proc onNewStream*(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
@@ -421,7 +422,7 @@ proc onNewStream*(
     return nil
 
   let quicConn = cast[QuicConnection](conn_ctx)
-  let stream_id = lsquic_stream_id(stream).int
+  let stream_id = lsquic_stream_id(stream)
   let isLocal =
     if quicConn.isOutgoing:
       (stream_id and 1) == 0
@@ -437,7 +438,7 @@ proc onNewStream*(
       discard lsquic_stream_wantwrite(stream, 1)
       s
     else:
-      let s = Stream.new(stream)
+      let s = Stream.new(stream, canWrite = not isUnidirectional(stream_id))
       quicConn.incoming.putNoWait(s)
       # Whoever opens the stream reads first
       discard lsquic_stream_wantread(stream, 1)
@@ -445,8 +446,3 @@ proc onNewStream*(
       s
 
   return cast[ptr lsquic_stream_ctx_t](streamCtx)
-
-proc certificates*(
-    ctx: QuicContext, conn: QuicConnection
-): seq[seq[byte]] {.raises: [].} =
-  conn.certChain

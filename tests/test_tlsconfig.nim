@@ -12,33 +12,6 @@ import lsquic/certificates
 import lsquic/lsquic_ffi
 import ./helpers/[certificate, trackers]
 
-proc decodeAlpnWire(wire: string): HashSet[string] =
-  ## Reverses the ALPN encoding that TLSConfig.new applies, so a test can check
-  ## which protocol names ended up on the wire.
-  ##
-  ## Each name is stored as one byte holding its length followed by the name
-  ## itself, and those pairs are concatenated:
-  ##
-  ##   {"test", "quic-echo"}  ->  "\x04test" & "\x09quic-echo"
-  ##
-  ## A length byte that points past the end of the buffer means the encoding is
-  ## broken, so decoding stops there and the caller gets the names read so far.
-  var decoded = initHashSet[string]()
-  var i = 0
-  while i < wire.len:
-    let length = wire[i].byte.int
-    if i + 1 + length > wire.len:
-      return decoded
-    decoded.incl(wire[i + 1 ..< i + 1 + length])
-    i += 1 + length
-  decoded
-
-proc makeAlpnSet(protocols: varargs[string]): HashSet[string] =
-  var alpn = initHashSet[string]()
-  for protocol in protocols:
-    alpn.incl(protocol)
-  alpn
-
 suite "tls config":
   teardown:
     checkTrackers()
@@ -57,47 +30,56 @@ suite "tls config":
       discard QuicServer.new(cfg)
 
   test "single alpn value is encoded":
-    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), makeAlpn())
+    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), @["test"])
 
     check cfg.alpnWire == "\x04test"
 
   test "every alpn value gets its own length prefix":
-    let alpn = makeAlpnSet("test", "quic-echo")
+    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), @["test", "quic-echo"])
 
-    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), alpn)
+    check cfg.alpnWire == "\x04test\x09quic-echo"
 
-    # alpn is a HashSet, so the encoder has no order to preserve: decode the
-    # wire form back instead of pinning a byte string.
-    check:
-      cfg.alpnWire.len == (1 + "test".len) + (1 + "quic-echo".len)
-      cfg.alpnWire.decodeAlpnWire() == alpn
+  test "hash set alpn remains source compatible":
+    let alpn = @["test"].toHashSet()
+    let positional = TLSConfig.new(
+      testCertificate(), testPrivateKey(), alpn, Opt.none(CertificateVerifier)
+    )
+    let named = TLSConfig.new(alpn = alpn)
+
+    check positional.alpnWire == "\x04test"
+    check named.alpnWire == "\x04test"
+
+  test "duplicate alpn values are rejected":
+    expect QuicConfigError:
+      discard TLSConfig.new(testCertificate(), testPrivateKey(), @["test", "test"])
 
   test "alpn value of 255 bytes still encodes":
     let protocol = repeat('a', 255)
-    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), makeAlpnSet(protocol))
+    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), @[protocol])
 
     check:
       cfg.alpnWire.len == 256
       cfg.alpnWire[0].byte.int == 255
-      cfg.alpnWire.decodeAlpnWire() == makeAlpnSet(protocol)
+      cfg.alpnWire[1 .. ^1] == protocol
 
   test "alpn value over 255 bytes is not encodable":
-    # TODO: vacp2p/nim-lsquic#113
-    # TLSConfig.new does not validate the protocol length, so chr(len) trips the range check
-    # and a RangeDefect escapes an API that reports every other misconfiguration as a QuicConfigError.
-    let alpn = makeAlpnSet(repeat('a', 256))
+    let alpn = @[repeat('a', 256)]
 
-    expect RangeDefect:
+    expect QuicConfigError:
       discard TLSConfig.new(testCertificate(), testPrivateKey(), alpn)
 
-  test "empty alpn value encodes to a zero length entry":
-    # TODO: vacp2p/nim-lsquic#113
-    # RFC 7301 forbids an empty protocol name, but TLSConfig.new emits one and
-    # reports nothing. BoringSSL rejects the buffer later, at dial time, where it
-    # surfaces as AssertionDefect instead of a QuicConfigError.
-    let cfg = TLSConfig.new(testCertificate(), testPrivateKey(), makeAlpnSet(""))
+  test "empty alpn value is not encodable":
+    expect QuicConfigError:
+      discard TLSConfig.new(testCertificate(), testPrivateKey(), @[""])
 
-    check cfg.alpnWire == "\x00"
+  test "alpn protocol list cannot exceed 65535 bytes":
+    var alpn: seq[string]
+    for i in 0 .. 256:
+      let prefix = $i
+      alpn.add(prefix & repeat('a', 255 - prefix.len))
+
+    expect QuicConfigError:
+      discard TLSConfig.new(testCertificate(), testPrivateKey(), alpn)
 
   test "valid pem certificate parses":
     let parsed = testCertificate().toX509()
@@ -123,7 +105,7 @@ suite "tls config":
     let der = cert.x509toDERBytes().valueOr:
       raiseAssert "test certificate must convert to DER"
 
-    var readPos = cast[ptr uint8](unsafeAddr der[0])
+    var readPos = cast[ptr uint8](addr der[0])
     let reparsed = d2i_X509(nil, addr readPos, der.len.clong)
     defer:
       X509_free(reparsed)
