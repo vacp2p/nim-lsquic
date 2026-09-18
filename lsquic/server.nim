@@ -2,12 +2,17 @@
 # Copyright (c) Status Research & Development GmbH 
 
 import chronos, results
-import ./[errors, connection, tlsconfig, endpoint, certificateverifier, socketconfig]
+import
+  ./[
+    errors, connection, tlsconfig, endpoint, certificateverifier, socketconfig,
+    engine_config,
+  ]
 
 type
   QuicServer* = ref object of RootObj
     tlsConfig: TLSConfig
     socketConfig: QuicSocketConfig
+    engineConfig: QuicEngineConfig
 
   Listener* = ref object of RootObj
     endpoint: QuicEndpoint
@@ -16,22 +21,29 @@ proc new*(
     t: typedesc[QuicServer],
     tlsConfig: TLSConfig,
     socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
+    engineConfig: QuicEngineConfig = DefaultQuicEngineConfig,
 ): QuicServer {.raises: [QuicConfigError].} =
   if tlsConfig.certificate.len == 0:
     raise newException(QuicConfigError, "tlsConfig does not contain a certificate")
   socketConfig.validate()
-  return QuicServer(tlsConfig: tlsConfig, socketConfig: socketConfig)
+  engineConfig.validate(true)
+  engineConfig.validate(false)
+  return QuicServer(
+    tlsConfig: tlsConfig, socketConfig: socketConfig, engineConfig: engineConfig
+  )
 
 proc newListener*(
     tlsConfig: TLSConfig,
     address: TransportAddress,
     socketConfig: QuicSocketConfig = DefaultQuicSocketConfig,
+    engineConfig: QuicEngineConfig = DefaultQuicEngineConfig,
 ): Result[Listener, string] =
   try:
     ok(
       Listener(
-        endpoint:
-          QuicEndpoint.new(tlsConfig, address, {CanListen, CanDial}, socketConfig)
+        endpoint: QuicEndpoint.new(
+          tlsConfig, address, {CanListen, CanDial}, socketConfig, engineConfig
+        )
       )
     )
   except QuicConfigError, QuicError, TransportOsError:
@@ -40,13 +52,13 @@ proc newListener*(
 proc listen*(
     self: QuicServer, address: TransportAddress
 ): Listener {.raises: [QuicError].} =
-  newListener(self.tlsConfig, address, self.socketConfig).valueOr:
+  newListener(self.tlsConfig, address, self.socketConfig, self.engineConfig).valueOr:
     raise newException(QuicError, error)
 
 proc listen*(
     self: QuicServer, address: TransportAddress, socketConfig: QuicSocketConfig
 ): Listener {.raises: [QuicError].} =
-  newListener(self.tlsConfig, address, socketConfig).valueOr:
+  newListener(self.tlsConfig, address, socketConfig, self.engineConfig).valueOr:
     raise newException(QuicError, error)
 
 proc accept*(

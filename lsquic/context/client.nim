@@ -10,7 +10,7 @@ import ./[context, io, stream]
 import
   ../[
     lsquic_ffi, errors, tlsconfig, timeout, stream, certificates, certificateverifier,
-    tracking,
+    tracking, engine_config,
   ]
 
 proc onNewConn(
@@ -120,27 +120,24 @@ method dial*(
 
   ok(quicClientConn)
 
-const Cubic = 1
-const Adaptive = 3
-
-proc new*(T: typedesc[ClientContext], tlsConfig: TLSConfig): Result[T, string] =
+proc new*(
+    T: typedesc[ClientContext],
+    tlsConfig: TLSConfig,
+    engineConfig: QuicEngineConfig = DefaultQuicEngineConfig,
+): Result[T, string] =
   var ctx = ClientContext()
   ctx.tlsConfig = tlsConfig
   ctx.running = true
   ctx.setupSSLContext()
   ctx.initCidTracking()
 
-  lsquic_engine_init_settings(addr ctx.settings, 0)
-  ctx.settings.es_versions = 1.cuint shl LSQVER_I001.cuint #IETF QUIC v1
-  ctx.settings.es_cc_algo = Cubic
-  ctx.settings.es_base_plpmtu = 1280
-  ctx.settings.es_init_max_streams_bidi = 100
-  ctx.settings.es_honor_prst = 1
+  ctx.settings.initSettings(false)
 
-  ctx.settings.es_max_cfcw = 8 * 1024 * 1024
-  ctx.settings.es_max_sfcw = 2 * 1024 * 1024
-  ctx.settings.es_init_max_stream_data_bidi_local = 1024 * 1024
-  ctx.settings.es_init_max_stream_data_bidi_remote = 1024 * 1024
+  try:
+    engineConfig.apply(ctx.settings, false)
+  except QuicConfigError:
+    ctx.destroy()
+    return err(getCurrentExceptionMsg())
 
   ctx.stream_if = struct_lsquic_stream_if(
     on_new_conn: onNewConn,

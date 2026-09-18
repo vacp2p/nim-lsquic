@@ -141,6 +141,42 @@ The snippet expects `cert.pem` and `key.pem` in PEM format and embeds them at co
   not normal EOF.
 - UDP sockets request an 8 MiB receive buffer by default. Pass `QuicSocketConfig(receiveBufferBytes: 0)` to keep the OS default, or set another byte value; Linux may cap the effective size at `net.core.rmem_max`.
 
+### QUIC Configuration
+
+`nim-lsquic` initializes LSQUIC with its native client or server defaults, then
+applies a few interoperability defaults internally. Public configuration support
+is split by ownership:
+
+| Area | Nim API | LSQUIC setting |
+| --- | --- | --- |
+| UDP receive buffer | `QuicSocketConfig.receiveBufferBytes` | OS `SO_RCVBUF` |
+| TLS certificate, ALPN, verification | `TLSConfig` | TLS callbacks |
+| Handshake timeout | `QuicEngineConfig.handshakeTimeout` | `es_handshake_to` |
+| Idle and no-progress timeouts | `idleTimeout`, `noProgressTimeout` | `es_idle_timeout`, `es_noprogress_timeout` |
+| Keepalive | `pingPeriod` | `es_ping_period` |
+| Bidirectional streams | `initialMaxStreamsBidi` | `es_init_max_streams_bidi` |
+| Connection flow control | `initialMaxData`, `maxConnectionFlowControlWindow` | `es_init_max_data`, `es_max_cfcw` |
+| Stream flow control | `initialMaxStreamDataBidiLocal`, `initialMaxStreamDataBidiRemote`, `maxStreamFlowControlWindow` | corresponding `es_*` fields |
+| Congestion control | `congestionControl` | `es_cc_algo` |
+| Migration | `allowMigration` | `es_allow_migration` |
+| Path MTU discovery | `enablePathMtuDiscovery` | `es_dplpmtud` |
+
+All engine fields are optional. Leaving a field unset preserves nim-lsquic's
+role-specific behavior, which lets nim-libp2p expose one configuration object for
+both dialing and listening. `Duration` values must match LSQUIC's precision:
+whole microseconds for handshakes and whole seconds for the other timers. Invalid
+values are rejected when a client, server, or endpoint is created.
+
+```nim
+let engineConfig = QuicEngineConfig(
+  idleTimeout: Opt.some(60.seconds),
+  pingPeriod: Opt.some(20.seconds),
+  initialMaxStreamsBidi: Opt.some(256'u32),
+)
+let server = QuicServer.new(tlsConfig, engineConfig = engineConfig)
+let client = QuicClient.new(tlsConfig, engineConfig = engineConfig)
+```
+
 For more complete usage patterns, see:
 
 - [`tests/test_connection.nim`](tests/test_connection.nim)
@@ -193,6 +229,8 @@ The script installs `futhark@0.15.0`, regenerates the binding file, and appends 
 | [`lsquic/connection`](lsquic/connection.nim) | Connection lifecycle, stream creation, certificate access |
 | [`lsquic/stream`](lsquic/stream.nim) | Async stream reads, writes, close, and abort |
 | [`lsquic/tlsconfig`](lsquic/tlsconfig.nim) | TLS configuration plus PEM-to-X509/PKey helpers |
+| [`lsquic/socketconfig`](lsquic/socketconfig.nim) | UDP socket configuration |
+| [`lsquic/engine_config`](lsquic/engine_config.nim) | Typed LSQUIC engine configuration |
 | [`lsquic/certificateverifier`](lsquic/certificateverifier.nim) | Base, custom, and insecure certificate verifier adapters |
 | [`lsquic/lsquic_ffi`](lsquic/lsquic_ffi.nim) | Generated low-level bindings to the vendored native libraries |
 
