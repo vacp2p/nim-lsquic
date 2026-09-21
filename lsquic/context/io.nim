@@ -3,14 +3,17 @@
 
 import chronos
 import chronos/osdefs
+import chronicles
 import ./context
 import ../lsquic_ffi
 import ../helpers/transportaddr
 import std/[nativesockets, net]
 
 when not defined(windows):
-  import chronicles
   import posix
+
+logScope:
+  topics = "nim-lsquic"
 
 const MaxBatch = 1024
   ## Upper bound on the stack WSABUF array in the Windows send path (`sendPacketsOut`).

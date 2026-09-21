@@ -14,6 +14,9 @@ import
   ]
 import ../helpers/transportaddr
 
+logScope:
+  topics = "nim-lsquic"
+
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
 ): ptr lsquic_conn_ctx_t {.cdecl.} =

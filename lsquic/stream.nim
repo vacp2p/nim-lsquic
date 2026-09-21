@@ -6,6 +6,9 @@ import chronos
 import chronicles
 import ./[lsquic_ffi, errors, tracking]
 
+logScope:
+  topics = "nim-lsquic"
+
 const WriteFlushBytes = 16384
   ## Large writes flush immediately; smaller writes defer to coalesce ticks.
 

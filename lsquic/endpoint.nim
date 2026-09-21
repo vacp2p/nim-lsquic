@@ -19,6 +19,9 @@ when defined(windows):
 else:
   from chronos/osdefs import recvfrom
 
+logScope:
+  topics = "nim-lsquic"
+
 type
   QuicEndpointCapability* = enum
     CanListen

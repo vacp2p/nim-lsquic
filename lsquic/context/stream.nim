@@ -7,6 +7,9 @@ import chronos
 import ../[lsquic_ffi, errors, stream, tracking]
 import ../helpers/sequninit
 
+logScope:
+  topics = "nim-lsquic"
+
 proc onReset*(
     stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t, how: cint
 ) {.cdecl.} =
