@@ -159,8 +159,8 @@ proc sendPacketsOut*(
       let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nmsgs.cuint, 0)
       if res < 0:
         let savedErrno = errno
-        trace "Failed to send UDP datagram batch", sent, nspecs,
-          error = osErrorLabel(savedErrno)
+        trace "Failed to send UDP datagram batch",
+          sent, nspecs, error = osErrorLabel(savedErrno)
         errno = savedErrno
         if sent == 0:
           return -1
@@ -168,8 +168,8 @@ proc sendPacketsOut*(
 
       sent += res.int
       if res < nmsgs.cint:
-        trace "Sent only part of UDP datagram batch", sent, nspecs,
-          error = osErrorLabel(EAGAIN)
+        trace "Sent only part of UDP datagram batch",
+          sent, nspecs, error = osErrorLabel(EAGAIN)
         errno = EAGAIN
         return sent.cint
 
@@ -225,8 +225,8 @@ proc sendPacketsOut*(
         let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
         if res < 0:
           let savedErrno = errno
-          trace "Failed to send UDP datagram", sent, nspecs,
-            error = osErrorLabel(savedErrno)
+          trace "Failed to send UDP datagram",
+            sent, nspecs, error = osErrorLabel(savedErrno)
           errno = savedErrno
           if sent == 0:
             return -1

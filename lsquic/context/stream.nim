@@ -100,7 +100,8 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
     streamCtx.isEof = true
   if n == 0 and streamCtx.isEof:
     if not streamCtx.closeIfDone():
-      trace "Failed to close stream after receiving end of input", streamId = lsquic_stream_id(stream)
+      trace "Failed to close stream after receiving end of input",
+        streamId = lsquic_stream_id(stream)
       streamCtx.failPendingRead(newException(StreamError, "could not close the stream"))
       streamCtx.abort()
       return
