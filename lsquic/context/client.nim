@@ -26,7 +26,7 @@ proc onNewConn(
 proc onHandshakeDone(
     conn: ptr lsquic_conn_t, status: enum_lsquic_hsk_status
 ) {.cdecl.} =
-  trace "Client handshake completed", status
+  trace "Client handshake completed", status = $status
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
     trace "Client handshake completed without a connection context"
@@ -51,7 +51,9 @@ proc onHandshakeDone(
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   let (connStatus, msg) = connectionStatus(conn)
   trace "Client connection closed",
-    status = connStatus, statelessReset = connStatus == LSCONN_ST_RESET, reason = msg
+    status = $connStatus,
+    statelessReset = connStatus == LSCONN_ST_RESET,
+    hasReason = msg.len > 0
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
     let quicClientConn = cast[QuicConnection](conn_ctx)

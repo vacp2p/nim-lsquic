@@ -5,6 +5,7 @@ import std/[deques, posix]
 import chronos
 import chronicles
 import ./[lsquic_ffi, errors, tracking]
+import ./helpers/logging
 
 logScope:
   topics = "nim-lsquic"
@@ -167,7 +168,7 @@ proc clearPendingRead(
     let readErrno = errno
     if readErrno != EBADF:
       debug "Failed to disable stream read notifications",
-        streamId = lsquic_stream_id(stream.quicStream), errno = readErrno
+        streamId = lsquic_stream_id(stream.quicStream), error = osErrorLabel(readErrno)
 
 proc clearPendingWrite(
     stream: Stream, doneFut: Future[void].Raising([CancelledError, StreamError])
@@ -186,7 +187,7 @@ proc clearPendingWrite(
     let writeErrno = errno
     if writeErrno != EBADF:
       debug "Failed to disable stream write notifications",
-        streamId = lsquic_stream_id(stream.quicStream), errno = writeErrno
+        streamId = lsquic_stream_id(stream.quicStream), error = osErrorLabel(writeErrno)
 
 template raiseIfReadReset(stream: Stream) =
   if stream.readResetByPeer():
@@ -218,7 +219,7 @@ proc requestClose(stream: Stream): bool {.raises: [].} =
 
     stream.closeRequested = false
     trace "Failed to close stream",
-      streamId = lsquic_stream_id(stream.quicStream), errno = closeErrno
+      streamId = lsquic_stream_id(stream.quicStream), error = osErrorLabel(closeErrno)
     return false
 
   stream.processWhenAvailable()
@@ -392,7 +393,8 @@ proc write*(
       if not stream.writeResetByPeer():
         stream.markResetByPeer(ResetWrite)
       raise stream.newStreamResetError("stream write")
-    trace "Failed to write to stream", streamId = lsquic_stream_id(stream.quicStream), errno
+    trace "Failed to write to stream",
+      streamId = lsquic_stream_id(stream.quicStream), error = osErrorLabel(errno)
     raise newException(StreamError, "could not write")
 
   # Enqueue otherwise

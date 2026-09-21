@@ -6,6 +6,7 @@ import chronos/osdefs
 import chronicles
 import ./context
 import ../lsquic_ffi
+import ../helpers/logging
 import ../helpers/transportaddr
 import std/[nativesockets, net]
 
@@ -158,7 +159,8 @@ proc sendPacketsOut*(
       let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nmsgs.cuint, 0)
       if res < 0:
         let savedErrno = errno
-        trace "Failed to send UDP datagram batch", sent, nspecs
+        trace "Failed to send UDP datagram batch", sent, nspecs,
+          error = osErrorLabel(savedErrno)
         errno = savedErrno
         if sent == 0:
           return -1
@@ -166,7 +168,8 @@ proc sendPacketsOut*(
 
       sent += res.int
       if res < nmsgs.cint:
-        trace "Sent only part of UDP datagram batch", sent, nspecs
+        trace "Sent only part of UDP datagram batch", sent, nspecs,
+          error = osErrorLabel(EAGAIN)
         errno = EAGAIN
         return sent.cint
 
@@ -221,7 +224,10 @@ proc sendPacketsOut*(
 
         let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
         if res < 0:
-          trace "Failed to send UDP datagram", sent, nspecs
+          let savedErrno = errno
+          trace "Failed to send UDP datagram", sent, nspecs,
+            error = osErrorLabel(savedErrno)
+          errno = savedErrno
           if sent == 0:
             return -1
           break

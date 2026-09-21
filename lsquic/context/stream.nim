@@ -5,7 +5,7 @@ import std/[posix]
 import chronicles
 import chronos
 import ../[lsquic_ffi, errors, stream, tracking]
-import ../helpers/sequninit
+import ../helpers/[logging, sequninit]
 
 logScope:
   topics = "nim-lsquic"
@@ -13,19 +13,18 @@ logScope:
 proc onReset*(
     stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t, how: cint
 ) {.cdecl.} =
-  trace "Peer reset stream", how
-  if ctx.isNil:
-    trace "Stream reset received without a stream context"
-    return
-
-  let streamCtx = cast[Stream](ctx)
-
   let sHow =
     case how
     of 0: ResetRead
     of 1: ResetWrite
     of 2: ResetReadWrite
     else: ResetReadWrite
+  trace "Peer reset stream", reset = $sHow
+  if ctx.isNil:
+    trace "Stream reset received without a stream context", reset = $sHow
+    return
+
+  let streamCtx = cast[Stream](ctx)
 
   streamCtx.markResetByPeer(sHow)
 
@@ -75,7 +74,7 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       let readErrno = errno
       if readErrno != EBADF:
         trace "Failed to disable stream read notifications",
-          streamId = lsquic_stream_id(stream), errno = readErrno
+          streamId = lsquic_stream_id(stream), error = osErrorLabel(readErrno)
         streamCtx.abort()
     return
 
@@ -92,7 +91,8 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       streamCtx.failPendingRead(streamCtx.newStreamResetError("stream read"))
       return
     else:
-      trace "Failed to read from stream", streamId = lsquic_stream_id(stream), errno = errno
+      trace "Failed to read from stream",
+        streamId = lsquic_stream_id(stream), error = osErrorLabel(errno)
       streamCtx.abort()
       return
 
@@ -115,7 +115,7 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
     let readErrno = errno
     if readErrno != EBADF:
       trace "Failed to disable stream read notifications",
-        streamId = lsquic_stream_id(stream), errno = readErrno
+        streamId = lsquic_stream_id(stream), error = osErrorLabel(readErrno)
       streamCtx.abort()
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
@@ -132,7 +132,7 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
       let writeErrno = errno
       if writeErrno != EBADF:
         trace "Failed to disable stream write notifications",
-          streamId = lsquic_stream_id(stream), errno = writeErrno
+          streamId = lsquic_stream_id(stream), error = osErrorLabel(writeErrno)
         streamCtx.abort()
     return
 
@@ -172,5 +172,5 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     let writeErrno = errno
     if writeErrno != EBADF:
       trace "Failed to disable stream write notifications",
-        streamId = lsquic_stream_id(stream), errno = writeErrno
+        streamId = lsquic_stream_id(stream), error = osErrorLabel(writeErrno)
       streamCtx.abort()

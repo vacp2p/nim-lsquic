@@ -12,7 +12,7 @@ import
     socketconfig, engine_config,
   ]
 import ./context/[server, client, context, io]
-import ./helpers/transportaddr
+import ./helpers/[logging, transportaddr]
 from chronos/osdefs import Sockaddr_storage, SockAddr, SockLen, SocketHandle
 when defined(windows):
   from std/winlean import recvfrom
@@ -277,7 +277,7 @@ proc receiveFromUdp(
     if msgLen > 0:
       targets = endpoint.routeDatagram(msg.toOpenArray(0, msgLen - 1), local, remote)
   except TransportError as e:
-    warn "Failed to read UDP datagram", errorMsg = e.msg
+    warn "Failed to read UDP datagram", error = shortLog(e.msg)
     return
 
   targets = targets + endpoint.drainDatagrams(udp, local)

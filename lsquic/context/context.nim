@@ -11,6 +11,7 @@ import
     lsquic_ffi, errors, tlsconfig, timeout, certificates, certificateverifier, stream,
     tracking,
   ]
+import ../helpers/logging
 
 logScope:
   topics = "nim-lsquic"
@@ -46,9 +47,18 @@ func hash*(cid: CidKey): Hash =
   !$h
 
 func shortLog*(cid: CidKey): string =
+  const MaxLoggedBytes = 8
   var ret = $cid.len & ":"
-  for i in 0 ..< min(cid.len.int, 8):
-    ret.add(toHex(cid.bytes[i], 2))
+  if cid.len.int <= MaxLoggedBytes:
+    for i in 0 ..< cid.len.int:
+      ret.add(toHex(cid.bytes[i], 2))
+  else:
+    const SideBytes = MaxLoggedBytes div 2
+    for i in 0 ..< SideBytes:
+      ret.add(toHex(cid.bytes[i], 2))
+    ret.add("...")
+    for i in cid.len.int - SideBytes ..< cid.len.int:
+      ret.add(toHex(cid.bytes[i], 2))
   ret
 
 chronicles.formatIt(CidKey):
@@ -304,7 +314,7 @@ proc verifyCertificate(
       out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
     return ssl_verify_invalid
   except Exception as exc:
-    warn "Certificate verifier callback raised an exception", errorMsg = exc.msg
+    warn "Certificate verifier callback raised an exception", error = shortLog(exc.msg)
     if not out_alert.isNil:
       out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
     return ssl_verify_invalid
