@@ -47,18 +47,9 @@ func hash*(cid: CidKey): Hash =
   !$h
 
 func shortLog*(cid: CidKey): string =
-  const MaxLoggedBytes = 8
   var ret = $cid.len & ":"
-  if cid.len.int <= MaxLoggedBytes:
-    for i in 0 ..< cid.len.int:
-      ret.add(toHex(cid.bytes[i], 2))
-  else:
-    const SideBytes = MaxLoggedBytes div 2
-    for i in 0 ..< SideBytes:
-      ret.add(toHex(cid.bytes[i], 2))
-    ret.add("...")
-    for i in cid.len.int - SideBytes ..< cid.len.int:
-      ret.add(toHex(cid.bytes[i], 2))
+  for i in 0 ..< cid.len.int:
+    ret.add(toHex(cid.bytes[i], 2))
   ret
 
 chronicles.formatIt(CidKey):
