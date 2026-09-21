@@ -127,6 +127,29 @@ proc connectionStatus*(
   result.status = lsquic_conn_status(conn, cast[cstring](addr buf[0]), buf.len.csize_t)
   result.reason = $cast[cstring](addr buf[0])
 
+func handshakeStatusLabel*(status: enum_lsquic_hsk_status): string {.raises: [].} =
+  case status
+  of LSQ_HSK_FAIL: "LSQ_HSK_FAIL"
+  of LSQ_HSK_OK: "LSQ_HSK_OK"
+  of LSQ_HSK_RESUMED_OK: "LSQ_HSK_RESUMED_OK"
+  of LSQ_HSK_RESUMED_FAIL: "LSQ_HSK_RESUMED_FAIL"
+  else: "UNKNOWN"
+
+func connectionStatusLabel*(status: enum_LSQUIC_CONN_STATUS): string {.raises: [].} =
+  case status
+  of LSCONN_ST_HSK_IN_PROGRESS: "LSCONN_ST_HSK_IN_PROGRESS"
+  of LSCONN_ST_CONNECTED: "LSCONN_ST_CONNECTED"
+  of LSCONN_ST_HSK_FAILURE: "LSCONN_ST_HSK_FAILURE"
+  of LSCONN_ST_GOING_AWAY: "LSCONN_ST_GOING_AWAY"
+  of LSCONN_ST_TIMED_OUT: "LSCONN_ST_TIMED_OUT"
+  of LSCONN_ST_RESET: "LSCONN_ST_RESET"
+  of LSCONN_ST_USER_ABORTED: "LSCONN_ST_USER_ABORTED"
+  of LSCONN_ST_ERROR: "LSCONN_ST_ERROR"
+  of LSCONN_ST_CLOSED: "LSCONN_ST_CLOSED"
+  of LSCONN_ST_PEER_GOING_AWAY: "LSCONN_ST_PEER_GOING_AWAY"
+  of LSCONN_ST_VERNEG_FAILURE: "LSCONN_ST_VERNEG_FAILURE"
+  else: "UNKNOWN"
+
 proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
   not ctx.isNil and ctx.running and not ctx.engine.isNil
 
