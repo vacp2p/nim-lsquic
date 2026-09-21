@@ -49,9 +49,7 @@ proc onNewConn(
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   let (connStatus, msg) = connectionStatus(conn)
   trace "Server connection closed",
-    status = $connStatus,
-    statelessReset = connStatus == LSCONN_ST_RESET,
-    hasReason = msg.len > 0
+    status = $connStatus, statelessReset = connStatus == LSCONN_ST_RESET, reason = msg
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
     let quicConn = cast[QuicConnection](conn_ctx)
