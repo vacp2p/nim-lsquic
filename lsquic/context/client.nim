@@ -16,17 +16,17 @@ import
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
 ): ptr lsquic_conn_ctx_t {.cdecl.} =
-  debug "New connection established: client"
+  trace "New connection established: client"
   let conn_ctx = lsquic_conn_get_ctx(conn)
   cast[ptr lsquic_conn_ctx_t](conn_ctx)
 
 proc onHandshakeDone(
     conn: ptr lsquic_conn_t, status: enum_lsquic_hsk_status
 ) {.cdecl.} =
-  debug "Handshake done", status
+  trace "Handshake done", status
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
-    debug "conn_ctx is nil in onHandshakeDone"
+    trace "conn_ctx is nil in onHandshakeDone"
     return
 
   let quicClientConn = cast[QuicConnection](conn_ctx)

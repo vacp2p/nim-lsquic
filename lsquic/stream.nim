@@ -163,7 +163,7 @@ proc clearPendingRead(
   if lsquic_stream_wantread(stream.quicStream, 0) == -1:
     let readErrno = errno
     if readErrno != EBADF:
-      error "could not set stream wantread",
+      debug "could not set stream wantread",
         streamId = lsquic_stream_id(stream.quicStream), errno = readErrno
 
 proc clearPendingWrite(
@@ -182,7 +182,7 @@ proc clearPendingWrite(
   if lsquic_stream_wantwrite(stream.quicStream, 0) == -1:
     let writeErrno = errno
     if writeErrno != EBADF:
-      error "could not set stream wantwrite",
+      debug "could not set stream wantwrite",
         streamId = lsquic_stream_id(stream.quicStream), errno = writeErrno
 
 template raiseIfReadReset(stream: Stream) =
@@ -389,7 +389,7 @@ proc write*(
       if not stream.writeResetByPeer():
         stream.markResetByPeer(ResetWrite)
       raise stream.newStreamResetError("stream write")
-    error "could not write to stream", streamId = lsquic_stream_id(stream.quicStream), n
+    trace "could not write to stream", streamId = lsquic_stream_id(stream.quicStream), errno
     raise newException(StreamError, "could not write")
 
   # Enqueue otherwise

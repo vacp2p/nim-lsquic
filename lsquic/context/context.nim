@@ -216,7 +216,7 @@ proc popPendingStream*(
     quicConn: QuicConnection, stream: ptr lsquic_stream_t
 ): Opt[Stream] {.raises: [], gcsafe.} =
   if quicConn.pendingStreams.len == 0:
-    debug "no pending streams!"
+    trace "no pending streams"
     return Opt.none(Stream)
 
   let pending = quicConn.pendingStreams.popFirst()
@@ -402,9 +402,9 @@ method dial*(
 proc makeStream*(
     ctx: QuicContext, quicConn: QuicConnection
 ) {.raises: [ConnectionClosedError].} =
-  debug "Creating stream"
+  trace "Creating stream"
   if not ctx.isRunning() or quicConn.isNil or quicConn.lsquicConn.isNil:
-    debug "Cannot create stream: connection is nil"
+    trace "Cannot create stream: connection is nil"
     raise newException(ConnectionClosedError, "connection closed")
   lsquic_conn_make_stream(quicConn.lsquicConn)
 
@@ -414,11 +414,11 @@ func isUnidirectional*(streamId: lsquic_stream_id_t): bool {.raises: [].} =
 proc onNewStream*(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
-  debug "New stream created"
+  trace "New stream created"
   let conn = lsquic_stream_conn(stream)
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
-    debug "conn_ctx is nil in onNewStream"
+    trace "conn_ctx is nil in onNewStream"
     return nil
 
   let quicConn = cast[QuicConnection](conn_ctx)

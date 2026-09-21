@@ -17,7 +17,7 @@ import ../helpers/transportaddr
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
 ): ptr lsquic_conn_ctx_t {.cdecl.} =
-  debug "New connection established: server"
+  trace "New connection established: server"
   var local: ptr SockAddr
   var remote: ptr SockAddr
   discard lsquic_conn_get_sockaddr(conn, addr local, addr remote)
@@ -45,7 +45,7 @@ proc onNewConn(
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   let (connStatus, msg) = connectionStatus(conn)
-  debug "Connection closed: server",
+  trace "Connection closed: server",
     status = connStatus, statelessReset = connStatus == LSCONN_ST_RESET, reason = msg
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
