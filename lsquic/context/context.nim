@@ -11,6 +11,10 @@ import
     lsquic_ffi, errors, tlsconfig, timeout, certificates, certificateverifier, stream,
     tracking,
   ]
+import ../helpers/logging
+
+logScope:
+  topics = "lsquic"
 
 let SSL_CTX_ID = SSL_CTX_get_ex_new_index(0, nil, nil, nil, nil) # Yes, this is global
 doAssert SSL_CTX_ID >= 0, "could not generate global ssl_ctx id"
@@ -44,7 +48,7 @@ func hash*(cid: CidKey): Hash =
 
 func shortLog*(cid: CidKey): string =
   var ret = $cid.len & ":"
-  for i in 0 ..< min(cid.len.int, 8):
+  for i in 0 ..< cid.len.int:
     ret.add(toHex(cid.bytes[i], 2))
   ret
 
@@ -75,7 +79,7 @@ proc addCids*(
     var key: CidKey
     if toCidKey(cidsArr[i], key):
       quicCtx.ownedCids.incl(key)
-      trace "Registered CID", cid = key, cidCount = quicCtx.ownedCids.len
+      trace "Registered connection ID", cid = key, cidCount = quicCtx.ownedCids.len
 
 proc removeCids*(
     ctx: pointer, _: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
@@ -89,7 +93,7 @@ proc removeCids*(
     var key: CidKey
     if toCidKey(cidsArr[i], key):
       quicCtx.ownedCids.excl(key)
-      trace "Removed CID", cid = key, cidCount = quicCtx.ownedCids.len
+      trace "Removed connection ID", cid = key, cidCount = quicCtx.ownedCids.len
 
 proc trackConnectionCid*(ctx: QuicContext, conn: ptr lsquic_conn_t) {.raises: [].} =
   if ctx.isNil or conn.isNil:
@@ -102,7 +106,7 @@ proc trackConnectionCid*(ctx: QuicContext, conn: ptr lsquic_conn_t) {.raises: []
   var key: CidKey
   if toCidKey(cid[], key):
     ctx.ownedCids.incl(key)
-    trace "Tracked connection CID", cid = key, cidCount = ctx.ownedCids.len
+    trace "Tracking connection ID", cid = key, cidCount = ctx.ownedCids.len
 
 proc ownsCid*(ctx: QuicContext, cid: CidKey): bool {.raises: [].} =
   not ctx.isNil and cid in ctx.ownedCids
@@ -113,6 +117,46 @@ proc connectionStatus*(
   var buf: array[256, char]
   result.status = lsquic_conn_status(conn, cast[cstring](addr buf[0]), buf.len.csize_t)
   result.reason = $cast[cstring](addr buf[0])
+
+func handshakeStatusLabel*(status: enum_lsquic_hsk_status): string {.raises: [].} =
+  case status
+  of LSQ_HSK_FAIL:
+    "LSQ_HSK_FAIL"
+  of LSQ_HSK_OK:
+    "LSQ_HSK_OK"
+  of LSQ_HSK_RESUMED_OK:
+    "LSQ_HSK_RESUMED_OK"
+  of LSQ_HSK_RESUMED_FAIL:
+    "LSQ_HSK_RESUMED_FAIL"
+  else:
+    "UNKNOWN(" & $status & ")"
+
+func connectionStatusLabel*(status: enum_LSQUIC_CONN_STATUS): string {.raises: [].} =
+  case status
+  of LSCONN_ST_HSK_IN_PROGRESS:
+    "LSCONN_ST_HSK_IN_PROGRESS"
+  of LSCONN_ST_CONNECTED:
+    "LSCONN_ST_CONNECTED"
+  of LSCONN_ST_HSK_FAILURE:
+    "LSCONN_ST_HSK_FAILURE"
+  of LSCONN_ST_GOING_AWAY:
+    "LSCONN_ST_GOING_AWAY"
+  of LSCONN_ST_TIMED_OUT:
+    "LSCONN_ST_TIMED_OUT"
+  of LSCONN_ST_RESET:
+    "LSCONN_ST_RESET"
+  of LSCONN_ST_USER_ABORTED:
+    "LSCONN_ST_USER_ABORTED"
+  of LSCONN_ST_ERROR:
+    "LSCONN_ST_ERROR"
+  of LSCONN_ST_CLOSED:
+    "LSCONN_ST_CLOSED"
+  of LSCONN_ST_PEER_GOING_AWAY:
+    "LSCONN_ST_PEER_GOING_AWAY"
+  of LSCONN_ST_VERNEG_FAILURE:
+    "LSCONN_ST_VERNEG_FAILURE"
+  else:
+    "UNKNOWN(" & $status & ")"
 
 proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
   not ctx.isNil and ctx.running and not ctx.engine.isNil
@@ -216,7 +260,7 @@ proc popPendingStream*(
     quicConn: QuicConnection, stream: ptr lsquic_stream_t
 ): Opt[Stream] {.raises: [], gcsafe.} =
   if quicConn.pendingStreams.len == 0:
-    debug "no pending streams!"
+    trace "Received a locally initiated stream without a pending stream request"
     return Opt.none(Stream)
 
   let pending = quicConn.pendingStreams.popFirst()
@@ -301,7 +345,7 @@ proc verifyCertificate(
       out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
     return ssl_verify_invalid
   except Exception as exc:
-    warn "certificate verifier raised", errorMsg = exc.msg
+    warn "Certificate verifier callback raised an exception", error = shortLog(exc.msg)
     if not out_alert.isNil:
       out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
     return ssl_verify_invalid
@@ -402,9 +446,9 @@ method dial*(
 proc makeStream*(
     ctx: QuicContext, quicConn: QuicConnection
 ) {.raises: [ConnectionClosedError].} =
-  debug "Creating stream"
+  trace "Requesting a new stream"
   if not ctx.isRunning() or quicConn.isNil or quicConn.lsquicConn.isNil:
-    debug "Cannot create stream: connection is nil"
+    trace "Cannot create stream because the connection is closed"
     raise newException(ConnectionClosedError, "connection closed")
   lsquic_conn_make_stream(quicConn.lsquicConn)
 
@@ -414,11 +458,11 @@ func isUnidirectional*(streamId: lsquic_stream_id_t): bool {.raises: [].} =
 proc onNewStream*(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
-  debug "New stream created"
+  trace "Stream created"
   let conn = lsquic_stream_conn(stream)
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
-    debug "conn_ctx is nil in onNewStream"
+    trace "Stream created without a connection context"
     return nil
 
   let quicConn = cast[QuicConnection](conn_ctx)

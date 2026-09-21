@@ -13,20 +13,23 @@ import
     tracking, engine_config,
   ]
 
+logScope:
+  topics = "lsquic"
+
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
 ): ptr lsquic_conn_ctx_t {.cdecl.} =
-  debug "New connection established: client"
+  trace "Client connection established"
   let conn_ctx = lsquic_conn_get_ctx(conn)
   cast[ptr lsquic_conn_ctx_t](conn_ctx)
 
 proc onHandshakeDone(
     conn: ptr lsquic_conn_t, status: enum_lsquic_hsk_status
 ) {.cdecl.} =
-  debug "Handshake done", status
+  trace "Client handshake completed", status = handshakeStatusLabel(status)
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
-    debug "conn_ctx is nil in onHandshakeDone"
+    trace "Client handshake completed without a connection context"
     return
 
   let quicClientConn = cast[QuicConnection](conn_ctx)
@@ -47,8 +50,10 @@ proc onHandshakeDone(
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   let (connStatus, msg) = connectionStatus(conn)
-  trace "Connection closed: client",
-    status = connStatus, statelessReset = connStatus == LSCONN_ST_RESET, reason = msg
+  trace "Client connection closed",
+    status = connectionStatusLabel(connStatus),
+    statelessReset = connStatus == LSCONN_ST_RESET,
+    reason = msg
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
     let quicClientConn = cast[QuicConnection](conn_ctx)

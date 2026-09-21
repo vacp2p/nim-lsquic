@@ -5,6 +5,10 @@ import std/[deques, posix]
 import chronos
 import chronicles
 import ./[lsquic_ffi, errors, tracking]
+import ./helpers/logging
+
+logScope:
+  topics = "lsquic"
 
 const WriteFlushBytes = 16384
   ## Large writes flush immediately; smaller writes defer to coalesce ticks.
@@ -163,8 +167,8 @@ proc clearPendingRead(
   if lsquic_stream_wantread(stream.quicStream, 0) == -1:
     let readErrno = errno
     if readErrno != EBADF:
-      error "could not set stream wantread",
-        streamId = lsquic_stream_id(stream.quicStream), errno = readErrno
+      debug "Failed to disable stream read notifications",
+        streamId = lsquic_stream_id(stream.quicStream), error = osErrorLabel(readErrno)
 
 proc clearPendingWrite(
     stream: Stream, doneFut: Future[void].Raising([CancelledError, StreamError])
@@ -182,8 +186,8 @@ proc clearPendingWrite(
   if lsquic_stream_wantwrite(stream.quicStream, 0) == -1:
     let writeErrno = errno
     if writeErrno != EBADF:
-      error "could not set stream wantwrite",
-        streamId = lsquic_stream_id(stream.quicStream), errno = writeErrno
+      debug "Failed to disable stream write notifications",
+        streamId = lsquic_stream_id(stream.quicStream), error = osErrorLabel(writeErrno)
 
 template raiseIfReadReset(stream: Stream) =
   if stream.readResetByPeer():
@@ -214,8 +218,8 @@ proc requestClose(stream: Stream): bool {.raises: [].} =
       return true
 
     stream.closeRequested = false
-    trace "could not close stream",
-      streamId = lsquic_stream_id(stream.quicStream), errno = closeErrno
+    trace "Failed to close stream",
+      streamId = lsquic_stream_id(stream.quicStream), error = osErrorLabel(closeErrno)
     return false
 
   stream.processWhenAvailable()
@@ -389,7 +393,8 @@ proc write*(
       if not stream.writeResetByPeer():
         stream.markResetByPeer(ResetWrite)
       raise stream.newStreamResetError("stream write")
-    error "could not write to stream", streamId = lsquic_stream_id(stream.quicStream), n
+    trace "Failed to write to stream",
+      streamId = lsquic_stream_id(stream.quicStream), error = osErrorLabel(errno)
     raise newException(StreamError, "could not write")
 
   # Enqueue otherwise

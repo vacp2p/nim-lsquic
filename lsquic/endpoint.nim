@@ -12,12 +12,15 @@ import
     socketconfig, engine_config,
   ]
 import ./context/[server, client, context, io]
-import ./helpers/transportaddr
+import ./helpers/[logging, transportaddr]
 from chronos/osdefs import Sockaddr_storage, SockAddr, SockLen, SocketHandle
 when defined(windows):
   from std/winlean import recvfrom
 else:
   from chronos/osdefs import recvfrom
+
+logScope:
+  topics = "lsquic"
 
 type
   QuicEndpointCapability* = enum
@@ -70,15 +73,15 @@ proc configureReceiveBuffer(
   let effective = udp.socketReceiveBufferBytes()
   if effective < requested:
     when defined(linux):
-      warn "QUIC UDP receive buffer capped below requested size",
+      warn "UDP receive buffer is smaller than requested",
         requestedBytes = requested,
         effectiveBytes = effective,
         hint = "raise net.core.rmem_max if Linux caps SO_RCVBUF"
     else:
-      warn "QUIC UDP receive buffer capped below requested size",
+      warn "UDP receive buffer is smaller than requested",
         requestedBytes = requested, effectiveBytes = effective
   else:
-    debug "Configured QUIC UDP receive buffer",
+    debug "Configured UDP receive buffer",
       requestedBytes = requested, effectiveBytes = effective
 
 proc createServerContext(
@@ -166,29 +169,29 @@ proc routeDatagram(
   var cid: CidKey
   if endpoint.packetDcid(data, cid):
     if hasClientContext and endpoint.clientContext.ownsCid(cid):
-      trace "Routing datagram to client context", cid
+      trace "Routing datagram to client context by connection ID", cid
       endpoint.clientContext.packetIn(data, local, remote)
       return {rtClient}
 
     if hasServerContext and endpoint.serverContext.ownsCid(cid):
-      trace "Routing datagram to server context", cid
+      trace "Routing datagram to server context by connection ID", cid
       endpoint.serverContext.packetIn(data, local, remote)
       return {rtServer}
 
   if hasServerContext and data.isIetfInitial():
-    trace "Routing initial datagram with unknown CID to server context",
+    trace "Routing Initial packet with unknown connection ID to server context",
       bytes = data.len, local, remote
     endpoint.serverContext.packetIn(data, local, remote)
     return {rtServer}
 
   if hasClientContext and hasServerContext and data.isIetfShortHeader():
-    trace "Routing unknown short-header datagram to both contexts",
+    trace "Routing short-header packet with unknown connection ID to both contexts",
       bytes = data.len, local, remote
     endpoint.clientContext.packetIn(data, local, remote)
     endpoint.serverContext.packetIn(data, local, remote)
     return {rtClient, rtServer}
 
-  trace "Dropping datagram with unknown CID", bytes = data.len, local, remote
+  trace "Dropping packet with unknown connection ID", bytes = data.len, local, remote
   {}
 
 proc recvDatagram(
@@ -274,7 +277,7 @@ proc receiveFromUdp(
     if msgLen > 0:
       targets = endpoint.routeDatagram(msg.toOpenArray(0, msgLen - 1), local, remote)
   except TransportError as e:
-    warn "Could not read received datagram", errorMsg = e.msg
+    warn "Failed to read UDP datagram", error = shortLog(e.msg)
     return
 
   targets = targets + endpoint.drainDatagrams(udp, local)
@@ -398,7 +401,7 @@ proc accept*(
 
     let quicConn = await incomingFut
     if quicConn.lsquicConn.isNil and quicConn.incoming.len == 0:
-      debug "Dropping already closed incoming connection"
+      debug "Dropping incoming connection that closed before acceptance"
       continue
 
     let conn = newIncomingConnection(endpoint.serverContext, quicConn)
