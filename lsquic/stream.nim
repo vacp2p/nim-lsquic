@@ -166,7 +166,7 @@ proc clearPendingRead(
   if lsquic_stream_wantread(stream.quicStream, 0) == -1:
     let readErrno = errno
     if readErrno != EBADF:
-      debug "could not set stream wantread",
+      debug "Failed to disable stream read notifications",
         streamId = lsquic_stream_id(stream.quicStream), errno = readErrno
 
 proc clearPendingWrite(
@@ -185,7 +185,7 @@ proc clearPendingWrite(
   if lsquic_stream_wantwrite(stream.quicStream, 0) == -1:
     let writeErrno = errno
     if writeErrno != EBADF:
-      debug "could not set stream wantwrite",
+      debug "Failed to disable stream write notifications",
         streamId = lsquic_stream_id(stream.quicStream), errno = writeErrno
 
 template raiseIfReadReset(stream: Stream) =
@@ -217,7 +217,7 @@ proc requestClose(stream: Stream): bool {.raises: [].} =
       return true
 
     stream.closeRequested = false
-    trace "could not close stream",
+    trace "Failed to close stream",
       streamId = lsquic_stream_id(stream.quicStream), errno = closeErrno
     return false
 
@@ -392,7 +392,7 @@ proc write*(
       if not stream.writeResetByPeer():
         stream.markResetByPeer(ResetWrite)
       raise stream.newStreamResetError("stream write")
-    trace "could not write to stream", streamId = lsquic_stream_id(stream.quicStream), errno
+    trace "Failed to write to stream", streamId = lsquic_stream_id(stream.quicStream), errno
     raise newException(StreamError, "could not write")
 
   # Enqueue otherwise

@@ -78,7 +78,7 @@ proc addCids*(
     var key: CidKey
     if toCidKey(cidsArr[i], key):
       quicCtx.ownedCids.incl(key)
-      trace "Registered CID", cid = key, cidCount = quicCtx.ownedCids.len
+      trace "Registered connection ID", cid = key, cidCount = quicCtx.ownedCids.len
 
 proc removeCids*(
     ctx: pointer, _: ptr pointer, cids: ptr lsquic_cid_t, nCids: cuint
@@ -92,7 +92,7 @@ proc removeCids*(
     var key: CidKey
     if toCidKey(cidsArr[i], key):
       quicCtx.ownedCids.excl(key)
-      trace "Removed CID", cid = key, cidCount = quicCtx.ownedCids.len
+      trace "Removed connection ID", cid = key, cidCount = quicCtx.ownedCids.len
 
 proc trackConnectionCid*(ctx: QuicContext, conn: ptr lsquic_conn_t) {.raises: [].} =
   if ctx.isNil or conn.isNil:
@@ -105,7 +105,7 @@ proc trackConnectionCid*(ctx: QuicContext, conn: ptr lsquic_conn_t) {.raises: []
   var key: CidKey
   if toCidKey(cid[], key):
     ctx.ownedCids.incl(key)
-    trace "Tracked connection CID", cid = key, cidCount = ctx.ownedCids.len
+    trace "Tracking connection ID", cid = key, cidCount = ctx.ownedCids.len
 
 proc ownsCid*(ctx: QuicContext, cid: CidKey): bool {.raises: [].} =
   not ctx.isNil and cid in ctx.ownedCids
@@ -219,7 +219,7 @@ proc popPendingStream*(
     quicConn: QuicConnection, stream: ptr lsquic_stream_t
 ): Opt[Stream] {.raises: [], gcsafe.} =
   if quicConn.pendingStreams.len == 0:
-    trace "no pending streams"
+    trace "Received a locally initiated stream without a pending stream request"
     return Opt.none(Stream)
 
   let pending = quicConn.pendingStreams.popFirst()
@@ -304,7 +304,7 @@ proc verifyCertificate(
       out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
     return ssl_verify_invalid
   except Exception as exc:
-    warn "certificate verifier raised", errorMsg = exc.msg
+    warn "Certificate verifier callback raised an exception", errorMsg = exc.msg
     if not out_alert.isNil:
       out_alert[] = SSL_AD_CERTIFICATE_UNKNOWN
     return ssl_verify_invalid
@@ -405,9 +405,9 @@ method dial*(
 proc makeStream*(
     ctx: QuicContext, quicConn: QuicConnection
 ) {.raises: [ConnectionClosedError].} =
-  trace "Creating stream"
+  trace "Requesting a new stream"
   if not ctx.isRunning() or quicConn.isNil or quicConn.lsquicConn.isNil:
-    trace "Cannot create stream: connection is nil"
+    trace "Cannot create stream because the connection is closed"
     raise newException(ConnectionClosedError, "connection closed")
   lsquic_conn_make_stream(quicConn.lsquicConn)
 
@@ -417,11 +417,11 @@ func isUnidirectional*(streamId: lsquic_stream_id_t): bool {.raises: [].} =
 proc onNewStream*(
     stream_if_ctx: pointer, stream: ptr lsquic_stream_t
 ): ptr lsquic_stream_ctx_t {.cdecl.} =
-  trace "New stream created"
+  trace "Stream created"
   let conn = lsquic_stream_conn(stream)
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
-    trace "conn_ctx is nil in onNewStream"
+    trace "Stream created without a connection context"
     return nil
 
   let quicConn = cast[QuicConnection](conn_ctx)

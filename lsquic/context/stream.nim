@@ -13,9 +13,9 @@ logScope:
 proc onReset*(
     stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t, how: cint
 ) {.cdecl.} =
-  trace "Stream reset", how
+  trace "Peer reset stream", how
   if ctx.isNil:
-    trace "stream_ctx is nil onReset"
+    trace "Stream reset received without a stream context"
     return
 
   let streamCtx = cast[Stream](ctx)
@@ -36,9 +36,9 @@ proc onReset*(
     streamCtx.abortPendingWrites(streamCtx.newStreamResetError("stream write"))
 
 proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  trace "Stream closed"
+  trace "Stream closed by QUIC engine"
   if ctx.isNil:
-    trace "stream_ctx is nil onClose"
+    trace "Stream close received without a stream context"
     return
 
   let streamCtx = cast[Stream](ctx)
@@ -63,9 +63,9 @@ proc onClose*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   unpin(streamCtx)
 
 proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  trace "stream read"
+  trace "Stream read callback received"
   if ctx.isNil:
-    trace "stream_ctx is nil onRead"
+    trace "Stream read callback received without a stream context"
     return
 
   let streamCtx = cast[Stream](ctx)
@@ -74,7 +74,7 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
     if lsquic_stream_wantread(stream, 0) == -1:
       let readErrno = errno
       if readErrno != EBADF:
-        trace "could not set stream wantread",
+        trace "Failed to disable stream read notifications",
           streamId = lsquic_stream_id(stream), errno = readErrno
         streamCtx.abort()
     return
@@ -92,7 +92,7 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
       streamCtx.failPendingRead(streamCtx.newStreamResetError("stream read"))
       return
     else:
-      trace "could not read", streamId = lsquic_stream_id(stream), errno = errno
+      trace "Failed to read from stream", streamId = lsquic_stream_id(stream), errno = errno
       streamCtx.abort()
       return
 
@@ -100,7 +100,7 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
     streamCtx.isEof = true
   if n == 0 and streamCtx.isEof:
     if not streamCtx.closeIfDone():
-      trace "could not close stream after EOF", streamId = lsquic_stream_id(stream)
+      trace "Failed to close stream after receiving end of input", streamId = lsquic_stream_id(stream)
       streamCtx.failPendingRead(newException(StreamError, "could not close the stream"))
       streamCtx.abort()
       return
@@ -114,15 +114,15 @@ proc onRead*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.
   if lsquic_stream_wantread(stream, 0) == -1:
     let readErrno = errno
     if readErrno != EBADF:
-      trace "could not set stream wantread",
+      trace "Failed to disable stream read notifications",
         streamId = lsquic_stream_id(stream), errno = readErrno
       streamCtx.abort()
 
 proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl.} =
-  trace "onWrite"
+  trace "Stream write callback received"
 
   if ctx.isNil:
-    trace "stream_ctx is nil onWrite"
+    trace "Stream write callback received without a stream context"
     return
 
   let streamCtx = cast[Stream](ctx)
@@ -131,7 +131,7 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
     if lsquic_stream_wantwrite(stream, 0) == -1:
       let writeErrno = errno
       if writeErrno != EBADF:
-        trace "could not set stream wantwrite",
+        trace "Failed to disable stream write notifications",
           streamId = lsquic_stream_id(stream), errno = writeErrno
         streamCtx.abort()
     return
@@ -171,6 +171,6 @@ proc onWrite*(stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t) {.cdecl
   if lsquic_stream_wantwrite(stream, 0) == -1:
     let writeErrno = errno
     if writeErrno != EBADF:
-      trace "could not set stream wantwrite",
+      trace "Failed to disable stream write notifications",
         streamId = lsquic_stream_id(stream), errno = writeErrno
       streamCtx.abort()

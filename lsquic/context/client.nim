@@ -19,17 +19,17 @@ logScope:
 proc onNewConn(
     stream_if_ctx: pointer, conn: ptr lsquic_conn_t
 ): ptr lsquic_conn_ctx_t {.cdecl.} =
-  trace "New connection established: client"
+  trace "Client connection established"
   let conn_ctx = lsquic_conn_get_ctx(conn)
   cast[ptr lsquic_conn_ctx_t](conn_ctx)
 
 proc onHandshakeDone(
     conn: ptr lsquic_conn_t, status: enum_lsquic_hsk_status
 ) {.cdecl.} =
-  trace "Handshake done", status
+  trace "Client handshake completed", status
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if conn_ctx.isNil:
-    trace "conn_ctx is nil in onHandshakeDone"
+    trace "Client handshake completed without a connection context"
     return
 
   let quicClientConn = cast[QuicConnection](conn_ctx)
@@ -50,7 +50,7 @@ proc onHandshakeDone(
 
 proc onConnClosed(conn: ptr lsquic_conn_t) {.cdecl.} =
   let (connStatus, msg) = connectionStatus(conn)
-  trace "Connection closed: client",
+  trace "Client connection closed",
     status = connStatus, statelessReset = connStatus == LSCONN_ST_RESET, reason = msg
   let conn_ctx = lsquic_conn_get_ctx(conn)
   if not conn_ctx.isNil:
