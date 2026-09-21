@@ -8,7 +8,7 @@ import ../[lsquic_ffi, errors, stream, tracking]
 import ../helpers/[logging, sequninit]
 
 logScope:
-  topics = "nim-lsquic"
+  topics = "lsquic"
 
 proc onReset*(
     stream: ptr lsquic_stream_t, ctx: ptr lsquic_stream_ctx_t, how: cint

@@ -20,7 +20,7 @@ else:
   from chronos/osdefs import recvfrom
 
 logScope:
-  topics = "nim-lsquic"
+  topics = "lsquic"
 
 type
   QuicEndpointCapability* = enum

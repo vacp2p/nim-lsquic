@@ -14,7 +14,7 @@ when not defined(windows):
   import posix
 
 logScope:
-  topics = "nim-lsquic"
+  topics = "lsquic"
 
 const MaxBatch = 1024
   ## Upper bound on the stack WSABUF array in the Windows send path (`sendPacketsOut`).

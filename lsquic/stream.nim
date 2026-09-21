@@ -8,7 +8,7 @@ import ./[lsquic_ffi, errors, tracking]
 import ./helpers/logging
 
 logScope:
-  topics = "nim-lsquic"
+  topics = "lsquic"
 
 const WriteFlushBytes = 16384
   ## Large writes flush immediately; smaller writes defer to coalesce ticks.
