@@ -216,6 +216,9 @@ proc sendPacketsOut*(
           nil, # no overlapped
         )
         if res != 0:
+          let errorCode = wsaGetLastError()
+          trace "Failed to send UDP datagram",
+            sent, nspecs, error = osErrorLabel(errorCode)
           if sent == 0:
             return -1
           break
