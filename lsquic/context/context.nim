@@ -129,7 +129,7 @@ func handshakeStatusLabel*(status: enum_lsquic_hsk_status): string {.raises: [].
   of LSQ_HSK_RESUMED_FAIL:
     "LSQ_HSK_RESUMED_FAIL"
   else:
-    "UNKNOWN(" & $status &")"
+    "UNKNOWN(" & $status & ")"
 
 func connectionStatusLabel*(status: enum_LSQUIC_CONN_STATUS): string {.raises: [].} =
   case status
@@ -156,7 +156,7 @@ func connectionStatusLabel*(status: enum_LSQUIC_CONN_STATUS): string {.raises: [
   of LSCONN_ST_VERNEG_FAILURE:
     "LSCONN_ST_VERNEG_FAILURE"
   else:
-    "UNKNOWN(" & $status &")"
+    "UNKNOWN(" & $status & ")"
 
 proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
   not ctx.isNil and ctx.running and not ctx.engine.isNil
