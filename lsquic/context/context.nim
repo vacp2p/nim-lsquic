@@ -139,7 +139,7 @@ func connectionStatusLabel*(status: enum_LSQUIC_CONN_STATUS): string {.raises: [
   of LSCONN_ST_CLOSED: "LSCONN_ST_CLOSED"
   of LSCONN_ST_PEER_GOING_AWAY: "LSCONN_ST_PEER_GOING_AWAY"
   of LSCONN_ST_VERNEG_FAILURE: "LSCONN_ST_VERNEG_FAILURE"
-  else: "UNKNOWN"
+  else: "UNKNOWN(" & $status &")"
 
 proc isRunning*(ctx: QuicContext): bool {.raises: [].} =
   not ctx.isNil and ctx.running and not ctx.engine.isNil
