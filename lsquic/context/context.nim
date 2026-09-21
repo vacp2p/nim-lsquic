@@ -124,7 +124,7 @@ func handshakeStatusLabel*(status: enum_lsquic_hsk_status): string {.raises: [].
   of LSQ_HSK_OK: "LSQ_HSK_OK"
   of LSQ_HSK_RESUMED_OK: "LSQ_HSK_RESUMED_OK"
   of LSQ_HSK_RESUMED_FAIL: "LSQ_HSK_RESUMED_FAIL"
-  else: "UNKNOWN"
+  else: "UNKNOWN(" & $status &")"
 
 func connectionStatusLabel*(status: enum_LSQUIC_CONN_STATUS): string {.raises: [].} =
   case status
