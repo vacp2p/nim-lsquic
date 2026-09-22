@@ -365,9 +365,6 @@ proc dialLocalAddress(
     endpoint: QuicEndpoint, remote: TransportAddress
 ): TransportAddress {.raises: [TransportOsError].} =
   let bound = endpoint.udp.localAddress()
-  when not defined(linux):
-    return bound
-
   if not bound.isAnyLocal():
     return bound
 

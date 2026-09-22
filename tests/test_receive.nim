@@ -47,6 +47,7 @@ suite "UDP receive":
           )
           if received >= 0:
             break
+          # The socket is non-blocking and send completion may precede readability.
           await sleepAsync(10.milliseconds)
 
         check:

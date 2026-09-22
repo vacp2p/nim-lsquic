@@ -116,6 +116,8 @@ when defined(linux):
     result = recvmsg(fd, addr msg, 0)
     if result < 0:
       return
+    if (msg.msg_flags and MSG_CTRUNC) != 0:
+      return -1
 
     remote = toTransportAddress(cast[ptr SockAddr](addr remoteStorage))
     if boundLocal.family == AddressFamily.IPv6 and remote.isV4Mapped():
@@ -303,22 +305,26 @@ proc sendPacketsOut*(
       var
         bufs {.noinit.}: array[MaxBatch, osdefs.WSABUF]
         overflow: seq[osdefs.WSABUF]
-        extension: pointer
-        extensionBytesRet: DWORD
-        sendMsgGuid = osdefs.WSAID_WSASENDMSG
-      if wsaIoctl(
-        SocketHandle(quicCtx.fd),
-        osdefs.SIO_GET_EXTENSION_FUNCTION_POINTER,
-        addr sendMsgGuid,
-        DWORD(sizeof(sendMsgGuid)),
-        addr extension,
-        DWORD(sizeof(extension)),
-        addr extensionBytesRet,
-        nil,
-        nil,
-      ) != 0:
+      if not quicCtx.wsaSendMsgResolved:
+        var
+          extension: pointer
+          extensionBytesRet: DWORD
+          sendMsgGuid = osdefs.WSAID_WSASENDMSG
+        if wsaIoctl(
+          SocketHandle(quicCtx.fd),
+          osdefs.SIO_GET_EXTENSION_FUNCTION_POINTER,
+          addr sendMsgGuid,
+          DWORD(sizeof(sendMsgGuid)),
+          addr extension,
+          DWORD(sizeof(extension)),
+          addr extensionBytesRet,
+          nil,
+          nil,
+        ) == 0:
+          quicCtx.wsaSendMsg = cast[osdefs.LPFN_WSASENDMSG](extension)
+        quicCtx.wsaSendMsgResolved = true
+      if quicCtx.wsaSendMsg.isNil:
         return -1
-      let wsaSendMsg = cast[osdefs.LPFN_WSASENDMSG](extension)
     var sent = 0
     for i in 0 ..< nspecs.int:
       let curr = specsArr[i]
@@ -353,7 +359,7 @@ proc sendPacketsOut*(
             dwBufferCount: DWORD(iovlen),
           )
         prepareSourceAddr(curr.local_sa, control, msg)
-        let res = wsaSendMsg(
+        let res = quicCtx.wsaSendMsg(
           SocketHandle(quicCtx.fd), addr msg, DWORD(0), addr bytesSent, nil, nil
         )
         if res != 0:

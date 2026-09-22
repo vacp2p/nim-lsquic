@@ -40,6 +40,10 @@ type
     running*: bool
     ownedCids: HashSet[CidKey]
 
+    when defined(windows):
+      wsaSendMsg*: osdefs.LPFN_WSASENDMSG
+      wsaSendMsgResolved*: bool
+
 func hash*(cid: CidKey): Hash =
   var h = hash(cid.len)
   for i in 0 ..< cid.len.int:
