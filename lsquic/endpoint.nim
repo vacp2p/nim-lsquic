@@ -287,6 +287,10 @@ proc receiveFromUdp(
       msg: seq[byte]
       msgLen: int
     local = udp.receivedLocalAddress()
+    if udp.localAddress().family == AddressFamily.IPv6 and
+        local.family == AddressFamily.IPv4:
+      # LSQUIC identifies paths using the socket address family.
+      local = local.toIPv6()
     readIncoming(udp, msg, msgLen)
     if msgLen > 0:
       targets = endpoint.routeDatagram(msg.toOpenArray(0, msgLen - 1), local, remote)
