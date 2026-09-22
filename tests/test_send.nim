@@ -20,6 +20,11 @@ proc makeOutSpec(
     dest_sa: cast[ptr SockAddr](dest),
   )
 
+proc makeContext(fd: SocketHandle): QuicContext =
+  result = QuicContext(fd: cint(fd))
+  when defined(windows):
+    doAssert result.initPacketIo(fd)
+
 suite "packets out":
   teardown:
     checkTrackers()
@@ -46,7 +51,7 @@ suite "packets out":
     defer:
       nativesockets.close(fd)
 
-    let ctx = QuicContext(fd: cint(fd))
+    let ctx = makeContext(fd)
     var
       payload = @[1'u8, 2, 3]
       localStorage = toSockaddrStorage(initTAddress("127.0.0.1:1000"))
@@ -74,7 +79,7 @@ suite "packets out":
     defer:
       nativesockets.close(fd)
 
-    let ctx = QuicContext(fd: cint(fd))
+    let ctx = makeContext(fd)
     var
       payload = @[1'u8, 2, 3]
       localStorage = toSockaddrStorage(initTAddress("127.0.0.1:1000"))
@@ -87,53 +92,110 @@ suite "packets out":
     check sendPacketsOut(cast[pointer](ctx), addr specs[0], SpecCount.cuint) == SpecCount
 
   test "packet info selects the requested IPv4 source address":
-    when defined(linux):
-      let
-        senderFd = createNativeSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-        receiverFd = createNativeSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-      defer:
-        nativesockets.close(senderFd)
-        nativesockets.close(receiverFd)
+    let
+      senderFd = createNativeSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+      receiverFd = createNativeSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+      requestedSource = when defined(windows): "127.0.0.1" else: "127.0.0.2"
+    defer:
+      nativesockets.close(senderFd)
+      nativesockets.close(receiverFd)
 
-      var
-        senderBind = toSockaddrStorage(initTAddress("0.0.0.0:0"))
-        receiverBind = toSockaddrStorage(initTAddress("127.0.0.2:0"))
-      check bindSocket(
-        senderFd, cast[ptr SockAddr](addr senderBind), sizeof(Sockaddr_in).SockLen
-      ) == 0
-      check bindSocket(
-        receiverFd, cast[ptr SockAddr](addr receiverBind), sizeof(Sockaddr_in).SockLen
-      ) == 0
+    var
+      senderBind = toSockaddrStorage(initTAddress("0.0.0.0:0"))
+      receiverBind = toSockaddrStorage(initTAddress(requestedSource & ":0"))
+    check bindSocket(
+      senderFd, cast[ptr SockAddr](addr senderBind), sizeof(Sockaddr_in).SockLen
+    ) == 0
+    check bindSocket(
+      receiverFd, cast[ptr SockAddr](addr receiverBind), sizeof(Sockaddr_in).SockLen
+    ) == 0
 
-      var receiverLen = sizeof(receiverBind).SockLen
-      check getsockname(
-        receiverFd, cast[ptr SockAddr](addr receiverBind), addr receiverLen
-      ) == 0
+    var receiverLen = sizeof(receiverBind).SockLen
+    check getsockname(
+      receiverFd, cast[ptr SockAddr](addr receiverBind), addr receiverLen
+    ) == 0
 
-      let ctx = QuicContext(fd: cint(senderFd))
-      var
-        payload = @[byte(1), 2, 3]
-        localStorage = toSockaddrStorage(initTAddress("127.0.0.2:0"))
-        iov = struct_iovec(iov_base: addr payload[0], iov_len: payload.len.csize_t)
-        spec = makeOutSpec(addr iov, addr localStorage, addr receiverBind)
+    let ctx = makeContext(senderFd)
+    var
+      payload = @[byte(1), 2, 3]
+      localStorage = toSockaddrStorage(initTAddress(requestedSource & ":0"))
+      iov = struct_iovec(iov_base: addr payload[0], iov_len: payload.len.csize_t)
+      spec = makeOutSpec(addr iov, addr localStorage, addr receiverBind)
 
-      check sendPacketsOut(cast[pointer](ctx), addr spec, 1) == 1
+    check sendPacketsOut(cast[pointer](ctx), addr spec, 1) == 1
 
-      var
-        received: array[3, byte]
-        remoteStorage: Sockaddr_storage
-        remoteLen = sizeof(remoteStorage).SockLen
-      check recvfrom(
-        receiverFd,
-        addr received[0],
-        received.len,
-        0,
-        cast[ptr SockAddr](addr remoteStorage),
-        addr remoteLen,
-      ) == received.len
+    var
+      received: array[3, byte]
+      remoteStorage: Sockaddr_storage
+      remoteLen = sizeof(remoteStorage).SockLen
+      receiveBuffer =
+        when defined(windows):
+          cast[cstring](addr received[0])
+        else:
+          addr received[0]
+    check recvfrom(
+      receiverFd,
+      receiveBuffer,
+      received.len.cint,
+      0,
+      cast[ptr SockAddr](addr remoteStorage),
+      addr remoteLen,
+    ) == received.len
 
-      var remote: TransportAddress
-      fromSAddr(addr remoteStorage, remoteLen, remote)
-      check remote.toIpAddress() == parseIpAddress("127.0.0.2")
-    else:
-      skip()
+    var remote: TransportAddress
+    fromSAddr(addr remoteStorage, remoteLen, remote)
+    check remote.toIpAddress() == parseIpAddress(requestedSource)
+
+  test "packet info selects the requested IPv6 source address":
+    let
+      senderFd = createNativeSocket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)
+      receiverFd = createNativeSocket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)
+    defer:
+      nativesockets.close(senderFd)
+      nativesockets.close(receiverFd)
+
+    var
+      senderBind = toSockaddrStorage(initTAddress("[::]:0"))
+      receiverBind = toSockaddrStorage(initTAddress("[::1]:0"))
+    check bindSocket(
+      senderFd, cast[ptr SockAddr](addr senderBind), sizeof(Sockaddr_in6).SockLen
+    ) == 0
+    check bindSocket(
+      receiverFd, cast[ptr SockAddr](addr receiverBind), sizeof(Sockaddr_in6).SockLen
+    ) == 0
+
+    var receiverLen = sizeof(receiverBind).SockLen
+    check getsockname(
+      receiverFd, cast[ptr SockAddr](addr receiverBind), addr receiverLen
+    ) == 0
+
+    let ctx = makeContext(senderFd)
+    var
+      payload = @[byte(1), 2, 3]
+      localStorage = toSockaddrStorage(initTAddress("[::1]:0"))
+      iov = struct_iovec(iov_base: addr payload[0], iov_len: payload.len.csize_t)
+      spec = makeOutSpec(addr iov, addr localStorage, addr receiverBind)
+
+    check sendPacketsOut(cast[pointer](ctx), addr spec, 1) == 1
+
+    var
+      received: array[3, byte]
+      remoteStorage: Sockaddr_storage
+      remoteLen = sizeof(remoteStorage).SockLen
+      receiveBuffer =
+        when defined(windows):
+          cast[cstring](addr received[0])
+        else:
+          addr received[0]
+    check recvfrom(
+      receiverFd,
+      receiveBuffer,
+      received.len.cint,
+      0,
+      cast[ptr SockAddr](addr remoteStorage),
+      addr remoteLen,
+    ) == received.len
+
+    var remote: TransportAddress
+    fromSAddr(addr remoteStorage, remoteLen, remote)
+    check remote.toIpAddress() == parseIpAddress("::1")

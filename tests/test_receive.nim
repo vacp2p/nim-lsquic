@@ -3,10 +3,10 @@
 
 {.used.}
 
-import chronos, chronos/unittest2/asynctests
-when defined(linux):
-  import chronos/osdefs
-  import ../lsquic/context/io
+import chronos, chronos/osdefs, chronos/unittest2/asynctests
+import ../lsquic/context/io
+when defined(windows):
+  import ../lsquic/context/context
 import ./helpers/trackers
 
 suite "UDP receive":
@@ -14,46 +14,53 @@ suite "UDP receive":
     checkTrackers()
 
   asyncTest "drained IPv4 burst keeps the dual-stack socket family":
-    when defined(linux):
-      proc ignore(
-          udp: DatagramTransport, remote: TransportAddress
-      ): Future[void] {.async: (raises: []).} =
-        discard
+    proc ignore(
+        udp: DatagramTransport, remote: TransportAddress
+    ): Future[void] {.async: (raises: []).} =
+      discard
 
-      let
-        server = newDatagramTransport6(
-          ignore,
-          local = initTAddress("[::]:0"),
-          flags = {ServerFlags.NoAutoRead, ServerFlags.PacketInfo},
-        )
-        client = newDatagramTransport(ignore)
-      defer:
-        await allFutures(server.closeWait(), client.closeWait())
+    let
+      server = newDatagramTransport6(
+        ignore,
+        local = initTAddress("[::]:0"),
+        flags = {ServerFlags.NoAutoRead, ServerFlags.PacketInfo},
+      )
+      client = newDatagramTransport(ignore)
+    defer:
+      await allFutures(server.closeWait(), client.closeWait())
 
-      var destination = initTAddress("127.0.0.1:0")
-      destination.port = server.localAddress().port
-      await client.sendTo(destination, @[1.byte])
-      await client.sendTo(destination, @[2.byte])
+    when defined(windows):
+      let ctx = QuicContext()
+      check ctx.initPacketIo(SocketHandle(server.fd))
 
-      var buf = newSeq[byte](DefaultDatagramBufferSize)
-      for expected in [1.byte, 2.byte]:
-        var
-          local, remote: TransportAddress
-          received = -1
+    var destination = initTAddress("127.0.0.1:0")
+    destination.port = server.localAddress().port
+    await client.sendTo(destination, @[1.byte])
+    await client.sendTo(destination, @[2.byte])
 
-        for _ in 0 ..< 100:
-          received = recvPacket(
-            SocketHandle(server.fd), buf, server.localAddress(), local, remote
-          )
-          if received >= 0:
-            break
-          # The socket is non-blocking and send completion may precede readability.
-          await sleepAsync(10.milliseconds)
+    var buf = newSeq[byte](DefaultDatagramBufferSize)
+    for expected in [1.byte, 2.byte]:
+      var
+        local, remote: TransportAddress
+        received = -1
 
-        check:
-          received == 1
-          buf[0] == expected
-          local == destination.toIPv6()
-          remote.family == AddressFamily.IPv4
-    else:
-      skip()
+      for _ in 0 ..< 100:
+        received =
+          when defined(windows):
+            recvPacket(
+              ctx, SocketHandle(server.fd), buf, server.localAddress(), local, remote
+            )
+          else:
+            recvPacket(
+              SocketHandle(server.fd), buf, server.localAddress(), local, remote
+            )
+        if received >= 0:
+          break
+        # The socket is non-blocking and send completion may precede readability.
+        await sleepAsync(10.milliseconds)
+
+      check:
+        received == 1
+        buf[0] == expected
+        local == destination.toIPv6()
+        remote.family == AddressFamily.IPv4

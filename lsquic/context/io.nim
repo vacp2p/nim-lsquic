@@ -16,6 +16,10 @@ when not defined(windows):
 logScope:
   topics = "lsquic"
 
+type ControlBuffer {.union.} = object
+  alignment: uint
+  data: array[128, byte]
+
 when defined(windows):
   const MaxBatch = 1024
     ## Upper bound on the stack WSABUF array in the Windows send path (`sendPacketsOut`).
@@ -39,25 +43,25 @@ when defined(linux) or defined(macosx):
   when defined(macosx):
     {.passc: "-D__APPLE_USE_RFC_3542".}
 
-  type
-    InPktInfo {.importc: "struct in_pktinfo", header: "<netinet/in.h>", bycopy.} = object
+  type In6PktInfo {.importc: "struct in6_pktinfo", header: "<netinet/in.h>", bycopy.} = object
+    ipi6_addr: In6Addr
+    ipi6_ifindex: cuint
+
+  when defined(linux):
+    type InPktInfo {.importc: "struct in_pktinfo", header: "<netinet/in.h>", bycopy.} = object
       ipi_ifindex: cint
       ipi_spec_dst: InAddr
       ipi_addr: InAddr
 
-    In6PktInfo {.importc: "struct in6_pktinfo", header: "<netinet/in.h>", bycopy.} = object
-      ipi6_addr: In6Addr
-      ipi6_ifindex: cuint
+    var IP_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
+  else:
+    var
+      IP_RECVDSTADDR {.importc, header: "<netinet/in.h>".}: cint
+      IP_SENDSRCADDR {.importc, header: "<netinet/in.h>".}: cint
 
-  var
-    IP_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
-    IPV6_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
+  var IPV6_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
 
 when not defined(windows):
-  type ControlBuffer {.union.} = object
-    alignment: clong
-    data: array[128, byte]
-
   proc prepareSourceAddr(
       localSa: ptr SockAddr, control: var ControlBuffer, msg: var Tmsghdr
   ) =
@@ -73,15 +77,22 @@ when not defined(windows):
 
       let cmsg = cast[ptr Tcmsghdr](msg.msg_control)
       if local.family == AddressFamily.IPv4:
-        msg.msg_controllen =
-          typeof(msg.msg_controllen)(CMSG_SPACE(sizeof(InPktInfo).csize_t))
-        cmsg.cmsg_len = typeof(cmsg.cmsg_len)(CMSG_LEN(sizeof(InPktInfo).csize_t))
         cmsg.cmsg_level = IPPROTO_IP
-        cmsg.cmsg_type = IP_PKTINFO
-        let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
-        copyMem(
-          addr info.ipi_spec_dst, unsafeAddr local.address_v4[0], local.address_v4.len
-        )
+        when defined(linux):
+          msg.msg_controllen =
+            typeof(msg.msg_controllen)(CMSG_SPACE(sizeof(InPktInfo).csize_t))
+          cmsg.cmsg_len = typeof(cmsg.cmsg_len)(CMSG_LEN(sizeof(InPktInfo).csize_t))
+          cmsg.cmsg_type = IP_PKTINFO
+          let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
+          copyMem(
+            addr info.ipi_spec_dst, unsafeAddr local.address_v4[0], local.address_v4.len
+          )
+        else:
+          msg.msg_controllen =
+            typeof(msg.msg_controllen)(CMSG_SPACE(sizeof(InAddr).csize_t))
+          cmsg.cmsg_len = typeof(cmsg.cmsg_len)(CMSG_LEN(sizeof(InAddr).csize_t))
+          cmsg.cmsg_type = IP_SENDSRCADDR
+          copyMem(CMSG_DATA(cmsg), unsafeAddr local.address_v4[0], local.address_v4.len)
       elif local.family == AddressFamily.IPv6:
         msg.msg_controllen =
           typeof(msg.msg_controllen)(CMSG_SPACE(sizeof(In6PktInfo).csize_t))
@@ -93,7 +104,7 @@ when not defined(windows):
           addr info.ipi6_addr, unsafeAddr local.address_v6[0], local.address_v6.len
         )
 
-when defined(linux):
+when defined(linux) or defined(macosx):
   proc recvPacket*(
       fd: SocketHandle,
       buf: var seq[byte],
@@ -113,10 +124,11 @@ when defined(linux):
       )
     msg.msg_controllen = typeof(msg.msg_controllen)(control.data.len)
 
-    var response = recvmsg(fd, addr msg, 0)
+    let response = recvmsg(fd, addr msg, 0)
     if response < 0:
       return response
     if (msg.msg_flags and MSG_CTRUNC) != 0:
+      trace "Dropping UDP datagram with truncated packet info", boundLocal
       return -1
 
     remote = toTransportAddress(cast[ptr SockAddr](addr remoteStorage))
@@ -126,29 +138,35 @@ when defined(linux):
 
     var cmsg = CMSG_FIRSTHDR(addr msg)
     while not cmsg.isNil:
-      if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_PKTINFO:
-        let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
-        local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
-        copyMem(addr local.address_v4[0], addr info.ipi_addr, local.address_v4.len)
-        break
-      elif cmsg.cmsg_level == IPPROTO_IPV6 and cmsg.cmsg_type == IPV6_PKTINFO:
+      when defined(linux):
+        if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_PKTINFO:
+          let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
+          local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
+          copyMem(addr local.address_v4[0], addr info.ipi_addr, local.address_v4.len)
+          break
+      else:
+        if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_RECVDSTADDR:
+          local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
+          copyMem(addr local.address_v4[0], CMSG_DATA(cmsg), local.address_v4.len)
+          break
+      if cmsg.cmsg_level == IPPROTO_IPV6 and cmsg.cmsg_type == IPV6_PKTINFO:
         let info = cast[ptr In6PktInfo](CMSG_DATA(cmsg))
         local = TransportAddress(family: AddressFamily.IPv6, port: boundLocal.port)
         copyMem(addr local.address_v6[0], addr info.ipi6_addr, local.address_v6.len)
         break
       cmsg = CMSG_NXTHDR(addr msg, cmsg)
 
-    if boundLocal.family == AddressFamily.IPv6 and local.family == AddressFamily.IPv4:
-      local = local.toIPv6()
-
-    return response
+    local = local.matchSocketFamily(boundLocal)
+    response
 
 when defined(windows):
+  const WsaMsgCtrunc = DWORD(0x0200)
+
   func wsaCmsgAlign(value: uint): uint =
     (value + uint(sizeof(uint) - 1)) and not uint(sizeof(uint) - 1)
 
   proc prepareSourceAddr(
-      localSa: ptr SockAddr, control: var array[128, byte], msg: var osdefs.WSAMSG
+      localSa: ptr SockAddr, control: var ControlBuffer, msg: var osdefs.WSAMSG
   ) =
     var local = localSa.toTransportAddress()
     if local.isV4Mapped():
@@ -156,13 +174,13 @@ when defined(windows):
     if local.isAnyLocal():
       return
 
-    zeroMem(addr control[0], control.len)
+    zeroMem(addr control.data[0], control.data.len)
     let
       headerLen = wsaCmsgAlign(uint(sizeof(osdefs.WSACMSGHDR)))
-      header = cast[ptr osdefs.WSACMSGHDR](addr control[0])
+      header = cast[ptr osdefs.WSACMSGHDR](addr control.data[0])
       data = cast[pointer](cast[uint](header) + headerLen)
 
-    msg.control.buf = cast[cstring](addr control[0])
+    msg.control.buf = cast[cstring](addr control.data[0])
     if local.family == AddressFamily.IPv4:
       header.cmsg_len = headerLen + uint(sizeof(osdefs.WinInPktInfo))
       header.cmsg_level = osdefs.IPPROTO_IP
@@ -177,6 +195,64 @@ when defined(windows):
       msg.control.len = ULONG(wsaCmsgAlign(header.cmsg_len))
       let info = cast[ptr osdefs.WinIn6PktInfo](data)
       copyMem(addr info.ipi6_addr, unsafeAddr local.address_v6[0], local.address_v6.len)
+
+  proc recvPacket*(
+      ctx: QuicContext,
+      fd: SocketHandle,
+      buf: var seq[byte],
+      boundLocal: TransportAddress,
+      local, remote: var TransportAddress,
+  ): int {.raises: [].} =
+    var
+      remoteStorage: Sockaddr_storage
+      control: ControlBuffer
+      data = osdefs.WSABUF(len: ULONG(buf.len), buf: cast[cstring](addr buf[0]))
+      msg = osdefs.WSAMSG(
+        name: cast[ptr SockAddr](addr remoteStorage),
+        namelen: cint(sizeof(remoteStorage)),
+        lpBuffers: addr data,
+        dwBufferCount: DWORD(1),
+        control: osdefs.WSABUF(
+          len: ULONG(control.data.len), buf: cast[cstring](addr control.data[0])
+        ),
+      )
+      bytesReceived: DWORD
+
+    if ctx.recvMsg(fd, addr msg, addr bytesReceived) != 0:
+      return -1
+    if (msg.dwFlags and WsaMsgCtrunc) != 0:
+      trace "Dropping UDP datagram with truncated packet info", boundLocal
+      return -1
+
+    remote = toTransportAddress(cast[ptr SockAddr](addr remoteStorage))
+    if boundLocal.family == AddressFamily.IPv6 and remote.isV4Mapped():
+      remote = remote.toIPv4()
+    local = boundLocal
+
+    var
+      cursor = cast[uint](msg.control.buf)
+      finish = cursor + uint(msg.control.len)
+    while cursor + uint(sizeof(osdefs.WSACMSGHDR)) <= finish:
+      let header = cast[ptr osdefs.WSACMSGHDR](cursor)
+      if header.cmsg_len < uint(sizeof(osdefs.WSACMSGHDR)) or
+          cursor + header.cmsg_len > finish:
+        break
+      let data = cast[pointer](cursor + wsaCmsgAlign(uint(sizeof(osdefs.WSACMSGHDR))))
+      if header.cmsg_level == osdefs.IPPROTO_IP and header.cmsg_type == osdefs.IP_PKTINFO:
+        let info = cast[ptr osdefs.WinInPktInfo](data)
+        local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
+        copyMem(addr local.address_v4[0], addr info.ipi_addr, local.address_v4.len)
+        break
+      if header.cmsg_level == osdefs.IPPROTO_IPV6 and
+          header.cmsg_type == osdefs.IPV6_PKTINFO:
+        let info = cast[ptr osdefs.WinIn6PktInfo](data)
+        local = TransportAddress(family: AddressFamily.IPv6, port: boundLocal.port)
+        copyMem(addr local.address_v6[0], addr info.ipi6_addr, local.address_v6.len)
+        break
+      cursor += wsaCmsgAlign(header.cmsg_len)
+
+    local = local.matchSocketFamily(boundLocal)
+    bytesReceived.int
 
 proc prepareDestAddr(
     localSa: ptr SockAddr,
@@ -309,26 +385,6 @@ proc sendPacketsOut*(
       var
         bufs {.noinit.}: array[MaxBatch, osdefs.WSABUF]
         overflow: seq[osdefs.WSABUF]
-      if not quicCtx.wsaSendMsgResolved:
-        var
-          extension: pointer
-          extensionBytesRet: DWORD
-          sendMsgGuid = osdefs.WSAID_WSASENDMSG
-        if wsaIoctl(
-          SocketHandle(quicCtx.fd),
-          osdefs.SIO_GET_EXTENSION_FUNCTION_POINTER,
-          addr sendMsgGuid,
-          DWORD(sizeof(sendMsgGuid)),
-          addr extension,
-          DWORD(sizeof(extension)),
-          addr extensionBytesRet,
-          nil,
-          nil,
-        ) == 0:
-          quicCtx.wsaSendMsg = cast[osdefs.LPFN_WSASENDMSG](extension)
-        quicCtx.wsaSendMsgResolved = true
-      if quicCtx.wsaSendMsg.isNil:
-        return -1
     var sent = 0
     for i in 0 ..< nspecs.int:
       let curr = specsArr[i]
@@ -354,7 +410,7 @@ proc sendPacketsOut*(
           dst[j].buf = cast[cstring](src.iov_base)
 
         var
-          control: array[128, byte]
+          control: ControlBuffer
           bytesSent: DWORD
           msg = osdefs.WSAMSG(
             name: cast[ptr SockAddr](addr destStorage),
@@ -363,9 +419,7 @@ proc sendPacketsOut*(
             dwBufferCount: DWORD(iovlen),
           )
         prepareSourceAddr(curr.local_sa, control, msg)
-        let res = quicCtx.wsaSendMsg(
-          SocketHandle(quicCtx.fd), addr msg, DWORD(0), addr bytesSent, nil, nil
-        )
+        let res = quicCtx.sendMsg(SocketHandle(quicCtx.fd), addr msg, addr bytesSent)
         if res != 0:
           let errorCode = osdefs.wsaGetLastError()
           trace "Failed to send UDP datagram",
