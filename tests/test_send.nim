@@ -85,3 +85,55 @@ suite "packets out":
       spec = makeOutSpec(addr iov, addr localStorage, addr destStorage)
 
     check sendPacketsOut(cast[pointer](ctx), addr specs[0], SpecCount.cuint) == SpecCount
+
+  test "packet info selects the requested IPv4 source address":
+    when defined(linux):
+      let
+        senderFd = createNativeSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        receiverFd = createNativeSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+      defer:
+        nativesockets.close(senderFd)
+        nativesockets.close(receiverFd)
+
+      var
+        senderBind = toSockaddrStorage(initTAddress("0.0.0.0:0"))
+        receiverBind = toSockaddrStorage(initTAddress("127.0.0.2:0"))
+      check bindSocket(
+        senderFd, cast[ptr SockAddr](addr senderBind), sizeof(Sockaddr_in).SockLen
+      ) == 0
+      check bindSocket(
+        receiverFd, cast[ptr SockAddr](addr receiverBind), sizeof(Sockaddr_in).SockLen
+      ) == 0
+
+      var receiverLen = sizeof(receiverBind).SockLen
+      check getsockname(
+        receiverFd, cast[ptr SockAddr](addr receiverBind), addr receiverLen
+      ) == 0
+
+      let ctx = QuicContext(fd: cint(senderFd))
+      var
+        payload = @[byte(1), 2, 3]
+        localStorage = toSockaddrStorage(initTAddress("127.0.0.2:0"))
+        iov = struct_iovec(iov_base: addr payload[0], iov_len: payload.len.csize_t)
+        spec = makeOutSpec(addr iov, addr localStorage, addr receiverBind)
+
+      check sendPacketsOut(cast[pointer](ctx), addr spec, 1) == 1
+
+      var
+        received: array[3, byte]
+        remoteStorage: Sockaddr_storage
+        remoteLen = sizeof(remoteStorage).SockLen
+      check recvfrom(
+        receiverFd,
+        addr received[0],
+        received.len,
+        0,
+        cast[ptr SockAddr](addr remoteStorage),
+        addr remoteLen,
+      ) == received.len
+
+      var remote: TransportAddress
+      fromSAddr(addr remoteStorage, remoteLen, remote)
+      check remote.toIpAddress() == parseIpAddress("127.0.0.2")
+    else:
+      skip()

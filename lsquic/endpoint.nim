@@ -12,7 +12,9 @@ import
     socketconfig, engine_config,
   ]
 import ./context/[server, client, context, io]
-import ./helpers/[logging, transportaddr]
+import ./helpers/logging
+when not defined(linux):
+  import ./helpers/transportaddr
 from chronos/osdefs import Sockaddr_storage, SockAddr, SockLen, SocketHandle
 when defined(windows):
   from std/winlean import recvfrom
@@ -197,30 +199,40 @@ proc routeDatagram(
 proc recvDatagram(
     fd: SocketHandle,
     buf: var seq[byte],
-    remoteAddress: var Sockaddr_storage,
-    remoteAddrLen: var SockLen,
+    boundLocal: TransportAddress,
+    local, remote: var TransportAddress,
 ): int {.raises: [].} =
-  when defined(windows):
-    recvfrom(
-      fd,
-      cast[cstring](addr buf[0]),
-      cint(buf.len),
-      cint(0),
-      cast[ptr SockAddr](addr remoteAddress),
-      addr remoteAddrLen,
-    ).int
+  when defined(linux):
+    recvPacket(fd, buf, boundLocal, local, remote)
   else:
-    recvfrom(
-      fd,
-      addr buf[0],
-      buf.len,
-      cint(0),
-      cast[ptr SockAddr](addr remoteAddress),
-      addr remoteAddrLen,
-    ).int
+    var
+      remoteAddress: Sockaddr_storage
+      remoteAddrLen = SockLen(sizeof(Sockaddr_storage))
+    result =
+      when defined(windows):
+        recvfrom(
+          fd,
+          cast[cstring](addr buf[0]),
+          cint(buf.len),
+          cint(0),
+          cast[ptr SockAddr](addr remoteAddress),
+          addr remoteAddrLen,
+        ).int
+      else:
+        recvfrom(
+          fd,
+          addr buf[0],
+          buf.len,
+          cint(0),
+          cast[ptr SockAddr](addr remoteAddress),
+          addr remoteAddrLen,
+        ).int
+    if result >= 0:
+      local = boundLocal
+      remote = toTransportAddress(cast[ptr SockAddr](addr remoteAddress))
 
 proc drainDatagrams(
-    endpoint: QuicEndpoint, udp: DatagramTransport, local: TransportAddress
+    endpoint: QuicEndpoint, udp: DatagramTransport
 ): set[RouteTarget] {.raises: [].} =
   ## Chronos hands this callback a single datagram per event-loop wakeup, so
   ## whatever else has already arrived is read here rather than one wakeup, and
@@ -228,13 +240,18 @@ proc drainDatagrams(
   if endpoint.drainBuf.len == 0:
     endpoint.drainBuf = newSeq[byte](DefaultDatagramBufferSize)
 
-  var targets: set[RouteTarget]
+  var
+    targets: set[RouteTarget]
+    boundLocal: TransportAddress
+  try:
+    boundLocal = udp.localAddress()
+  except TransportOsError:
+    return
+
   for _ in 0 ..< MaxDatagramsPerWakeup:
-    var
-      remoteAddress: Sockaddr_storage
-      remoteAddrLen = SockLen(sizeof(Sockaddr_storage))
+    var local, remote: TransportAddress
     let res = recvDatagram(
-      SocketHandle(udp.fd), endpoint.drainBuf, remoteAddress, remoteAddrLen
+      SocketHandle(udp.fd), endpoint.drainBuf, boundLocal, local, remote
     )
     if res < 0:
       # Empty, or an error the transport will report again on the next wakeup.
@@ -242,9 +259,7 @@ proc drainDatagrams(
 
     if res > 0:
       targets.incl endpoint.routeDatagram(
-        endpoint.drainBuf.toOpenArray(0, res - 1),
-        local,
-        toTransportAddress(cast[ptr SockAddr](addr remoteAddress)),
+        endpoint.drainBuf.toOpenArray(0, res - 1), local, remote
       )
 
   targets
@@ -272,7 +287,7 @@ proc receiveFromUdp(
     var
       msg: seq[byte]
       msgLen: int
-    local = udp.localAddress()
+    local = udp.receivedLocalAddress()
     readIncoming(udp, msg, msgLen)
     if msgLen > 0:
       targets = endpoint.routeDatagram(msg.toOpenArray(0, msgLen - 1), local, remote)
@@ -280,7 +295,7 @@ proc receiveFromUdp(
     warn "Failed to read UDP datagram", error = shortLog(e.msg)
     return
 
-  targets = targets + endpoint.drainDatagrams(udp, local)
+  targets = targets + endpoint.drainDatagrams(udp)
 
   if rtClient in targets:
     endpoint.clientContext.processWhenReady()
@@ -298,9 +313,13 @@ proc createUdp(
   let udp =
     case address.family
     of AddressFamily.IPv4:
-      newDatagramTransport(onReceive, local = address)
+      newDatagramTransport(
+        onReceive, local = address, flags = {ServerFlags.PacketInfo}
+      )
     of AddressFamily.IPv6:
-      newDatagramTransport6(onReceive, local = address)
+      newDatagramTransport6(
+        onReceive, local = address, flags = {ServerFlags.PacketInfo}
+      )
     else:
       raise newException(QuicError, "only IPv4/IPv6 address is supported")
 
@@ -380,6 +399,25 @@ proc ensureClientContext(
 
   endpoint.clientContext
 
+proc dialLocalAddress(
+    endpoint: QuicEndpoint, remote: TransportAddress
+): TransportAddress {.raises: [TransportOsError].} =
+  let bound = endpoint.udp.localAddress()
+  when not defined(linux):
+    return bound
+
+  if not bound.isAnyLocal():
+    return bound
+
+  var source = getBestRoute(remote).source
+  if source.family == AddressFamily.None:
+    return bound
+
+  if bound.family == AddressFamily.IPv6 and source.family == AddressFamily.IPv4:
+    source = source.toIPv6()
+  source.port = bound.port
+  source
+
 proc accept*(
     endpoint: QuicEndpoint
 ): Future[Connection] {.async: (raises: [CancelledError, TransportError]).} =
@@ -418,7 +456,7 @@ proc dial(
 .} =
   let ctx = endpoint.ensureClientContext()
   let connection = newOutgoingConnection(
-    ctx, endpoint.udp.localAddress(), address, serverName, certVerifier
+    ctx, endpoint.dialLocalAddress(address), address, serverName, certVerifier
   )
   endpoint.connman.addConnection(connection)
   var connected = false

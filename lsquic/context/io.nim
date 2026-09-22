@@ -30,9 +30,110 @@ when defined(linux):
     msg_hdr: Tmsghdr
     msg_len: cuint
 
+  type
+    InPktInfo {.importc: "struct in_pktinfo", header: "<netinet/in.h>", bycopy.} =
+      object
+        ipi_ifindex: cint
+        ipi_spec_dst: InAddr
+        ipi_addr: InAddr
+
+    In6PktInfo {.importc: "struct in6_pktinfo", header: "<netinet/in.h>", bycopy.} =
+      object
+        ipi6_addr: In6Addr
+        ipi6_ifindex: cuint
+
+  var
+    IP_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
+    IPV6_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
+
   proc sendmmsg(
     sockfd: SocketHandle, msgvec: ptr MMsgHdr, vlen: cuint, flags: cint
   ): cint {.importc, header: "<sys/socket.h>".}
+
+when not defined(windows):
+  type ControlBuffer {.union.} = object
+    alignment: clong
+    data: array[128, byte]
+
+  proc prepareSourceAddr(
+      localSa: ptr SockAddr, control: var ControlBuffer, msg: var Tmsghdr
+  ) =
+    when defined(linux):
+      let local = localSa.toTransportAddress()
+      if local.isAnyLocal():
+        return
+
+      zeroMem(addr control.data[0], control.data.len)
+      msg.msg_control = addr control.data[0]
+
+      let cmsg = cast[ptr Tcmsghdr](msg.msg_control)
+      if local.family == AddressFamily.IPv4:
+        msg.msg_controllen = CMSG_SPACE(sizeof(InPktInfo).csize_t)
+        cmsg.cmsg_len = CMSG_LEN(sizeof(InPktInfo).csize_t)
+        cmsg.cmsg_level = IPPROTO_IP
+        cmsg.cmsg_type = IP_PKTINFO
+        let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
+        copyMem(
+          addr info.ipi_spec_dst,
+          unsafeAddr local.address_v4[0],
+          local.address_v4.len,
+        )
+      elif local.family == AddressFamily.IPv6:
+        msg.msg_controllen = CMSG_SPACE(sizeof(In6PktInfo).csize_t)
+        cmsg.cmsg_len = CMSG_LEN(sizeof(In6PktInfo).csize_t)
+        cmsg.cmsg_level = IPPROTO_IPV6
+        cmsg.cmsg_type = IPV6_PKTINFO
+        let info = cast[ptr In6PktInfo](CMSG_DATA(cmsg))
+        copyMem(
+          addr info.ipi6_addr, unsafeAddr local.address_v6[0], local.address_v6.len
+        )
+
+when defined(linux):
+  proc recvPacket*(
+      fd: SocketHandle,
+      buf: var seq[byte],
+      boundLocal: TransportAddress,
+      local, remote: var TransportAddress,
+  ): int {.raises: [].} =
+    var
+      remoteStorage: Sockaddr_storage
+      iov = IOVec(iov_base: addr buf[0], iov_len: buf.len.csize_t)
+      control: ControlBuffer
+      msg = Tmsghdr(
+        msg_name: addr remoteStorage,
+        msg_namelen: SockLen(sizeof(remoteStorage)),
+        msg_iov: addr iov,
+        msg_iovlen: 1,
+        msg_control: addr control.data[0],
+        msg_controllen: control.data.len.csize_t,
+      )
+
+    result = recvmsg(fd, addr msg, 0)
+    if result < 0:
+      return
+
+    remote = toTransportAddress(cast[ptr SockAddr](addr remoteStorage))
+    if boundLocal.family == AddressFamily.IPv6 and remote.isV4Mapped():
+      remote = remote.toIPv4()
+    local = boundLocal
+
+    var cmsg = CMSG_FIRSTHDR(addr msg)
+    while not cmsg.isNil:
+      if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_PKTINFO:
+        let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
+        local = TransportAddress(
+          family: AddressFamily.IPv4, port: boundLocal.port
+        )
+        copyMem(addr local.address_v4[0], addr info.ipi_addr, local.address_v4.len)
+        break
+      elif cmsg.cmsg_level == IPPROTO_IPV6 and cmsg.cmsg_type == IPV6_PKTINFO:
+        let info = cast[ptr In6PktInfo](CMSG_DATA(cmsg))
+        local = TransportAddress(
+          family: AddressFamily.IPv6, port: boundLocal.port
+        )
+        copyMem(addr local.address_v6[0], addr info.ipi6_addr, local.address_v6.len)
+        break
+      cmsg = CMSG_NXTHDR(addr msg, cmsg)
 
 when defined(windows):
   import std/winlean
@@ -77,9 +178,10 @@ when not defined(windows):
       spec: struct_lsquic_out_spec,
       destStorage: var Sockaddr_storage,
       destAddrLen: SockLen,
+      control: var ControlBuffer,
   ): Tmsghdr =
     when defined(linux) and defined(x86_64) and not defined(android):
-      Tmsghdr(
+      result = Tmsghdr(
         msg_name: cast[pointer](addr destStorage),
         msg_namelen: destAddrLen,
         msg_iov: cast[ptr IOVec](spec.iov),
@@ -89,7 +191,7 @@ when not defined(windows):
         msg_flags: 0,
       )
     else:
-      Tmsghdr(
+      result = Tmsghdr(
         msg_name: cast[pointer](addr destStorage),
         msg_namelen: destAddrLen,
         msg_iov: cast[ptr IOVec](spec.iov),
@@ -98,6 +200,7 @@ when not defined(windows):
         msg_controllen: 0,
         msg_flags: 0,
       )
+    prepareSourceAddr(spec.local_sa, control, result)
 
 proc packetIn*(
     ctx: QuicContext,
@@ -144,6 +247,7 @@ proc sendPacketsOut*(
   when defined(linux):
     var
       destStorages {.noinit.}: array[SendmmsgBatchSize, Sockaddr_storage]
+      controls {.noinit.}: array[SendmmsgBatchSize, ControlBuffer]
       msgs {.noinit.}: array[SendmmsgBatchSize, MMsgHdr]
       sent = 0
 
@@ -153,8 +257,10 @@ proc sendPacketsOut*(
         let curr = specsArr[sent + i]
         var destAddrLen: SockLen
         prepareDestAddr(curr.local_sa, curr.dest_sa, destStorages[i], destAddrLen)
-        msgs[i] =
-          MMsgHdr(msg_hdr: makeMsgHdr(curr, destStorages[i], destAddrLen), msg_len: 0)
+        msgs[i] = MMsgHdr(
+          msg_hdr: makeMsgHdr(curr, destStorages[i], destAddrLen, controls[i]),
+          msg_len: 0,
+        )
 
       let res = sendmmsg(SocketHandle(quicCtx.fd), addr msgs[0], nmsgs.cuint, 0)
       if res < 0:
@@ -223,7 +329,8 @@ proc sendPacketsOut*(
             return -1
           break
       else:
-        let msg = makeMsgHdr(curr, destStorage, destAddrLen)
+        var control: ControlBuffer
+        let msg = makeMsgHdr(curr, destStorage, destAddrLen, control)
 
         let res = sendmsg(SocketHandle(quicCtx.fd), msg.addr, 0)
         if res < 0:
