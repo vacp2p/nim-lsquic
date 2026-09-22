@@ -4,8 +4,10 @@
 {.used.}
 
 import chronos, chronos/osdefs, nativesockets, unittest2
+import chronos/osutils
 import lsquic/[lsquic_ffi, context/context, context/io]
 import ./helpers/[address, trackers]
+import std/os
 
 when not defined(windows):
   from posix import EAGAIN, EBADF, errno
@@ -24,6 +26,34 @@ proc makeContext(fd: SocketHandle): QuicContext =
   result = QuicContext(fd: cint(fd))
   when defined(windows):
     doAssert result.initPacketIo(fd)
+
+proc receiveWithTimeout(
+    fd: SocketHandle,
+    received: var array[3, byte],
+    remoteStorage: var Sockaddr_storage,
+    remoteLen: var SockLen,
+): int =
+  doAssert setDescriptorBlocking(fd, false).isOk()
+  let buffer =
+    when defined(windows):
+      cast[cstring](addr received[0])
+    else:
+      addr received[0]
+
+  result = -1
+  for _ in 0 ..< 100:
+    remoteLen = sizeof(remoteStorage).SockLen
+    result = recvfrom(
+      fd,
+      buffer,
+      received.len.cint,
+      0,
+      cast[ptr SockAddr](addr remoteStorage),
+      addr remoteLen,
+    ).int
+    if result >= 0:
+      return
+    os.sleep(10)
 
 suite "packets out":
   teardown:
@@ -95,7 +125,7 @@ suite "packets out":
     let
       senderFd = createNativeSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
       receiverFd = createNativeSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-      requestedSource = when defined(windows): "127.0.0.1" else: "127.0.0.2"
+      requestedSource = when defined(linux): "127.0.0.2" else: "127.0.0.1"
     defer:
       nativesockets.close(senderFd)
       nativesockets.close(receiverFd)
@@ -103,15 +133,15 @@ suite "packets out":
     var
       senderBind = toSockaddrStorage(initTAddress("0.0.0.0:0"))
       receiverBind = toSockaddrStorage(initTAddress(requestedSource & ":0"))
-    check bindSocket(
+    require bindSocket(
       senderFd, cast[ptr SockAddr](addr senderBind), sizeof(Sockaddr_in).SockLen
     ) == 0
-    check bindSocket(
+    require bindSocket(
       receiverFd, cast[ptr SockAddr](addr receiverBind), sizeof(Sockaddr_in).SockLen
     ) == 0
 
     var receiverLen = sizeof(receiverBind).SockLen
-    check getsockname(
+    require getsockname(
       receiverFd, cast[ptr SockAddr](addr receiverBind), addr receiverLen
     ) == 0
 
@@ -122,25 +152,14 @@ suite "packets out":
       iov = struct_iovec(iov_base: addr payload[0], iov_len: payload.len.csize_t)
       spec = makeOutSpec(addr iov, addr localStorage, addr receiverBind)
 
-    check sendPacketsOut(cast[pointer](ctx), addr spec, 1) == 1
+    require sendPacketsOut(cast[pointer](ctx), addr spec, 1) == 1
 
     var
       received: array[3, byte]
       remoteStorage: Sockaddr_storage
       remoteLen = sizeof(remoteStorage).SockLen
-      receiveBuffer =
-        when defined(windows):
-          cast[cstring](addr received[0])
-        else:
-          addr received[0]
-    check recvfrom(
-      receiverFd,
-      receiveBuffer,
-      received.len.cint,
-      0,
-      cast[ptr SockAddr](addr remoteStorage),
-      addr remoteLen,
-    ) == received.len
+    check receiveWithTimeout(receiverFd, received, remoteStorage, remoteLen) ==
+      received.len
 
     var remote: TransportAddress
     fromSAddr(addr remoteStorage, remoteLen, remote)
@@ -157,15 +176,15 @@ suite "packets out":
     var
       senderBind = toSockaddrStorage(initTAddress("[::]:0"))
       receiverBind = toSockaddrStorage(initTAddress("[::1]:0"))
-    check bindSocket(
+    require bindSocket(
       senderFd, cast[ptr SockAddr](addr senderBind), sizeof(Sockaddr_in6).SockLen
     ) == 0
-    check bindSocket(
+    require bindSocket(
       receiverFd, cast[ptr SockAddr](addr receiverBind), sizeof(Sockaddr_in6).SockLen
     ) == 0
 
     var receiverLen = sizeof(receiverBind).SockLen
-    check getsockname(
+    require getsockname(
       receiverFd, cast[ptr SockAddr](addr receiverBind), addr receiverLen
     ) == 0
 
@@ -176,25 +195,14 @@ suite "packets out":
       iov = struct_iovec(iov_base: addr payload[0], iov_len: payload.len.csize_t)
       spec = makeOutSpec(addr iov, addr localStorage, addr receiverBind)
 
-    check sendPacketsOut(cast[pointer](ctx), addr spec, 1) == 1
+    require sendPacketsOut(cast[pointer](ctx), addr spec, 1) == 1
 
     var
       received: array[3, byte]
       remoteStorage: Sockaddr_storage
       remoteLen = sizeof(remoteStorage).SockLen
-      receiveBuffer =
-        when defined(windows):
-          cast[cstring](addr received[0])
-        else:
-          addr received[0]
-    check recvfrom(
-      receiverFd,
-      receiveBuffer,
-      received.len.cint,
-      0,
-      cast[ptr SockAddr](addr remoteStorage),
-      addr remoteLen,
-    ) == received.len
+    check receiveWithTimeout(receiverFd, received, remoteStorage, remoteLen) ==
+      received.len
 
     var remote: TransportAddress
     fromSAddr(addr remoteStorage, remoteLen, remote)
