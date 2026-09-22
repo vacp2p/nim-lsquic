@@ -43,23 +43,19 @@ when defined(linux) or defined(macosx):
   when defined(macosx):
     {.passc: "-D__APPLE_USE_RFC_3542".}
 
-  type In6PktInfo {.importc: "struct in6_pktinfo", header: "<netinet/in.h>", bycopy.} = object
-    ipi6_addr: In6Addr
-    ipi6_ifindex: cuint
-
-  when defined(linux):
-    type InPktInfo {.importc: "struct in_pktinfo", header: "<netinet/in.h>", bycopy.} = object
+  type
+    InPktInfo {.importc: "struct in_pktinfo", header: "<netinet/in.h>", bycopy.} = object
       ipi_ifindex: cint
       ipi_spec_dst: InAddr
       ipi_addr: InAddr
 
-    var IP_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
-  else:
-    var
-      IP_RECVDSTADDR {.importc, header: "<netinet/in.h>".}: cint
-      IP_SENDSRCADDR {.importc, header: "<netinet/in.h>".}: cint
+    In6PktInfo {.importc: "struct in6_pktinfo", header: "<netinet/in.h>", bycopy.} = object
+      ipi6_addr: In6Addr
+      ipi6_ifindex: cuint
 
-  var IPV6_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
+  var
+    IP_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
+    IPV6_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
 
 when not defined(windows):
   proc prepareSourceAddr(
@@ -77,22 +73,15 @@ when not defined(windows):
 
       let cmsg = cast[ptr Tcmsghdr](msg.msg_control)
       if local.family == AddressFamily.IPv4:
+        msg.msg_controllen =
+          typeof(msg.msg_controllen)(CMSG_SPACE(sizeof(InPktInfo).csize_t))
+        cmsg.cmsg_len = typeof(cmsg.cmsg_len)(CMSG_LEN(sizeof(InPktInfo).csize_t))
         cmsg.cmsg_level = IPPROTO_IP
-        when defined(linux):
-          msg.msg_controllen =
-            typeof(msg.msg_controllen)(CMSG_SPACE(sizeof(InPktInfo).csize_t))
-          cmsg.cmsg_len = typeof(cmsg.cmsg_len)(CMSG_LEN(sizeof(InPktInfo).csize_t))
-          cmsg.cmsg_type = IP_PKTINFO
-          let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
-          copyMem(
-            addr info.ipi_spec_dst, unsafeAddr local.address_v4[0], local.address_v4.len
-          )
-        else:
-          msg.msg_controllen =
-            typeof(msg.msg_controllen)(CMSG_SPACE(sizeof(InAddr).csize_t))
-          cmsg.cmsg_len = typeof(cmsg.cmsg_len)(CMSG_LEN(sizeof(InAddr).csize_t))
-          cmsg.cmsg_type = IP_SENDSRCADDR
-          copyMem(CMSG_DATA(cmsg), unsafeAddr local.address_v4[0], local.address_v4.len)
+        cmsg.cmsg_type = IP_PKTINFO
+        let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
+        copyMem(
+          addr info.ipi_spec_dst, unsafeAddr local.address_v4[0], local.address_v4.len
+        )
       elif local.family == AddressFamily.IPv6:
         msg.msg_controllen =
           typeof(msg.msg_controllen)(CMSG_SPACE(sizeof(In6PktInfo).csize_t))
@@ -138,17 +127,11 @@ when defined(linux) or defined(macosx):
 
     var cmsg = CMSG_FIRSTHDR(addr msg)
     while not cmsg.isNil:
-      when defined(linux):
-        if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_PKTINFO:
-          let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
-          local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
-          copyMem(addr local.address_v4[0], addr info.ipi_addr, local.address_v4.len)
-          break
-      else:
-        if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_RECVDSTADDR:
-          local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
-          copyMem(addr local.address_v4[0], CMSG_DATA(cmsg), local.address_v4.len)
-          break
+      if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_PKTINFO:
+        let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
+        local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
+        copyMem(addr local.address_v4[0], addr info.ipi_addr, local.address_v4.len)
+        break
       if cmsg.cmsg_level == IPPROTO_IPV6 and cmsg.cmsg_type == IPV6_PKTINFO:
         let info = cast[ptr In6PktInfo](CMSG_DATA(cmsg))
         local = TransportAddress(family: AddressFamily.IPv6, port: boundLocal.port)
