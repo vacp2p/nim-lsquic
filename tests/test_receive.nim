@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# Copyright (c) Status Research & Development GmbH
+
+{.used.}
+
+import chronos, chronos/unittest2/asynctests
+when defined(linux):
+  import chronos/osdefs
+  import ../lsquic/context/io
+import ./helpers/trackers
+
+suite "UDP receive":
+  teardown:
+    checkTrackers()
+
+  asyncTest "drained IPv4 burst keeps the dual-stack socket family":
+    when defined(linux):
+      proc ignore(
+          udp: DatagramTransport, remote: TransportAddress
+      ): Future[void] {.async: (raises: []).} =
+        discard
+
+      let
+        server = newDatagramTransport6(
+          ignore,
+          local = initTAddress("[::]:0"),
+          flags = {ServerFlags.NoAutoRead, ServerFlags.PacketInfo},
+        )
+        client = newDatagramTransport(ignore)
+      defer:
+        await allFutures(server.closeWait(), client.closeWait())
+
+      var destination = initTAddress("127.0.0.1:0")
+      destination.port = server.localAddress().port
+      await client.sendTo(destination, @[1.byte])
+      await client.sendTo(destination, @[2.byte])
+
+      var buf = newSeq[byte](DefaultDatagramBufferSize)
+      for expected in [1.byte, 2.byte]:
+        var
+          local, remote: TransportAddress
+          received = -1
+
+        for _ in 0 ..< 100:
+          received = recvPacket(
+            SocketHandle(server.fd), buf, server.localAddress(), local, remote
+          )
+          if received >= 0:
+            break
+          await sleepAsync(10.milliseconds)
+
+        check:
+          received == 1
+          buf[0] == expected
+          local == destination.toIPv6()
+          remote.family == AddressFamily.IPv4
+    else:
+      skip()

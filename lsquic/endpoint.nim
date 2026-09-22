@@ -13,13 +13,8 @@ import
   ]
 import ./context/[server, client, context, io]
 import ./helpers/logging
-when not defined(linux):
-  import ./helpers/transportaddr
-from chronos/osdefs import Sockaddr_storage, SockAddr, SockLen, SocketHandle
-when defined(windows):
-  from std/winlean import recvfrom
-else:
-  from chronos/osdefs import recvfrom
+when defined(linux):
+  from chronos/osdefs import SocketHandle
 
 logScope:
   topics = "lsquic"
@@ -46,10 +41,9 @@ type
     drainBuf: seq[byte]
     engineConfig: QuicEngineConfig
 
-const
-  CloseWait: Duration = 300.milliseconds
-
-  MaxDatagramsPerWakeup = 64
+const CloseWait: Duration = 300.milliseconds
+when defined(linux):
+  const MaxDatagramsPerWakeup = 64
     ## Capped so that a busy socket cannot starve the rest of the event loop.
 
 proc socketReceiveBufferBytes(
@@ -196,72 +190,38 @@ proc routeDatagram(
   trace "Dropping packet with unknown connection ID", bytes = data.len, local, remote
   {}
 
-proc recvDatagram(
-    fd: SocketHandle,
-    buf: var seq[byte],
-    boundLocal: TransportAddress,
-    local, remote: var TransportAddress,
-): int {.raises: [].} =
-  when defined(linux):
-    recvPacket(fd, buf, boundLocal, local, remote)
-  else:
+when defined(linux):
+  proc drainDatagrams(
+      endpoint: QuicEndpoint, udp: DatagramTransport
+  ): set[RouteTarget] {.raises: [].} =
+    ## Chronos hands this callback a single datagram per event-loop wakeup, so
+    ## whatever else has already arrived is read here rather than one wakeup, and
+    ## one engine tick, at a time.
+    if endpoint.drainBuf.len == 0:
+      endpoint.drainBuf = newSeq[byte](DefaultDatagramBufferSize)
+
     var
-      remoteAddress: Sockaddr_storage
-      remoteAddrLen = SockLen(sizeof(Sockaddr_storage))
-    result =
-      when defined(windows):
-        recvfrom(
-          fd,
-          cast[cstring](addr buf[0]),
-          cint(buf.len),
-          cint(0),
-          cast[ptr SockAddr](addr remoteAddress),
-          addr remoteAddrLen,
-        ).int
-      else:
-        recvfrom(
-          fd,
-          addr buf[0],
-          buf.len,
-          cint(0),
-          cast[ptr SockAddr](addr remoteAddress),
-          addr remoteAddrLen,
-        ).int
-    if result >= 0:
-      local = boundLocal
-      remote = toTransportAddress(cast[ptr SockAddr](addr remoteAddress))
+      targets: set[RouteTarget]
+      boundLocal: TransportAddress
+    try:
+      boundLocal = udp.localAddress()
+    except TransportOsError:
+      return
 
-proc drainDatagrams(
-    endpoint: QuicEndpoint, udp: DatagramTransport
-): set[RouteTarget] {.raises: [].} =
-  ## Chronos hands this callback a single datagram per event-loop wakeup, so
-  ## whatever else has already arrived is read here rather than one wakeup, and
-  ## one engine tick, at a time.
-  if endpoint.drainBuf.len == 0:
-    endpoint.drainBuf = newSeq[byte](DefaultDatagramBufferSize)
+    for _ in 0 ..< MaxDatagramsPerWakeup:
+      var local, remote: TransportAddress
+      let res =
+        recvPacket(SocketHandle(udp.fd), endpoint.drainBuf, boundLocal, local, remote)
+      if res < 0:
+        # Empty, or an error the transport will report again on the next wakeup.
+        break
 
-  var
-    targets: set[RouteTarget]
-    boundLocal: TransportAddress
-  try:
-    boundLocal = udp.localAddress()
-  except TransportOsError:
-    return
+      if res > 0:
+        targets.incl endpoint.routeDatagram(
+          endpoint.drainBuf.toOpenArray(0, res - 1), local, remote
+        )
 
-  for _ in 0 ..< MaxDatagramsPerWakeup:
-    var local, remote: TransportAddress
-    let res =
-      recvDatagram(SocketHandle(udp.fd), endpoint.drainBuf, boundLocal, local, remote)
-    if res < 0:
-      # Empty, or an error the transport will report again on the next wakeup.
-      break
-
-    if res > 0:
-      targets.incl endpoint.routeDatagram(
-        endpoint.drainBuf.toOpenArray(0, res - 1), local, remote
-      )
-
-  targets
+    targets
 
 proc readIncoming(
     udp: DatagramTransport, msg: var seq[byte], msgLen: var int
@@ -298,7 +258,8 @@ proc receiveFromUdp(
     warn "Failed to read UDP datagram", error = shortLog(e.msg)
     return
 
-  targets = targets + endpoint.drainDatagrams(udp)
+  when defined(linux):
+    targets = targets + endpoint.drainDatagrams(udp)
 
   if rtClient in targets:
     endpoint.clientContext.processWhenReady()

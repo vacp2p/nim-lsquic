@@ -16,10 +16,11 @@ when not defined(windows):
 logScope:
   topics = "lsquic"
 
-const MaxBatch = 1024
-  ## Upper bound on the stack WSABUF array in the Windows send path (`sendPacketsOut`).
-  ## In practice `iovlen` is small; if it exceeds this bound, `sendPacketsOut`
-  ## falls back to a heap-allocated seq.
+when defined(windows):
+  const MaxBatch = 1024
+    ## Upper bound on the stack WSABUF array in the Windows send path (`sendPacketsOut`).
+    ## In practice `iovlen` is small; if it exceeds this bound, `sendPacketsOut`
+    ## falls back to a heap-allocated seq.
 
 when defined(linux):
   {.passc: "-D_GNU_SOURCE".}
@@ -29,6 +30,14 @@ when defined(linux):
   type MMsgHdr {.importc: "struct mmsghdr", header: "<sys/socket.h>", bycopy.} = object
     msg_hdr: Tmsghdr
     msg_len: cuint
+
+  proc sendmmsg(
+    sockfd: SocketHandle, msgvec: ptr MMsgHdr, vlen: cuint, flags: cint
+  ): cint {.importc, header: "<sys/socket.h>".}
+
+when defined(linux) or defined(macosx):
+  when defined(macosx):
+    {.passc: "-D__APPLE_USE_RFC_3542".}
 
   type
     InPktInfo {.importc: "struct in_pktinfo", header: "<netinet/in.h>", bycopy.} = object
@@ -44,10 +53,6 @@ when defined(linux):
     IP_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
     IPV6_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
 
-  proc sendmmsg(
-    sockfd: SocketHandle, msgvec: ptr MMsgHdr, vlen: cuint, flags: cint
-  ): cint {.importc, header: "<sys/socket.h>".}
-
 when not defined(windows):
   type ControlBuffer {.union.} = object
     alignment: clong
@@ -56,8 +61,10 @@ when not defined(windows):
   proc prepareSourceAddr(
       localSa: ptr SockAddr, control: var ControlBuffer, msg: var Tmsghdr
   ) =
-    when defined(linux):
-      let local = localSa.toTransportAddress()
+    when defined(linux) or defined(macosx):
+      var local = localSa.toTransportAddress()
+      if local.isV4Mapped():
+        local = local.toIPv4()
       if local.isAnyLocal():
         return
 
@@ -129,26 +136,43 @@ when defined(linux):
         break
       cmsg = CMSG_NXTHDR(addr msg, cmsg)
 
+    if boundLocal.family == AddressFamily.IPv6 and local.family == AddressFamily.IPv4:
+      local = local.toIPv6()
+
 when defined(windows):
-  import std/winlean
+  func wsaCmsgAlign(value: uint): uint =
+    (value + uint(sizeof(uint) - 1)) and not uint(sizeof(uint) - 1)
 
-  {.pragma: wsa, stdcall, dynlib: "ws2_32.dll".}
+  proc prepareSourceAddr(
+      localSa: ptr SockAddr, control: var array[128, byte], msg: var osdefs.WSAMSG
+  ) =
+    var local = localSa.toTransportAddress()
+    if local.isV4Mapped():
+      local = local.toIPv4()
+    if local.isAnyLocal():
+      return
 
-  type WSABUF* = object
-    len*: culong
-    buf*: ptr char
+    zeroMem(addr control[0], control.len)
+    let
+      headerLen = wsaCmsgAlign(uint(sizeof(osdefs.WSACMSGHDR)))
+      header = cast[ptr osdefs.WSACMSGHDR](addr control[0])
+      data = cast[pointer](cast[uint](header) + headerLen)
 
-  proc WSASendTo*(
-    s: SocketHandle,
-    lpBuffers: ptr WSABUF,
-    dwBufferCount: culong,
-    lpNumberOfBytesSent: ptr culong,
-    dwFlags: culong,
-    lpTo: ptr SockAddr,
-    iToLen: cint,
-    lpOverlapped: pointer,
-    lpCompletionRoutine: pointer,
-  ): cint {.wsa, importc: "WSASendTo".}
+    msg.control.buf = cast[cstring](addr control[0])
+    if local.family == AddressFamily.IPv4:
+      header.cmsg_len = headerLen + uint(sizeof(osdefs.WinInPktInfo))
+      header.cmsg_level = osdefs.IPPROTO_IP
+      header.cmsg_type = osdefs.IP_PKTINFO
+      msg.control.len = ULONG(wsaCmsgAlign(header.cmsg_len))
+      let info = cast[ptr osdefs.WinInPktInfo](data)
+      copyMem(addr info.ipi_addr, unsafeAddr local.address_v4[0], local.address_v4.len)
+    elif local.family == AddressFamily.IPv6:
+      header.cmsg_len = headerLen + uint(sizeof(osdefs.WinIn6PktInfo))
+      header.cmsg_level = osdefs.IPPROTO_IPV6
+      header.cmsg_type = osdefs.IPV6_PKTINFO
+      msg.control.len = ULONG(wsaCmsgAlign(header.cmsg_len))
+      let info = cast[ptr osdefs.WinIn6PktInfo](data)
+      copyMem(addr info.ipi6_addr, unsafeAddr local.address_v6[0], local.address_v6.len)
 
 proc prepareDestAddr(
     localSa: ptr SockAddr,
@@ -277,8 +301,24 @@ proc sendPacketsOut*(
   else:
     when defined(windows):
       var
-        bufs {.noinit.}: array[MaxBatch, WSABUF]
-        overflow: seq[WSABUF]
+        bufs {.noinit.}: array[MaxBatch, osdefs.WSABUF]
+        overflow: seq[osdefs.WSABUF]
+        extension: pointer
+        extensionBytesRet: DWORD
+        sendMsgGuid = osdefs.WSAID_WSASENDMSG
+      if wsaIoctl(
+        SocketHandle(quicCtx.fd),
+        osdefs.SIO_GET_EXTENSION_FUNCTION_POINTER,
+        addr sendMsgGuid,
+        DWORD(sizeof(sendMsgGuid)),
+        addr extension,
+        DWORD(sizeof(extension)),
+        addr extensionBytesRet,
+        nil,
+        nil,
+      ) != 0:
+        return -1
+      let wsaSendMsg = cast[osdefs.LPFN_WSASENDMSG](extension)
     var sent = 0
     for i in 0 ..< nspecs.int:
       let curr = specsArr[i]
@@ -293,27 +333,28 @@ proc sendPacketsOut*(
           iovlen = curr.iovlen.int
           dst =
             if iovlen <= bufs.len:
-              cast[ptr UncheckedArray[WSABUF]](addr bufs[0])
+              cast[ptr UncheckedArray[osdefs.WSABUF]](addr bufs[0])
             else:
               overflow.setLen(iovlen)
-              cast[ptr UncheckedArray[WSABUF]](addr overflow[0])
+              cast[ptr UncheckedArray[osdefs.WSABUF]](addr overflow[0])
 
         for j in 0 ..< iovlen:
           let src = iovArr[j]
-          dst[j].len = culong(src.iov_len)
-          dst[j].buf = cast[ptr char](src.iov_base)
+          dst[j].len = ULONG(src.iov_len)
+          dst[j].buf = cast[cstring](src.iov_base)
 
-        var bytesSent: culong = 0
-        let res = WSASendTo(
-          SocketHandle(quicCtx.fd),
-          addr dst[0],
-          culong(iovlen),
-          addr bytesSent,
-          0, # flags
-          cast[ptr SockAddr](addr destStorage),
-          cint(destAddrLen),
-          nil,
-          nil, # no overlapped
+        var
+          control: array[128, byte]
+          bytesSent: DWORD
+          msg = osdefs.WSAMSG(
+            name: cast[ptr SockAddr](addr destStorage),
+            namelen: cint(destAddrLen),
+            lpBuffers: addr dst[0],
+            dwBufferCount: DWORD(iovlen),
+          )
+        prepareSourceAddr(curr.local_sa, control, msg)
+        let res = wsaSendMsg(
+          SocketHandle(quicCtx.fd), addr msg, DWORD(0), addr bytesSent, nil, nil
         )
         if res != 0:
           let errorCode = osdefs.wsaGetLastError()
