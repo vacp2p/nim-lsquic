@@ -66,8 +66,9 @@ when not defined(windows):
 
       let cmsg = cast[ptr Tcmsghdr](msg.msg_control)
       if local.family == AddressFamily.IPv4:
-        msg.msg_controllen = CMSG_SPACE(sizeof(InPktInfo).csize_t)
-        cmsg.cmsg_len = CMSG_LEN(sizeof(InPktInfo).csize_t)
+        msg.msg_controllen =
+          typeof(msg.msg_controllen)(CMSG_SPACE(sizeof(InPktInfo).csize_t))
+        cmsg.cmsg_len = typeof(cmsg.cmsg_len)(CMSG_LEN(sizeof(InPktInfo).csize_t))
         cmsg.cmsg_level = IPPROTO_IP
         cmsg.cmsg_type = IP_PKTINFO
         let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
@@ -75,8 +76,9 @@ when not defined(windows):
           addr info.ipi_spec_dst, unsafeAddr local.address_v4[0], local.address_v4.len
         )
       elif local.family == AddressFamily.IPv6:
-        msg.msg_controllen = CMSG_SPACE(sizeof(In6PktInfo).csize_t)
-        cmsg.cmsg_len = CMSG_LEN(sizeof(In6PktInfo).csize_t)
+        msg.msg_controllen =
+          typeof(msg.msg_controllen)(CMSG_SPACE(sizeof(In6PktInfo).csize_t))
+        cmsg.cmsg_len = typeof(cmsg.cmsg_len)(CMSG_LEN(sizeof(In6PktInfo).csize_t))
         cmsg.cmsg_level = IPPROTO_IPV6
         cmsg.cmsg_type = IPV6_PKTINFO
         let info = cast[ptr In6PktInfo](CMSG_DATA(cmsg))
@@ -101,8 +103,8 @@ when defined(linux):
         msg_iov: addr iov,
         msg_iovlen: 1,
         msg_control: addr control.data[0],
-        msg_controllen: control.data.len.csize_t,
       )
+    msg.msg_controllen = typeof(msg.msg_controllen)(control.data.len)
 
     result = recvmsg(fd, addr msg, 0)
     if result < 0:
