@@ -113,9 +113,9 @@ when defined(linux):
       )
     msg.msg_controllen = typeof(msg.msg_controllen)(control.data.len)
 
-    result = recvmsg(fd, addr msg, 0)
-    if result < 0:
-      return
+    var response = recvmsg(fd, addr msg, 0)
+    if response < 0:
+      return response
     if (msg.msg_flags and MSG_CTRUNC) != 0:
       return -1
 
@@ -140,6 +140,8 @@ when defined(linux):
 
     if boundLocal.family == AddressFamily.IPv6 and local.family == AddressFamily.IPv4:
       local = local.toIPv6()
+
+    return response
 
 when defined(windows):
   func wsaCmsgAlign(value: uint): uint =
@@ -200,8 +202,9 @@ when not defined(windows):
       destAddrLen: SockLen,
       control: var ControlBuffer,
   ): Tmsghdr =
+    var response: Tmsghdr
     when defined(linux) and defined(x86_64) and not defined(android):
-      result = Tmsghdr(
+      response = Tmsghdr(
         msg_name: cast[pointer](addr destStorage),
         msg_namelen: destAddrLen,
         msg_iov: cast[ptr IOVec](spec.iov),
@@ -211,7 +214,7 @@ when not defined(windows):
         msg_flags: 0,
       )
     else:
-      result = Tmsghdr(
+      response = Tmsghdr(
         msg_name: cast[pointer](addr destStorage),
         msg_namelen: destAddrLen,
         msg_iov: cast[ptr IOVec](spec.iov),
@@ -220,7 +223,8 @@ when not defined(windows):
         msg_controllen: 0,
         msg_flags: 0,
       )
-    prepareSourceAddr(spec.local_sa, control, result)
+    prepareSourceAddr(spec.local_sa, control, response)
+    response
 
 proc packetIn*(
     ctx: QuicContext,
