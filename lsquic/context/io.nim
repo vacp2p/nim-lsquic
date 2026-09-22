@@ -57,6 +57,9 @@ when defined(linux) or defined(macosx):
     IP_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
     IPV6_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
 
+  when defined(macosx):
+    var IP_RECVDSTADDR {.importc, header: "<netinet/in.h>".}: cint
+
 when not defined(windows):
   proc prepareSourceAddr(
       localSa: ptr SockAddr, control: var ControlBuffer, msg: var Tmsghdr
@@ -127,11 +130,17 @@ when defined(linux) or defined(macosx):
 
     var cmsg = CMSG_FIRSTHDR(addr msg)
     while not cmsg.isNil:
-      if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_PKTINFO:
-        let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
-        local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
-        copyMem(addr local.address_v4[0], addr info.ipi_addr, local.address_v4.len)
-        break
+      when defined(linux):
+        if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_PKTINFO:
+          let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
+          local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
+          copyMem(addr local.address_v4[0], addr info.ipi_addr, local.address_v4.len)
+          break
+      else:
+        if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_RECVDSTADDR:
+          local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
+          copyMem(addr local.address_v4[0], CMSG_DATA(cmsg), local.address_v4.len)
+          break
       if cmsg.cmsg_level == IPPROTO_IPV6 and cmsg.cmsg_type == IPV6_PKTINFO:
         let info = cast[ptr In6PktInfo](CMSG_DATA(cmsg))
         local = TransportAddress(family: AddressFamily.IPv6, port: boundLocal.port)
