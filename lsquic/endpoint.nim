@@ -2,10 +2,12 @@
 # Copyright (c) Status Research & Development GmbH
 
 import chronos, chronicles, results
+import std/nativesockets except SOL_SOCKET, SO_RCVBUF
 when defined(windows):
-  from chronos/osdefs import SOL_SOCKET, SO_RCVBUF
+  from chronos/osdefs import SOL_SOCKET, SO_RCVBUF, getsockname
 else:
   from posix import SOL_SOCKET, SO_RCVBUF
+  from chronos/osdefs import getsockname
 import
   ./[
     errors, connection, tlsconfig, connectionmanager, lsquic_ffi, certificateverifier,
@@ -13,8 +15,6 @@ import
   ]
 import ./context/[server, client, context, io]
 import ./helpers/logging
-when defined(linux):
-  from chronos/osdefs import SocketHandle
 
 logScope:
   topics = "lsquic"
@@ -361,6 +361,31 @@ proc ensureClientContext(
 
   endpoint.clientContext
 
+proc selectSourceAddress(remote: TransportAddress): TransportAddress {.raises: [].} =
+  let domain =
+    case remote.family
+    of AddressFamily.IPv4:
+      AF_INET
+    of AddressFamily.IPv6:
+      AF_INET6
+    else:
+      return
+  let fd = createNativeSocket(domain, SOCK_DGRAM, IPPROTO_UDP)
+  if fd.int == osInvalidSocket.int:
+    return
+  defer:
+    nativesockets.close(fd)
+
+  var
+    remoteStorage, localStorage: Sockaddr_storage
+    remoteLen, localLen: SockLen
+  remote.toSAddr(remoteStorage, remoteLen)
+  if connect(fd, cast[ptr SockAddr](addr remoteStorage), remoteLen) != 0:
+    return
+  localLen = SockLen(sizeof(localStorage))
+  if getsockname(fd, cast[ptr SockAddr](addr localStorage), addr localLen) == 0:
+    fromSAddr(addr localStorage, localLen, result)
+
 proc dialLocalAddress(
     endpoint: QuicEndpoint, remote: TransportAddress
 ): TransportAddress {.raises: [TransportOsError].} =
@@ -368,7 +393,7 @@ proc dialLocalAddress(
   if not bound.isAnyLocal():
     return bound
 
-  var source = getBestRoute(remote).source
+  var source = selectSourceAddress(remote)
   if source.family == AddressFamily.None:
     return bound
 
