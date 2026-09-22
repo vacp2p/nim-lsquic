@@ -250,9 +250,8 @@ proc drainDatagrams(
 
   for _ in 0 ..< MaxDatagramsPerWakeup:
     var local, remote: TransportAddress
-    let res = recvDatagram(
-      SocketHandle(udp.fd), endpoint.drainBuf, boundLocal, local, remote
-    )
+    let res =
+      recvDatagram(SocketHandle(udp.fd), endpoint.drainBuf, boundLocal, local, remote)
     if res < 0:
       # Empty, or an error the transport will report again on the next wakeup.
       break
@@ -313,9 +312,7 @@ proc createUdp(
   let udp =
     case address.family
     of AddressFamily.IPv4:
-      newDatagramTransport(
-        onReceive, local = address, flags = {ServerFlags.PacketInfo}
-      )
+      newDatagramTransport(onReceive, local = address, flags = {ServerFlags.PacketInfo})
     of AddressFamily.IPv6:
       newDatagramTransport6(
         onReceive, local = address, flags = {ServerFlags.PacketInfo}

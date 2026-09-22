@@ -31,16 +31,14 @@ when defined(linux):
     msg_len: cuint
 
   type
-    InPktInfo {.importc: "struct in_pktinfo", header: "<netinet/in.h>", bycopy.} =
-      object
-        ipi_ifindex: cint
-        ipi_spec_dst: InAddr
-        ipi_addr: InAddr
+    InPktInfo {.importc: "struct in_pktinfo", header: "<netinet/in.h>", bycopy.} = object
+      ipi_ifindex: cint
+      ipi_spec_dst: InAddr
+      ipi_addr: InAddr
 
-    In6PktInfo {.importc: "struct in6_pktinfo", header: "<netinet/in.h>", bycopy.} =
-      object
-        ipi6_addr: In6Addr
-        ipi6_ifindex: cuint
+    In6PktInfo {.importc: "struct in6_pktinfo", header: "<netinet/in.h>", bycopy.} = object
+      ipi6_addr: In6Addr
+      ipi6_ifindex: cuint
 
   var
     IP_PKTINFO {.importc, header: "<netinet/in.h>".}: cint
@@ -74,9 +72,7 @@ when not defined(windows):
         cmsg.cmsg_type = IP_PKTINFO
         let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
         copyMem(
-          addr info.ipi_spec_dst,
-          unsafeAddr local.address_v4[0],
-          local.address_v4.len,
+          addr info.ipi_spec_dst, unsafeAddr local.address_v4[0], local.address_v4.len
         )
       elif local.family == AddressFamily.IPv6:
         msg.msg_controllen = CMSG_SPACE(sizeof(In6PktInfo).csize_t)
@@ -121,16 +117,12 @@ when defined(linux):
     while not cmsg.isNil:
       if cmsg.cmsg_level == IPPROTO_IP and cmsg.cmsg_type == IP_PKTINFO:
         let info = cast[ptr InPktInfo](CMSG_DATA(cmsg))
-        local = TransportAddress(
-          family: AddressFamily.IPv4, port: boundLocal.port
-        )
+        local = TransportAddress(family: AddressFamily.IPv4, port: boundLocal.port)
         copyMem(addr local.address_v4[0], addr info.ipi_addr, local.address_v4.len)
         break
       elif cmsg.cmsg_level == IPPROTO_IPV6 and cmsg.cmsg_type == IPV6_PKTINFO:
         let info = cast[ptr In6PktInfo](CMSG_DATA(cmsg))
-        local = TransportAddress(
-          family: AddressFamily.IPv6, port: boundLocal.port
-        )
+        local = TransportAddress(family: AddressFamily.IPv6, port: boundLocal.port)
         copyMem(addr local.address_v6[0], addr info.ipi6_addr, local.address_v6.len)
         break
       cmsg = CMSG_NXTHDR(addr msg, cmsg)
