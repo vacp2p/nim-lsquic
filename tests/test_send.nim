@@ -23,9 +23,10 @@ proc makeOutSpec(
   )
 
 proc makeContext(fd: SocketHandle): QuicContext =
-  result = QuicContext(fd: cint(fd))
+  var response = QuicContext(fd: cint(fd))
   when defined(windows):
-    doAssert result.initPacketIo(fd)
+    doAssert response.initPacketIo(fd)
+  response
 
 proc receiveWithTimeout(
     fd: SocketHandle,
@@ -40,10 +41,10 @@ proc receiveWithTimeout(
     else:
       addr received[0]
 
-  result = -1
+  var response: int = -1
   for _ in 0 ..< 100:
     remoteLen = sizeof(remoteStorage).SockLen
-    result = recvfrom(
+    response = recvfrom(
       fd,
       buffer,
       received.len.cint,
@@ -51,9 +52,10 @@ proc receiveWithTimeout(
       cast[ptr SockAddr](addr remoteStorage),
       addr remoteLen,
     ).int
-    if result >= 0:
-      return
+    if response >= 0:
+      return response
     os.sleep(10)
+  response
 
 suite "packets out":
   teardown:
